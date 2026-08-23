@@ -494,6 +494,74 @@ fn plugin_leaf_does_not_consume_slot_index() {
 }
 
 #[test]
+fn plugin_config_children_do_not_consume_slot_index() {
+    // 独立レビューMR-32: plugin nodeのconfig子node（zjstatusのformat_left等）が
+    // has_nested判定でnest扱いになると、config node自体がslotに数えられ・inject対象に
+    // なる。plugin配下はすべてそのpluginのconfigurationでありslotを形成しない
+    let layout = "layout {\n    plugin location=\"file:/plugins/zjstatus.wasm\" {\n        format_left \"{session_name}\"\n        format_right \"{datetime}\"\n    }\n    pane\n    pane\n}\n";
+    let doc = zelper::layout::parse(layout).unwrap();
+    let base = zelper::layout::base_subtree(&doc);
+    assert_eq!(zelper::layout::count_terminal_slots(&base), 2);
+
+    let mut cmds = std::collections::BTreeMap::new();
+    cmds.insert(
+        0,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdA".into()],
+            cwd: None,
+        },
+    );
+    cmds.insert(
+        1,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdB".into()],
+            cwd: None,
+        },
+    );
+    let kdl = zelper::layout::generate_instance_kdl(&base, "t", &cmds).unwrap();
+    // layout直下のbare plugin（config子node込み）は生成KDLから除去される:
+    // 生成KDLではbase subtreeがtab配下に置かれ、tab直下のpluginは実zellijで
+    // Invalid tab property errorになるため（実機検証S11）。実zellijもbare pluginを
+    // 無視するため除去しても挙動は変わらない
+    assert!(!kdl.contains("plugin"), "raw: {kdl}");
+    assert!(!kdl.contains("format_left"), "raw: {kdl}");
+    let reparsed = zelper::layout::parse(&kdl).unwrap();
+    let specs = zelper::layout::extract_slot_commands(&reparsed);
+    assert_eq!(
+        specs
+            .iter()
+            .map(|s| s.command_argv.clone())
+            .collect::<Vec<_>>(),
+        vec![vec!["cmdA".to_string()], vec!["cmdB".to_string()]],
+        "raw: {kdl}"
+    );
+
+    // pane wrapper内のplugin + config子nodeはslotを形成せず、生成KDLにも保持される
+    let wrapped = "layout {\n    pane size=1 borderless=true {\n        plugin location=\"file:/plugins/zjstatus.wasm\" {\n            format_left \"{session_name}\"\n        }\n    }\n    pane\n}\n";
+    let doc = zelper::layout::parse(wrapped).unwrap();
+    let base = zelper::layout::base_subtree(&doc);
+    assert_eq!(zelper::layout::count_terminal_slots(&base), 1);
+    let mut cmds = std::collections::BTreeMap::new();
+    cmds.insert(
+        0,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdA".into()],
+            cwd: None,
+        },
+    );
+    let kdl = zelper::layout::generate_instance_kdl(&base, "t", &cmds).unwrap();
+    assert!(kdl.contains("format_left \"{session_name}\""), "raw: {kdl}");
+    assert_eq!(
+        zelper::layout::extract_slot_commands(&zelper::layout::parse(&kdl).unwrap())
+            .iter()
+            .map(|s| s.command_argv.clone())
+            .collect::<Vec<_>>(),
+        vec![vec!["cmdA".to_string()]],
+        "raw: {kdl}"
+    );
+}
+
+#[test]
 fn childless_tab_node_does_not_consume_slot_index() {
     // 独立レビューMR-31: 子なしtab/layout nodeはwalk_slots（count）と同様に
     // injectでもslotを形成しない。leaf扱いだと以降のpaneが1つずれる

@@ -123,9 +123,11 @@ PR#1（初期取り込み）への外部レビュー指摘5件（plugin leaf slo
 | ID | 指摘 | disposition |
 |---|---|---|
 | MR-31 | 子なし`tab`/`layout` node（braceなし）でcount（walk_slotsはskip）とinject（leaf扱いでslot消費）の規則が非対称。`layout { tab \n pane \n pane }`形式で生成KDLのcommandが1つずれる（scratch実行で実証。PR#1 fix 1と同族の既存乖離） | **修正済み**: inject_walkのdecisionに「子なしlayout/tabはskip」を追加しwalk_slotsと対称化。回帰テスト追加（childless_tab_node_does_not_consume_slot_index） |
-| MR-32 | plugin nodeのconfig子node（zjstatus形式の`format_left`等）がhas_nested判定でnest扱いになり、config node自体がslotに数えられ・inject対象になる（scratch実行で実証。count/injectは対称のためindexずれ無し。PANE_CONTENT_NODESはplugin/argsのみの既存構造） | **P1起票**: plugin node配下の再帰抑制・config子nodeのslot除外の規則検討（TASK-23）。修正後の検証失敗化（PR#1 fix 2）により黙示成功はしない |
+| MR-32 | plugin nodeのconfig子node（zjstatus形式の`format_left`等）がhas_nested判定でnest扱いになり、config node自体がslotに数えられ・inject対象になる（scratch実行で実証。count/injectは対称のためindexずれ無し。PANE_CONTENT_NODESはplugin/argsのみの既存構造） | **修正済み**（TASK-23）: zellij parser実装（zellij-utils/src/kdl/kdl_layout_parser.rs）を調査し規則確定 — plugin配下の子nodeはすべてplugin configurationとして文字列化されslotを形成しない・layout直下のbare pluginは実zellijで無視される・tab直下のbare pluginはInvalid tab property error。walk_slots/inject_walkともplugin nodeをconfig子nodeの有無にかかわらずleaf扱いとし再帰抑制。加えて実機検証（S11）で、生成KDLはbase subtreeをtab配下に置くためlayout直下bare pluginが残るとparse errorになると判明し、inject_walkでlayout/tab直下のbare plugin nodeを生成KDLから除去（pane run block内は保持）。回帰テスト追加（plugin_config_children_do_not_consume_slot_index・fail-first実証済み）・L4実機検証S11でbare/wrapper両形式12/12 PASS |
 | MR-33 | FakeBackendのnew_tab emulateがzelper生成KDLをzelper自身のextract規則で解釈する循環構造。injectのslot意味論が実zellijと乖離していてもfakeは同じ解釈を再現する。layout parse失敗時に黙って1 bare paneを生成（実zellijならerror） | **修正不要**: 既知のテスト限界として記録。slot indexずれの回帰検出は生成KDLの再parse（extract）で独立担保しており、実zellijとの意味論一致はL4実機検証で補完する運用を維持 |
 | MR-34 | `--embed-floating`時のsource sortがtoggle前（floating geometry）基準。tabs modeでembed後の実際の並びと異なる順序でoverflow対象が選ばれうる | **修正不要**: DD-10.2記載のとおりdry-run/実行の計画統一のための意図的選択。fill modeはzellij側が割当するため影響は報告のみ。実運用で問題報告があれば再検討 |
 | MR-35 | session-scope × `--json`はtab毎にenvelopeが出る（成功時も。部分失敗時は成功tab分+最終error envelope） | **修正不要**: tab毎responseという仕様意図と解釈。単一document契約を全verbで厳密化する場合はDD-4.2の明記が必要（必要なら別起票） |
 
 **検証**: 修正後 L1〜L3テスト77件合格・clippy警告0・fmt差分なし。
+
+**MR-32修正（TASK-23）の独立レビュー（codex read-only・2026-08-23）**: slot再帰抑制・生成KDLからのbare plugin除去に対し、作成者と別model（codex）で独立レビュー。**P1/P2/P3指摘なし（承認可）**。count/inject/extractのslot index対称性・bare plugin除去の限定性（pane run block・`floating_panes`・templateとの組合せで過剰除去・除去漏れなし）・zellij 0.44.3 parserソースとの静的照合・テストのfail-first検証力を確認。L1〜L3テスト78件合格・clippy警告0・fmt差分なし。

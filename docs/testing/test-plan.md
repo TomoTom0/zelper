@@ -84,7 +84,7 @@ plannerを純粋関数（現状PaneState列+LayoutRef+option → RemapPlan）と
 | R10 | visual order | (tab_position, pane_y, pane_x)順の割当 |
 
 - KDL生成: 生成文字列が改行区切り形式・bar plugin明示（DD-3.3/10.7）であることのsnapshot test
-- KDL parse: slot数カウント（bare/command/edit/plugin混在layout fixture）・plugin除外
+- KDL parse: slot数カウント（bare/command/edit/plugin混在layout fixture）・plugin除外（config子node持ち・bare両方。plugin配下はすべてplugin configurationのため再帰しない: MR-32回帰）
 
 ### 2.8 integration fixtures / sessions（L4）
 
