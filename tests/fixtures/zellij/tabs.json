@@ -1,0 +1,12 @@
+[
+  {
+    "position": 0, "name": "Tab #1", "active": true,
+    "panes_to_hide": 1, "is_fullscreen_active": false, "is_sync_panes_active": false,
+    "are_floating_panes_visible": true, "other_focused_clients": null,
+    "active_swap_layout_name": null, "is_swap_layout_dirty": false,
+    "viewport_rows": 60, "viewport_columns": 200,
+    "display_area_rows": 60, "display_area_columns": 200,
+    "selectable_tiled_panes_count": 2, "selectable_floating_panes_count": 0,
+    "tab_id": 0, "has_bell_notification": null, "is_flashing_bell": false
+  }
+]
