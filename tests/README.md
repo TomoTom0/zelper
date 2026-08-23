@@ -28,7 +28,7 @@
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（71テスト）
+cargo test          # L1〜L3（70テスト）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はtmp/phase7/harnessをpodmanで実行（Phase 7記録を参照）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）
