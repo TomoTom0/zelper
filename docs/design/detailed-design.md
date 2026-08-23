@@ -294,15 +294,15 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 
 - 適用単位はtab。`override-layout --apply-only-to-active-tab --retain-existing-terminal-panes --retain-existing-plugin-panes`を常時使用（他tab保護・超過pane保護・plugin保護。実機確認済み）
 - **M>Nのoverflowはプロセス保存付きでは実現不可**（override-layoutは既存paneを第1tabにしか割り当てない。capabilities §4.1実験E1〜E5）
-- **floating paneはremap適用でkillされる**（retain flagの対象外）。preflightで検出し、既定はerror。`--embed-floating`指定時は`toggle-pane-embed-or-floating -p`（プロセス保存を実証済み）でtiled化してからsource setへ組入れる
+- **floating paneはremap適用でkillされる**（retain flagの対象外）。preflightで検出し、既定はerror。`--embed-floating`指定時は`toggle-pane-embed-or-floating -p`（プロセス保存を実証済み）でtiled化する。tiled化はlayout解決・plan確定**後**に行い、layout miss/invalidやM>N+overflow未指定のerrorが状態変更後に起こらないようにする（PR#1レビュー対応）
 - 適用後のslot↔pane割当順はpane ID昇順ではない。適用後に`list-panes`で実対応を検証する
 
 ### 10.2 source-set解決と順序
 
 - scope解決: 既定=active tab。`--tab`指定時は対象tabを`go-to-tab-by-id`でactive化し、実行前に元のactive tabを記録して完了時に復帰する。`--session-scope`は各tabに本アルゴリズムを独立適用する（**cross-tab pane統合は提供しない**——実現不可のため）
-- slot数 N の算出: LayoutRefをKDLとしてparse（name→layout_dirのfile、path→file、inline→文字列）し、末端のterminal pane node（bare pane / command pane / edit pane）を数える。plugin leafはslot勘定から除外する
+- slot数 N の算出: LayoutRefをKDLとしてparse（name→layout_dirのfile、path→file、inline→文字列）し、末端のterminal pane node（bare pane / command pane / edit pane）を数える。plugin leafはslotから除外する（数える・command注入のslot indexing両方で同じ規則。PR#1レビュー対応）
 - source paneの順序: `list-panes`の (tab_position, pane_y, pane_x) 昇順（visual order）。文書化されテストで固定される
-- 対象pane: selectable かつ tiled なterminal pane。floating paneの扱いは10.1に従う（preflight error / `--embed-floating`でtiled化して組入れ。dry-runでは計画に含めるがtoggleは実行しない）
+- 対象pane: selectable かつ tiled なterminal pane。floating paneの扱いは10.1に従う（preflight error / `--embed-floating`でtiled化して組入れ。tiled化はlayout解決・plan確定後、dry-runでは実行しない。計画はtoggle前のsnapshotから仮想的にfloating paneを含めるためdry-runと実行が同じ計画になる）
 
 ### 10.3 配置アルゴリズム
 
@@ -322,7 +322,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 
 ### 10.4 検証とdry-run
 
-- 検証（全mode）: (a) source pane IDの生存（nest/fill。tabs modeでは対象tab内で検証）または再構成paneのcommand一致 + instance tabのtiled pane数（tabs）、(b) 失敗時はclass=`VerificationFailed` + 適用済み/未適用の一覧。geometryの個別報告はv1では省略（`list panes --json`で確認可能。MR-14で確定）
+- 検証（全mode）: (a) source pane IDの生存（nest/fill。tabs modeでは対象tab内で検証）または再構成paneのcommand一致 + instance tabのtiled pane数（tabs。command不一致・pane数不一致はともに検証失敗。PR#1レビュー対応）、(b) 失敗時はclass=`VerificationFailed` + 適用済み/未適用の一覧。`--json`時は失敗でも成功envelopeを出力せず、mapping/missingを`error.data`に載せてmainから**単一の**error envelopeを出す（PR#1レビュー対応）。geometryの個別報告はv1では省略（`list panes --json`で確認可能。MR-14で確定）
 - dry-run: (a) source pane一覧（visual order）、(b) NとM、(c) paneからtab/slotへの割当表（tabs modeはpreserved/recreatedの別を明示）、(d) 実行予定のbackend操作列。状態変更は一切なし（tab切替も行わない）
 
 ### 10.5 途中失敗の扱い
@@ -346,7 +346,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 
 - 改行区切り形式・bar plugin明示（DD-3.3）
 - `new-tab --layout-string`へはargvで直接渡す（shell経由しない）
-- `cwd`はtab属性として絶対pathで指定する（pane毎の相対合成は使わない）
+- `cwd`は該当slotのpane属性として絶対pathで指定する（実装・S9実機検証に一致。tab属性は使わず、pane毎の相対合成も使わない。shellのみpaneの再作成でもcwdは注入する — PR#1レビュー対応）
 
 ## DD-11. `add` / `remove` 操作設計
 

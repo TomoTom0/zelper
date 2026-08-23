@@ -167,11 +167,13 @@ fn walk_slots(doc: &KdlDocument, f: &mut impl FnMut(&KdlNode)) {
     }
 }
 
-/// leafがplugin paneか（子にplugin nodeを含む）
+/// leafがplugin paneか（bareのplugin node、または子にplugin nodeを含むpane）
 fn leaf_is_plugin(node: &KdlNode) -> bool {
-    node.children()
-        .map(|c| c.nodes().iter().any(|n| n.name().value() == "plugin"))
-        .unwrap_or(false)
+    node.name().value() == "plugin"
+        || node
+            .children()
+            .map(|c| c.nodes().iter().any(|n| n.name().value() == "plugin"))
+            .unwrap_or(false)
 }
 
 /// slot i への注入内容
@@ -223,6 +225,10 @@ fn inject_walk(
             let name = node.name().value();
             if SKIP_NODES.contains(&name) {
                 None
+            } else if (name == "layout" || name == "tab") && node.children().is_none() {
+                // 子なしlayout/tabはslotを形成しない（walk_slotsと同じ規則。
+                // leaf扱いにするとcount_terminal_slotsとinjectでindexがずれる）
+                None
             } else {
                 match node.children() {
                     None => Some(false), // 子なしleaf
@@ -243,7 +249,10 @@ fn inject_walk(
                     if let Some(c) = doc.nodes_mut()[i].children_mut() {
                         inject_walk(c, leaf_index, slot_commands);
                     }
-                } else {
+                } else if !leaf_is_plugin(&doc.nodes()[i]) {
+                    // plugin leafはslotを消費しない（count_terminal_slotsと同じ規則）。
+                    // ここでindexを進めるとcommandがplugin paneに注入され、
+                    // 以降のterminal paneのslotが1つずれる
                     let idx = *leaf_index;
                     *leaf_index += 1;
                     if let Some(sc) = slot_commands.get(&idx) {
@@ -256,14 +265,14 @@ fn inject_walk(
 }
 
 fn inject_into_leaf(node: &mut KdlNode, sc: &SlotCommand) {
-    if sc.command_argv.is_empty() {
-        return; // shellのみ → bare paneのまま
-    }
-    let argv0 = sc.command_argv[0].clone();
-    set_quoted_prop(node, "command", &argv0);
     if let Some(cwd) = &sc.cwd {
         set_quoted_prop(node, "cwd", cwd);
     }
+    if sc.command_argv.is_empty() {
+        return; // shellのみ → bare paneのまま（cwdのみ注入）
+    }
+    let argv0 = sc.command_argv[0].clone();
+    set_quoted_prop(node, "command", &argv0);
     if sc.command_argv.len() > 1 {
         let mut args = KdlNode::new("args");
         for a in &sc.command_argv[1..] {
@@ -303,6 +312,47 @@ fn set_quoted_prop(node: &mut KdlNode, key: &str, value: &str) {
 
 fn quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// 末端terminal slotの注入内容（command/cwd）を文書順に抽出する。
+/// injectの逆変換。生成KDLの実検証（fake backendの再現・test）に使用する
+pub fn extract_slot_commands(doc: &KdlDocument) -> Vec<SlotCommand> {
+    let mut slots = Vec::new();
+    walk_slots(doc, &mut |leaf| {
+        if leaf_is_plugin(leaf) {
+            return;
+        }
+        let mut sc = SlotCommand {
+            command_argv: Vec::new(),
+            cwd: None,
+        };
+        if let Some(v) = string_prop(leaf, "command") {
+            sc.command_argv.push(v);
+        }
+        if let Some(v) = string_prop(leaf, "cwd") {
+            sc.cwd = Some(v);
+        }
+        if let Some(children) = leaf.children() {
+            for n in children.nodes() {
+                if n.name().value() == "args" {
+                    for e in n.entries() {
+                        if let Some(s) = e.value().as_string() {
+                            sc.command_argv.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        slots.push(sc);
+    });
+    slots
+}
+
+fn string_prop(node: &KdlNode, key: &str) -> Option<String> {
+    node.entries()
+        .iter()
+        .find(|e| e.name().is_some_and(|i| i.value() == key))
+        .and_then(|e| e.value().as_string().map(|s| s.to_string()))
 }
 
 /// 対象layoutから「最初のtabのsubtree」（tabが無ければlayout本体）を取り出す

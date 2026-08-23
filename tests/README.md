@@ -14,7 +14,7 @@
   - `fake.rs` — FakeBackend（状態持ち・呼び出し記録・失敗注入・frozen no-op）
   - `rename_add_remove.rs` — rename検証・add作成検証・remove安全gate/`--empty`
   - `resize.rs` — step実行・no-op打ち切り・equalize収束・振動終了・不在ID/異tab混在error
-  - `remap.rs` — planner matrix R1〜R10・KDL slot数/instance生成・実行順序・R7途中失敗・R8 floating・R6 session-scope・レビュー回帰（bare bool KDL正規化・multi-tab layout N=先頭tab・dry-run --tab非切替・instance tab rename・部分適用報告）
+  - `remap.rs` — planner matrix R1〜R10・KDL slot数/instance生成・実行順序・R7途中失敗・R8 floating・R6 session-scope・レビュー回帰（bare bool KDL正規化・multi-tab layout N=先頭tab・dry-run --tab非切替・instance tab rename・部分適用報告・PR#1: plugin leaf slot非消費・再作成command検証失敗化・floating変更のpreflight後延期・shellのみpaneのcwd保持・検証失敗のJSON envelope単一化・子なしtab/layout nodeのslot非消費）
 - `fixtures/zellij/` — 実zellij 0.44.3出力fixture（panes.json / tabs.json）
 - `fake_backend/fake.rs` 内のshim生成は `cli/list_read_send.rs`（L3）
 
@@ -28,7 +28,7 @@
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（70テスト）
+cargo test          # L1〜L3（77テスト）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はtmp/phase7/harnessをpodmanで実行（Phase 7記録を参照）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）

@@ -446,3 +446,192 @@ fn r6_session_scope_applies_per_tab_independently() {
         .count();
     assert_eq!(overrides, 2);
 }
+
+// ---- PR#1レビュー回帰（plugin leaf slot・再作成検証・floating変更タイミング・cwd・JSON envelope） ----
+
+#[test]
+fn plugin_leaf_does_not_consume_slot_index() {
+    // PR#1: --overflow tabsでplugin leaf（tab bar等）がslot indexを消費すると、
+    // commandがplugin paneに注入され以降のterminal paneが1つずれる
+    let layout = "layout {\n    tab {\n        pane size=1 borderless=true {\n            plugin location=\"zellij:tab-bar\"\n        }\n        pane\n        pane\n    }\n}\n";
+    let doc = zelper::layout::parse(layout).unwrap();
+    let base = zelper::layout::base_subtree(&doc);
+    assert_eq!(zelper::layout::count_terminal_slots(&base), 2);
+
+    let mut cmds = std::collections::BTreeMap::new();
+    cmds.insert(
+        0,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdA".into()],
+            cwd: None,
+        },
+    );
+    cmds.insert(
+        1,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdB".into()],
+            cwd: None,
+        },
+    );
+    let kdl = zelper::layout::generate_instance_kdl(&base, "t", &cmds).unwrap();
+    let reparsed = zelper::layout::parse(&kdl).unwrap();
+    let specs = zelper::layout::extract_slot_commands(&reparsed);
+    assert_eq!(
+        specs
+            .iter()
+            .map(|s| s.command_argv.clone())
+            .collect::<Vec<_>>(),
+        vec![vec!["cmdA".to_string()], vec!["cmdB".to_string()]],
+        "raw: {kdl}"
+    );
+    assert!(specs.iter().all(|s| s.cwd.is_none()));
+
+    // bare plugin node（pane wrapperなし）もslotを形成しない
+    let bare = "layout {\n    tab {\n        plugin location=\"zellij:compact-bar\"\n        pane\n        pane\n    }\n}\n";
+    let doc = zelper::layout::parse(bare).unwrap();
+    let base = zelper::layout::base_subtree(&doc);
+    assert_eq!(zelper::layout::count_terminal_slots(&base), 2);
+}
+
+#[test]
+fn childless_tab_node_does_not_consume_slot_index() {
+    // 独立レビューMR-31: 子なしtab/layout nodeはwalk_slots（count）と同様に
+    // injectでもslotを形成しない。leaf扱いだと以降のpaneが1つずれる
+    let layout = "layout {\n    tab\n    pane\n    pane\n}\n";
+    let doc = zelper::layout::parse(layout).unwrap();
+    let base = zelper::layout::base_subtree(&doc);
+    assert_eq!(zelper::layout::count_terminal_slots(&base), 2);
+
+    let mut cmds = std::collections::BTreeMap::new();
+    cmds.insert(
+        0,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdA".into()],
+            cwd: None,
+        },
+    );
+    cmds.insert(
+        1,
+        zelper::layout::SlotCommand {
+            command_argv: vec!["cmdB".into()],
+            cwd: None,
+        },
+    );
+    let kdl = zelper::layout::generate_instance_kdl(&base, "t", &cmds).unwrap();
+    let reparsed = zelper::layout::parse(&kdl).unwrap();
+    let specs = zelper::layout::extract_slot_commands(&reparsed);
+    assert_eq!(
+        specs
+            .iter()
+            .map(|s| s.command_argv.clone())
+            .collect::<Vec<_>>(),
+        vec![vec!["cmdA".to_string()], vec!["cmdB".to_string()]],
+        "raw: {kdl}"
+    );
+}
+
+#[test]
+fn shell_only_pane_keeps_cwd_in_recreated_instance() {
+    // PR#1: shellのみpane（argv空）の再作成でもcwdは注入される（既定dirで起動しない）
+    let doc = zelper::layout::parse(THREE_SLOT).unwrap();
+    let base = zelper::layout::base_subtree(&doc);
+    let mut cmds = std::collections::BTreeMap::new();
+    cmds.insert(
+        0,
+        zelper::layout::SlotCommand {
+            command_argv: vec![],
+            cwd: Some("/w/proj".into()),
+        },
+    );
+    let kdl = zelper::layout::generate_instance_kdl(&base, "t", &cmds).unwrap();
+    assert!(kdl.contains("cwd=\"/w/proj\""), "raw: {kdl}");
+    let reparsed = zelper::layout::parse(&kdl).unwrap();
+    let specs = zelper::layout::extract_slot_commands(&reparsed);
+    assert_eq!(specs[0].cwd.as_deref(), Some("/w/proj"));
+    assert!(specs[0].command_argv.is_empty());
+    // 他slotは素のまま
+    assert!(specs[1].cwd.is_none() && specs[2].cwd.is_none());
+}
+
+#[test]
+fn embed_floating_layout_error_does_not_mutate() {
+    // PR#1: layout解決errorはfloating paneのtiled化より前に返る（状態変更なし）
+    let mut p = panes(2);
+    let mut f = pane(9, "float", 0, 0, Some("htop"));
+    f.is_floating = true;
+    p.push(f);
+    let b = FakeBackend::new(p, vec![tab0(3)]);
+    let mut a = args(None, false);
+    a.embed_floating = true;
+    a.inline = Some("layout {"); // 不正KDL（未close）
+    let err = zelper::app::remap::run(&b, &a).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::LayoutInvalid);
+    assert!(!b.calls().iter().any(|c| c.contains("toggle-embed")));
+    assert!(b.state.borrow().panes.iter().any(|p| p.is_floating));
+}
+
+#[test]
+fn embed_floating_plan_error_does_not_mutate() {
+    // PR#1: M > N + overflow未指定のplan errorもtiled化より前（状態変更なし）
+    let mut p = panes(3);
+    let mut f = pane(9, "float", 0, 0, Some("htop"));
+    f.is_floating = true;
+    p.push(f);
+    let b = FakeBackend::new(p, vec![tab0(4)]);
+    let mut a = args(None, false);
+    a.embed_floating = true;
+    let err = zelper::app::remap::run(&b, &a).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::Preflight);
+    assert!(err.message().contains("--overflow"));
+    assert!(!b.calls().iter().any(|c| c.contains("toggle-embed")));
+    assert!(b.state.borrow().panes.iter().any(|p| p.is_floating));
+}
+
+#[test]
+fn tabs_mode_unrestarted_command_fails_verification() {
+    // PR#1: 再作成されなかったcommandは検証失敗（ok:trueのまま成功扱いにしない）
+    let b = FakeBackend::new(panes(6), vec![tab0(6)]);
+    b.starve_command_restart("cmd4"); // instance 1の1 paneがbare paneに化ける
+    let err = zelper::app::remap::run(&b, &args(Some(OverflowMode::Tabs), false)).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::VerificationFailed);
+    assert!(
+        err.message().contains("command not restarted"),
+        "raw: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("terminal_4"),
+        "raw: {}",
+        err.message()
+    );
+    let missing = err.data().unwrap()["missing"].as_array().unwrap();
+    assert!(missing.len() == 1);
+}
+
+#[test]
+fn verification_failure_json_attaches_mapping_to_error() {
+    // PR#1: 検証失敗時は成功envelopeをstdoutに出さず、mapping/missingをerror.dataに
+    // 載せる（mainが単一のerror envelopeとして出力する）
+    let b = FakeBackend::new(panes(3), vec![tab0(3)]);
+    b.drop_on_next_override(PaneKindId::Terminal(1)); // layout適用でpane 1が消える
+    let mut a = args(None, false);
+    a.json = true;
+    let err = zelper::app::remap::run(&b, &a).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::VerificationFailed);
+    let data = err.data().expect("mapping data attached to error");
+    let mapping = data["mapping"].as_array().unwrap();
+    assert!(
+        mapping
+            .iter()
+            .any(|m| m["pane"] == "terminal_1" && m["alive"] == false),
+        "raw: {data}"
+    );
+    assert!(
+        data["missing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m.as_str().unwrap().contains("terminal_1")),
+        "raw: {data}"
+    );
+}

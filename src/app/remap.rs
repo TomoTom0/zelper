@@ -255,60 +255,57 @@ fn execute_on_tab(
     args: &RemapArgs,
 ) -> Result<(), ZelperError> {
     // 1. preflight: 現状取得（対象tabは引数で確定済み。active tabに依存しない）
-    let mut panes_now = backend.list_panes()?;
+    let panes_now = backend.list_panes()?;
     let tabs = backend.list_tabs()?;
     let tab = tabs.iter().find(|t| t.id == target).ok_or_else(|| {
         ZelperError::new(ErrorClass::NoTarget, format!("tab {0} not found", target.0))
     })?;
 
-    let in_tab: Vec<&PaneState> = panes_now.iter().filter(|p| p.tab_id == target).collect();
-    let floating: Vec<_> = in_tab
+    let floating: Vec<_> = panes_now
         .iter()
-        .filter(|p| p.is_floating && p.is_selectable)
+        .filter(|p| p.tab_id == target && p.is_floating && p.is_selectable)
         .collect();
-    if !floating.is_empty() {
-        if !args.embed_floating {
-            let ids: Vec<_> = floating.iter().map(|p| p.id.as_spec()).collect();
-            return Err(ZelperError::with_candidates(
-                ErrorClass::Preflight,
-                format!(
-                    "tab has {} floating pane(s); remap would destroy them. \
+    if !floating.is_empty() && !args.embed_floating {
+        let ids: Vec<_> = floating.iter().map(|p| p.id.as_spec()).collect();
+        return Err(ZelperError::with_candidates(
+            ErrorClass::Preflight,
+            format!(
+                "tab has {} floating pane(s); remap would destroy them. \
 Use --embed-floating to convert them to tiled (processes preserved) first",
-                    floating.len()
-                ),
-                ids,
-            ));
-        }
-        // dry-runは状態を一切変更しない（DD-12）。実行時のみtiled化し、
-        // 化したpaneをsourceに反映するため状態を再取得する
-        if !args.dry_run {
-            for p in &floating {
-                backend.toggle_embed_floating(&p.id)?;
-            }
-            panes_now = backend.list_panes()?;
-        }
+                floating.len()
+            ),
+            ids,
+        ));
     }
-    let mut source: Vec<PaneState> = panes_now
-        .iter()
-        .filter(|p| {
-            p.tab_id == target
-                && (p.is_remap_source()
-                    // dry-run + --embed-floating: embedされる予定のpaneを計画に含める
-                    || (args.dry_run && args.embed_floating && p.is_floating && p.is_selectable && matches!(p.id, PaneKindId::Terminal(_))))
-        })
-        .map(|p| (*p).clone())
-        .collect();
-    source.sort_by_key(|p| p.visual_key());
 
     // 2. layout解決・slot数。Nは「適用対象 = 先頭tab」のslot数とする
     //    （override-layout --apply-only-to-active-tab はlayoutの先頭tabのみ適用する。
     //     実機help確認済み。全tab合計で数えるとoverflow判定が狂う）
+    //    状態を変更する操作（floating paneのtiled化）より前に失敗しうる
+    //    検証をすべて済ませる（layout miss/invalid・plan errorが状態変更後に起こらないように）
     let kdl_text = layout::load_kdl(layout_ref)?;
     let doc = layout::parse(&kdl_text)?;
     let base = layout::base_subtree(&doc);
     let n_slots = layout::count_terminal_slots(&base);
 
-    // 3. plan
+    // 3. source（visual order）。--embed-floatingのfloating paneはtiled化「予定」として
+    //    計画に含める。toggle前のsnapshotから仮想的に含めるため、dry-runと実行が
+    //    同じ計画になる
+    let mut source: Vec<PaneState> = panes_now
+        .iter()
+        .filter(|p| {
+            p.tab_id == target
+                && (p.is_remap_source()
+                    || (args.embed_floating
+                        && p.is_floating
+                        && p.is_selectable
+                        && matches!(p.id, PaneKindId::Terminal(_))))
+        })
+        .map(|p| (*p).clone())
+        .collect();
+    source.sort_by_key(|p| p.visual_key());
+
+    // 4. plan（これも状態変更前）
     let p = plan(target, &tab.name, &source, n_slots, args.overflow)?;
     let plan_json = plan_to_json(&p);
 
@@ -324,7 +321,15 @@ Use --embed-floating to convert them to tiled (processes preserved) first",
         return Ok(());
     }
 
-    // 4. 実行
+    // 5. floating paneをtiled化（全検証通過後の初めての状態変更。
+    //    dry-runはここに到達しない = 状態を一切変更しない DD-12）
+    if !floating.is_empty() {
+        for fp in &floating {
+            backend.toggle_embed_floating(&fp.id)?;
+        }
+    }
+
+    // 6. 実行
     let layout_spec = LayoutSpec {
         name: matches!(layout_ref, LayoutRef::Name(_)).then(|| match layout_ref {
             LayoutRef::Name(n) => n.clone(),
@@ -508,33 +513,52 @@ Use --embed-floating to convert them to tiled (processes preserved) first",
                     mapping.push(serde_json::json!({
                         "old_pane": a.pane.as_spec(), "preserved": false, "restarted_match": found,
                     }));
+                    if !found {
+                        // 再作成されなかったcommandは検証失敗（ok:trueのまま成功扱いにしない）
+                        missing.push(format!(
+                            "instance {index}: command not restarted for {}",
+                            a.pane.as_spec()
+                        ));
+                    }
                 }
             }
         }
     }
 
-    let ok = missing.is_empty();
-    if args.json {
-        let env = serde_json::json!({
-            "schema_version": crate::output::json::SCHEMA_VERSION,
-            "ok": ok,
-            "data": { "mode": format!("{:?}", p.mode), "mapping": mapping,
-                      "snapshot_len": snapshot.len() },
-        });
-        println!("{env}");
-    } else {
+    // 検証結果出力。JSON時は成功のみここでenvelopeを出し、失敗時は出力しない
+    // （mainがerror.data付きの単一error envelopeを出す。stdoutに2つのJSON documentが
+    //  並び、単一response契約を破るのを防ぐ）
+    if missing.is_empty() {
+        if args.json {
+            let env = serde_json::json!({
+                "schema_version": crate::output::json::SCHEMA_VERSION,
+                "ok": true,
+                "data": { "mode": format!("{:?}", p.mode), "mapping": mapping,
+                          "snapshot_len": snapshot.len() },
+            });
+            println!("{env}");
+        } else {
+            for m in &mapping {
+                println!("{m}");
+            }
+        }
+        return Ok(());
+    }
+    if !args.json {
         for m in &mapping {
             println!("{m}");
         }
     }
-    if ok {
-        Ok(())
-    } else {
-        Err(ZelperError::new(
-            ErrorClass::VerificationFailed,
-            format!("remap verification failed: {missing:?}"),
-        ))
-    }
+    Err(ZelperError::new(
+        ErrorClass::VerificationFailed,
+        format!("remap verification failed: {missing:?}"),
+    )
+    .with_data(serde_json::json!({
+        "mode": format!("{:?}", p.mode),
+        "mapping": mapping,
+        "missing": missing,
+        "snapshot_len": snapshot.len(),
+    })))
 }
 
 fn is_shell(cmd: &str) -> bool {

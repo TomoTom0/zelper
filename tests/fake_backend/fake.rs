@@ -10,6 +10,10 @@ pub struct FakeBackend {
     pub calls: RefCell<Vec<String>>,
     /// この操作名の次回呼び出しを失敗させる
     pub fail_op: RefCell<Vec<String>>,
+    /// 次回override-layout時に除去するpane（zellijがlayout適用でdead paneを掃除する挙動のemulate）
+    pub drop_on_override: RefCell<Vec<PaneKindId>>,
+    /// このcommandの再作成を失敗させる（new-tabでbare paneに化ける。command再起動失敗のemulate）
+    pub fail_restart: RefCell<Vec<String>>,
 }
 
 pub struct FakeState {
@@ -39,6 +43,8 @@ impl FakeBackend {
             }),
             calls: RefCell::new(Vec::new()),
             fail_op: RefCell::new(Vec::new()),
+            drop_on_override: RefCell::new(Vec::new()),
+            fail_restart: RefCell::new(Vec::new()),
         }
     }
 
@@ -62,6 +68,16 @@ impl FakeBackend {
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
     pub fn inject_failure(&self, op: &str) {
         self.fail_op.borrow_mut().push(op.to_string());
+    }
+
+    #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
+    pub fn drop_on_next_override(&self, pane: PaneKindId) {
+        self.drop_on_override.borrow_mut().push(pane);
+    }
+
+    #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
+    pub fn starve_command_restart(&self, command: &str) {
+        self.fail_restart.borrow_mut().push(command.to_string());
     }
 }
 
@@ -219,21 +235,22 @@ impl ZellijBackend for FakeBackend {
             are_floating_panes_visible: true,
         };
         s.tabs.push(tab);
-        // zellij挙動のエミュレート: layout指定時はそのslot数のpaneを作る
-        // （bare pane = 既定shell相当。command注入までは再現しない）
-        let layout_slots = spec
+        // zellij挙動のエミュレート: layout指定時はそのslot数のpaneを作り、
+        // 生成KDLに注入されたcommand/cwdを再現する（remap検証が実挙動と同じ条件で走るように）
+        let slot_specs = spec
             .layout
             .as_ref()
             .and_then(|l| l.inline.as_deref())
-            .and_then(|kdl| {
-                zelper::layout::parse(kdl)
-                    .ok()
-                    .map(|doc| zelper::layout::count_terminal_slots(&doc))
-            });
-        let n_panes = layout_slots.unwrap_or(1);
-        for _ in 0..n_panes {
+            .and_then(|kdl| zelper::layout::parse(kdl).ok())
+            .map(|doc| zelper::layout::extract_slot_commands(&doc));
+        let n_panes = slot_specs.as_ref().map_or(1, Vec::len);
+        for i in 0..n_panes {
             let pid = s.next_terminal_id;
             s.next_terminal_id += 1;
+            let sc = slot_specs.as_ref().and_then(|s| s.get(i));
+            let command = sc
+                .map(|s| s.command_argv.join(" "))
+                .filter(|c| !c.is_empty() && !self.fail_restart.borrow().contains(c));
             s.panes.push(PaneState {
                 id: PaneKindId::Terminal(pid),
                 title: format!("Pane #{pid}"),
@@ -248,8 +265,8 @@ impl ZellijBackend for FakeBackend {
                     rows: 10,
                     cols: 10,
                 },
-                command: None,
-                cwd: None,
+                command,
+                cwd: sc.and_then(|s| s.cwd.clone()),
                 tab_id: TabId(id),
                 tab_position: 0,
                 tab_name: format!("Tab #{}", id + 1),
@@ -313,6 +330,13 @@ impl ZellijBackend for FakeBackend {
             "override-layout active_only={} retain_t={} retain_p={}",
             spec.apply_only_to_active_tab, spec.retain_terminal, spec.retain_plugin
         ))?;
+        // layout適用で掃除されるpaneのemulate（検証失敗test用）
+        let mut dropped = self.drop_on_override.borrow_mut();
+        if !dropped.is_empty() {
+            let mut s = self.state.borrow_mut();
+            s.panes.retain(|p| !dropped.contains(&p.id));
+            dropped.clear();
+        }
         Ok(())
     }
 
