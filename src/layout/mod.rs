@@ -144,6 +144,15 @@ fn walk_slots(doc: &KdlDocument, f: &mut impl FnMut(&KdlNode)) {
         if SKIP_NODES.contains(&name) {
             continue;
         }
+        if name == "plugin" {
+            // plugin node配下の子node（zjstatusのformat_left等）はすべてそのpluginの
+            // configurationでありslotを形成しない。実zellijは子nodeをconfig値として
+            // 文字列化し（zellij-utils/src/kdl/kdl_layout_parser.rs
+            // parse_plugin_user_configuration）、paneの外のbare plugin自体も無視する。
+            // 子の有無にかかわらずleafとして扱い、配下へ再帰しない（MR-32）
+            f(node);
+            continue;
+        }
         if name == "layout" || name == "tab" {
             if let Some(child) = node.children() {
                 walk_slots(child, f);
@@ -192,7 +201,8 @@ pub fn generate_instance_kdl(
 ) -> Result<String, ZelperError> {
     let mut cloned = base.clone();
     let mut leaf_index: usize = 0;
-    inject_walk(&mut cloned, &mut leaf_index, slot_commands);
+    // base subtreeは生成KDLでtab name="..."の直下に置かれるため親はpaneではない
+    inject_walk(&mut cloned, &mut leaf_index, slot_commands, false);
     let body = format!("{cloned}");
     // 改行区切り形式（DD-3.3）で全体を組み立てる
     let name_escaped = tab_name.replace('"', "\\\"");
@@ -212,12 +222,21 @@ pub fn generate_instance_kdl(
     Ok(out)
 }
 
-/// 末端leafへcommandを注入（文書順 = slot順）
+/// 末端leafへcommandを注入（文書順 = slot順）。
+/// parent_is_pane: このdocの親がpane containerか（run block配置可否の判定に使用）
 fn inject_walk(
     doc: &mut KdlDocument,
     leaf_index: &mut usize,
     slot_commands: &std::collections::BTreeMap<usize, SlotCommand>,
+    parent_is_pane: bool,
 ) {
+    if !parent_is_pane {
+        // layout/tab直下のbare plugin nodeは実zellijでは無視される（paneを作らない）が、
+        // 生成KDLはこの階層がtab配下に置かれるためInvalid tab property errorとなる。
+        // 実挙動と合わせるため出力から除去する。pane run block内のplugin
+        // （pane { plugin {...} }）は親がleaf扱いで再帰しないため対象外（MR-32/S11）
+        doc.nodes_mut().retain(|n| n.name().value() != "plugin");
+    }
     let node_count = doc.nodes().len();
     for i in 0..node_count {
         let decision = {
@@ -225,6 +244,10 @@ fn inject_walk(
             let name = node.name().value();
             if SKIP_NODES.contains(&name) {
                 None
+            } else if name == "plugin" {
+                // plugin nodeはconfig子nodeの有無にかかわらず常にleaf（walk_slotsと
+                // 対称）。leaf_is_pluginでslotを消費せずskipされる（MR-32）
+                Some(false)
             } else if (name == "layout" || name == "tab") && node.children().is_none() {
                 // 子なしlayout/tabはslotを形成しない（walk_slotsと同じ規則。
                 // leaf扱いにするとcount_terminal_slotsとinjectでindexがずれる）
@@ -246,8 +269,12 @@ fn inject_walk(
             None => continue,
             Some(is_container) => {
                 if is_container {
+                    // layout/tab配下はbare plugin不可、pane/template配下はrun block可
+                    let container_name = doc.nodes()[i].name().value().to_string();
                     if let Some(c) = doc.nodes_mut()[i].children_mut() {
-                        inject_walk(c, leaf_index, slot_commands);
+                        let child_parent_is_pane =
+                            container_name != "layout" && container_name != "tab";
+                        inject_walk(c, leaf_index, slot_commands, child_parent_is_pane);
                     }
                 } else if !leaf_is_plugin(&doc.nodes()[i]) {
                     // plugin leafはslotを消費しない（count_terminal_slotsと同じ規則）。

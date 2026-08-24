@@ -63,7 +63,7 @@ fn fixtures() -> Vec<PaneState> {
             tab_name: "tab1".into(),
             plugin_url: Some("zellij:tab-bar".into()),
         },
-        // floating pane（selectableだが対象外filter）
+        // floating pane（selectableならall対象に含まれる。DD-1.4）
         PaneState {
             id: PaneKindId::Terminal(4),
             title: "float".into(),
@@ -126,20 +126,25 @@ fn filter_name_exact_match_and_command_partial() {
 }
 
 #[test]
-fn filter_all_selectable_terminal_only_excludes_plugin_and_floating() {
+fn filter_all_selectable_terminal_includes_floating_excludes_plugin() {
     let panes = fixtures();
     let spec = TargetSpec {
         all: true,
         ..Default::default()
     };
     let set = resolve(&spec, &panes).unwrap();
-    // floating(terminal_4)はselectableだがall対象に含める仕様（DD-1.4はselectable terminal pane）
+    // floating(terminal_4)はselectableなのでall対象に含める仕様（DD-1.4はselectable terminal pane）
     // plugin_0はnon-selectableのため除外
     assert!(set.panes.iter().all(|p| p.is_selectable));
     assert!(
         !set.panes
             .iter()
             .any(|p| matches!(p.id, PaneKindId::Plugin(_)))
+    );
+    assert!(
+        set.panes
+            .iter()
+            .any(|p| p.is_floating && p.id == PaneKindId::Terminal(4))
     );
 }
 

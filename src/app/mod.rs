@@ -1,4 +1,5 @@
 pub mod add;
+pub mod docs;
 pub mod list;
 pub mod read;
 pub mod remap;
