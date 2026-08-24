@@ -9,7 +9,7 @@
 ## 対象指定（read / send / resize / remove等）
 
 - PANESPEC = pane ID。`terminal_3` / `plugin_1` / bare `3`（`3`は`terminal_3`と同義）。複数指定可
-- filter option（read/send共通）: `--tab` / `--name`（pane title完全一致）/ `--command`（pane command部分一致）/ `--cwd` / `--all`（selectable terminal pane全て。plugin pane・floating paneは含まない）
+- filter option（read/send共通）: `--tab` / `--name`（pane title完全一致）/ `--command`（pane command部分一致）/ `--cwd` / `--all`（selectable terminal pane全て。plugin paneは含まない。selectableなfloating terminal paneはtiledと同じく含む）
 - 対象 = positional PANESPEC群とfilterの和集合。空なら `NoTarget` error（exit 3）
 - TABSPEC = tab ID（整数）または一意なtab名。一意でなければ `AmbiguousTarget` error（candidatesにtab ID列）
 - 単一対象を要求する操作（rename等）で複数ヒットは `AmbiguousTarget`（exit 3、candidatesにpane ID列）
