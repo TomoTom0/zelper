@@ -46,6 +46,7 @@ fn wants_json(cli: &Cli) -> bool {
             RemoveTarget::Tab { json, .. } => *json,
         },
         Verb::Completion { .. } => false,
+        Verb::Docs { .. } => false,
     }
 }
 
@@ -53,6 +54,10 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
     match &cli.command {
         Verb::Completion { shell } => {
             generate_completion(*shell);
+            Ok(())
+        }
+        Verb::Docs { target } => {
+            zelper::app::docs::run(target);
             Ok(())
         }
         Verb::List {

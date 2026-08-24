@@ -34,6 +34,10 @@ name = "cli_list_read_send"
 path = "tests/cli/list_read_send.rs"
 
 [[test]]
+name = "cli_docs"
+path = "tests/cli/docs.rs"
+
+[[test]]
 name = "fake_rename_add_remove"
 path = "tests/fake_backend/rename_add_remove.rs"
 

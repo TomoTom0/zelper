@@ -114,6 +114,11 @@ pub enum Verb {
     },
     /// shell補完scriptの生成（文書化されたverb原則の例外）
     Completion { shell: clap_complete::Shell },
+    /// ドキュメント配布物の出力（文書化されたverb原則の例外）
+    Docs {
+        #[command(subcommand)]
+        target: DocsTarget,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,6 +135,27 @@ pub enum ListResource {
     Tabs,
     Panes,
     Layouts,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DocsTarget {
+    /// README.md全体（人間向け。完全usage・互換性・制限）
+    Readme,
+    /// LLM/agent向け配布物
+    Llm {
+        #[command(subcommand)]
+        resource: LlmDocsResource,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LlmDocsResource {
+    /// LLM向けusage参照（全verb文法・JSON契約・exit/error class対応・誤用対）
+    Usage,
+    /// Agent Skills形式skill（SKILL.md全体）
+    Skill,
+    /// AGENTS.md / CLAUDE.md追記用snippet
+    Snippet,
 }
 
 #[derive(Subcommand, Debug)]

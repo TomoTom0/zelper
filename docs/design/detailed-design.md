@@ -12,7 +12,7 @@
 list  read  send  rename  resize  remap  add  remove
 ```
 
-例外的にtop-levelに許容する非verbコマンド: `completion`（shell補完生成。`zelper completion bash|zsh|fish`）。helpの発見性目的で、文書化された例外として扱う。
+例外的にtop-levelに許容する非verbコマンド: `completion`（shell補完生成。`zelper completion bash|zsh|fish`）。helpの発見性目的で、文書化された例外として扱う。`docs`（agent向け配布物の出力。`zelper docs readme | llm usage|skill|snippet`）も同様の文書化された例外（配布物の取り出し経路。zellij sessionに触れない純粋出力）。
 
 ### 1.2 構文木（全体）
 
@@ -47,7 +47,7 @@ completion bash|zsh|fish
 ### 1.3 位置指定operandの規則
 
 - `PANESPEC` = pane IDのみ。`terminal_3` / `plugin_1` / bare `3`（=terminal_3）。**名前・path・その他の暗黙解釈はしない**（名前は`--name`、tab名は`--tab`へoption退避）
-- `TABSPEC` = tab ID（整数）。tab名は`--tab`に渡す場合もIDに解決してから使用。v1はTABSPEC=IDのみ、名前解説はlistで確認させる。ただし`--tab`には名前も許容（一意ならIDへ解決、曖昧ならerror）
+- `TABSPEC` = tab ID（整数）または一意なtab名（一意ならIDへ解決、曖昧なら候補列出のerror）。全verbのTABSPEC（`--tab` optionと `rename tab` / `remove tab` のpositional）で共通の解決を用いる
 - `remap`のpositional = layout名のみ。path/inlineはoption専用（要件2.9の強制規則）
 - `send`のTEXTは`--`以降。targets（positional）とTEXTの区切りを構文で保証する
 

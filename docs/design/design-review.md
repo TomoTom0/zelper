@@ -131,3 +131,30 @@ PR#1（初期取り込み）への外部レビュー指摘5件（plugin leaf slo
 **検証**: 修正後 L1〜L3テスト77件合格・clippy警告0・fmt差分なし。
 
 **MR-32修正（TASK-23）の独立レビュー（codex read-only・2026-08-23）**: slot再帰抑制・生成KDLからのbare plugin除去に対し、作成者と別model（codex）で独立レビュー。**P1/P2/P3指摘なし（承認可）**。count/inject/extractのslot index対称性・bare plugin除去の限定性（pane run block・`floating_panes`・templateとの組合せで過剰除去・除去漏れなし）・zellij 0.44.3 parserソースとの静的照合・テストのfail-first検証力を確認。L1〜L3テスト78件合格・clippy警告0・fmt差分なし。
+
+### 4.4 agent配布物（TASK-24）の独立レビュー（subagentによる）
+
+`zelper docs` verbと配布物（SKILL.md・snippet・docs/agent/README.md）に対し、作成者と別のsubagentが独立レビューを実施。P1なし、P2: 2件、P3: 8件。
+
+| ID | 指摘 | disposition |
+|---|---|---|
+| MR-36 | DD-1.3が「v1はTABSPEC=IDのみ」と記載する一方、実装（`resolve_tab`）は`rename tab`/`remove tab`のpositional含む全TABSPECで一意なtab名を受容し、正本間で矛盾 | **修正済み**: 実装・README・SKILL.mdが一致しているためDD-1.3を実装に合わせ更新（TABSPEC = ID or 一意な名前の共通解決） |
+| MR-37 | docs/agent/README.mdがversion管理外の`tmp/task24/`を参照（他cloneでlink切れ・形式比較の出典が追跡不能） | **修正済み**: `docs/research/research_agent-docs-formats.md`へ移設しdocs/README.md索引に登録 |
+| MR-38 | 軽微表記（P3群）: snippetのexit status略記・SKILLの「parse error」表記・「候補列出つき」・単一pane削除例の`--yes`誤学習リスク・list sessions JSON制限の記載漏れ・README:66等の要約省略・snippet verb一覧のcompletion省約説明・適用手順見出しとcommandの不一致 | **修正済み**: exit status表記統一・usage error表記・例修正（`remove pane 12`）・`list sessions`制限追記・「主要verb一覧」説明修正・CLAUDE.md用command併記。dry-run細部（README:64-66）はskillの分量制約上readme参照でカバー |
+
+**検証**: 修正後 L1〜L3テスト78件合格・clippy警告0・fmt差分なし。`zelper docs readme|skill|snippet`の出力が正本と一致することをCLI契約テスト（tests/cli/docs.rs）で検証。
+
+**TASK-25追記（2026-08-24）**: docs verbを `docs readme | llm usage|skill|snippet` の2段構造化（llmのみ第2階層。ユーザー指示）。LLM向けusage参照（`docs/agent/llm/usage.md`: 全verb文法・排他規則・JSON envelope全field・error class 11種とexit対応・安全gate・誤用対）を追加。**検証訂正**: TASK-24時点でtests/cli/docs.rsに`[[test]]`宣言が無くdocs verbテストが実行されていなかった（78件に未含入。検証報告が実態と不合だった）。宣言追加により85件合格で実検証完了。教訓: tests/直下以外の新規test fileはCargo.tomlの`[[test]]`宣言要。
+
+**TASK-26追記（2026-08-24）**: docs配布物正本を `docs/usage/` カテゴリへ再構成（README.md・llm.md・skill/SKILL.md・snippet.md。docs/の文書種カテゴリ体系 design/research/testing に参入、ユーザー指示）。docs/agent/カテゴリは廃止。include先・索引・適用手順・テストパス更新、85テスト合格。TASK-25/26変更に対する独立レビューは本項とは別に実施（結果は下記追記予定）。
+
+**TASK-25/26の独立レビュー（2026-08-24）**: docs verb 2段化・docs/usage/再構成・llm.md新規執筆に対し、作成者と別のsubagentが独立レビュー（実装突合・実binary検証・85テスト確認込み）。P1: 2件、P2: 5件、P3: 4件。全て対応済み。
+
+| ID | 指摘 | disposition |
+|---|---|---|
+| MR-39 | llm.md事実誤認2件: (a) destructive gateを「exit 2」と記載（実態はPreflight exit 7。llm.md自身の対応表とも矛盾）(b) remap --session-scopeがresults[]を出すと記載（実装はtab毎に独立envelopeを出しresults[]を生成しない） | **修正済み**: (a) Preflight exit 7に訂正 (b) results[]対象をread/send/removeに限定し、session-scopeはtab毎envelope・失敗時最初のerrorで中断と記載 |
+| MR-40 | llm.md過大一般化2件: (a) 「1つでも失敗あれば全体exit 6」（実態: 一部失敗=6・全失敗=5）(b) candidatesを「対象解決失敗時のみ」と記載（実態: session曖昧時のsession名・remap floating検出時も付く。省略条件は空か否か） | **修正済み**: 両記述を実装どおり訂正 |
+| MR-41 | docs/usage/README.md: cp例が`~/.claude/skills/skill/`を作りfrontmatter name:zelperと不整合。旧ファイル名（usage.md/snippet_zelper-guide.md）残存2件。DD-1.1のdocs文法が旧1段構造のまま | **修正済み**: cp先をzelperに修正、旧名を現行名（llm.md/snippet.md）に更新、DD-1.1文法を`docs readme | llm usage|skill|snippet`に更新 |
+| MR-42 | 軽微4件: add行の[--json]欠落（llm.md他verbと不整合）・remove tab --empty時のTAB省略可の未記載・SKILL.md verb一覧にdocs行なし・--allの意味限定（selectable terminalのみ）未記載 | **修正済み**: 全てllm.md/SKILL.mdに反映 |
+
+**検証**: 修正後85テスト合格・clippy警告0・fmt clean。レビュアーによる実binary検証（docs verb 4出力が正本とbyte一致・排他規則違反のexit 2実機確認）込み。

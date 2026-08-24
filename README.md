@@ -42,6 +42,8 @@ zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F 
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
 zelper completion bash|zsh|fish
+zelper docs readme | llm usage|skill|snippet
+                                        （ドキュメント配布物の出力。docs/usage/参照）
 ```
 
 ## 出力とexit status
@@ -86,4 +88,5 @@ zelper completion bash|zsh|fish
 - 要件・設計・経緯: `docs/README.md` の索引を参照
   - 機能調査（実験根拠）: `docs/research/zellij-capabilities.md`
   - 詳細設計: `docs/design/detailed-design.md`
+- coding agent向け配布物の索引: `docs/usage/README.md`（適用手順・形式比較: `docs/usage/distribution.md`）
 - テスト: `tests/README.md`

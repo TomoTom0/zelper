@@ -10,6 +10,7 @@
   - `error_map.rs` — error.class ↔ exit status対応表・JSON envelope契約
 - `cli/` — L3 CLI契約（assert_cmd + fake zellij shim）
   - `list_read_send.rs` — list/read/send契約、排他規則、exit code、補完生成、JSON error envelope。shimはtest実行時に生成（argv記録・fixture応答）
+  - `docs.rs` — docs verb契約（readme/llm usage|skill|snippet出力が正本と一致、subcommand無し/不正はexit 2。TASK-24/25。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
 - `fake_backend/` — L2 決定的fake backend
   - `fake.rs` — FakeBackend（状態持ち・呼び出し記録・失敗注入・frozen no-op）
   - `rename_add_remove.rs` — rename検証・add作成検証・remove安全gate/`--empty`
@@ -28,7 +29,7 @@
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（78テスト）
+cargo test          # L1〜L3（85テスト）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はtmp/phase7/harnessをpodmanで実行（Phase 7記録を参照）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）
