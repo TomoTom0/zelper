@@ -324,7 +324,7 @@ fn inject_into_leaf(node: &mut KdlNode, sc: &SlotCommand) {
 
 /// 値を必ずquoteした表現で設定する。kdl rendererは単純な識別子状の文字列を
 /// bare（command=sleep）で出力するが、zellij 0.44.3のparserはこれを拒否する
-/// （実機統合テストS9で確認。tmp/phase7/integration-report.md参照）
+/// （実機統合テストS9で確認。実行記録はrepo管理外の検証作業dirに残置）
 fn set_quoted_prop(node: &mut KdlNode, key: &str, value: &str) {
     node.insert(key, kdl::KdlValue::String(value.to_string()));
     if let Some(e) = node.entry_mut(key) {

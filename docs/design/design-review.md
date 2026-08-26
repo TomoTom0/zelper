@@ -114,7 +114,7 @@ MR-1〜MR-3・MR-13は実装修正を伴い、修正後に全テスト（63件�
 | MR-29 | timeout 30秒（DD-3.1の10秒から逸脱）・`version_supported`等dead code・未来major判定なし | **修正済み**: 10秒化・削除・`check_capability`に未来major拒否を追加 |
 | MR-30 | `send`のtext結合コメント不正確・`--yes`+`--dry-run`併用の注意表示なし・`--tail`のtest不在 | **修正済み**: コメント訂正・注意行追加・tail testはP1（apply_tail経路は実装済み・test追加は軽微） |
 
-**検証**: 修正後 L1〜L3テスト71件合格・clippy警告0・統合S5〜S10再実行でFAIL 0件（tmp/phase7/integration-report.md 第2ラウンド記録）。
+**検証**: 修正後 L1〜L3テスト71件合格・clippy警告0・統合S5〜S10再実行でFAIL 0件（実行記録はrepo管理外の検証作業dirに残置）。
 
 ### 4.3 PR#1外部レビュー対応の独立レビュー（subagentによる）
 
@@ -158,3 +158,33 @@ PR#1（初期取り込み）への外部レビュー指摘5件（plugin leaf slo
 | MR-42 | 軽微4件: add行の[--json]欠落（llm.md他verbと不整合）・remove tab --empty時のTAB省略可の未記載・SKILL.md verb一覧にdocs行なし・--allの意味限定（selectable terminalのみ）未記載 | **修正済み**: 全てllm.md/SKILL.mdに反映 |
 
 **検証**: 修正後85テスト合格・clippy警告0・fmt clean。レビュアーによる実binary検証（docs verb 4出力が正本とbyte一致・排他規則違反のexit 2実機確認）込み。
+
+### 4.5 TASK-31設計レビュー（第三者配布整備）
+
+レビュー日: 2026-08-26。対象: TASK-31実装設計書（repo管理外の作業dirに置かれた正本）。作成者と別のsubagentによる独立レビュー。指摘9件（P2: 3件・P3: 6件）、すべて修正採用（design-review.md本文の§2.8文言調整で当ファイル:117も対象になるため、当項目の追記自体が§2.8の実装に含まれる）。IDはT31R-n。
+
+| ID | severity | 指摘 | disposition |
+|---|---|---|---|
+| T31R-1 | P2 | tmp/参照の文言調整対象に`src/layout/mod.rs:327`（doc comment内のrepo管理外実行記録へのtmp/参照）が漏れていた。§1修正file一覧・§2.8表からも不存在で、src内のdangling参照だけが調整されないまま残る | **修正**: §1一覧・§2.8表へ追加し、§0の再確定記述にsrc側1箇所を含めた |
+| T31R-2 | P2 | §5のpublic化コマンドが現行gh CLIの必須flag（`--accept-visibility-change-consequences`）を欠き、手順実行時にconfirmで失敗する | **修正**: flag付きのコマンドへ更新 |
+| T31R-3 | P3 | §5のtag打ち直し手順にrelease残存時の削除がなく、`gh release create`成功後に後続stepが失敗した場合はtag打ち直し再pushが既存releaseとの重複で失敗する | **修正**: 先行して`gh release delete vX.Y.Z --yes`を実行する旨を追記 |
+| T31R-4 | P3 | mise ubi backendのasset選択機構の記述が不正確。archiveが1つのみの場合はplatform判定なしで無条件選択されるため、macOS/arm64でも導入可能（誤導入）となるが、その留意が§2.4にない。またubi backendはmiseでdeprecated warning表示中 | **修正**: §2.4 mise節にLinux x86_64向けである旨の留意1行を追加。§2.6に選択機構（拡張子filter、archive 1つなら無条件選択、複数ならplatform判定）の正確な記述を追記 |
+| T31R-5 | P3 | §2.6のworkflow YAMLが`actions/checkout@v4`（旧major） | **修正**: `@v5`へ更新 |
+| T31R-6 | P3 | §5前段にTASK-31 PRのhead branchがmerge後remoteに残存しているかの確認手順がなく、残ったままpublic化すると公開branchが増える | **修正**: 確認手順（残っていれば削除）を§5前段へ追記 |
+| T31R-7 | P2 | §4 verify表に§2.7/2.8文言調整箇所の設計・実file間の一致確認（docs/src内`tmp/`・`/home/tomo`言及のgrep残存確認）がなく、文言調整の実装漏れをverifyで検出できない | **修正**: verify表へ追記（規約・規則としての言及とrepo管理外である旨の明示は残存してよい旨を明記） |
+| T31R-8 | P3 | §0の「`.claude/settings.local.json` は untracked 存在」が実態と不正確。本machineではuser global gitignore（`~/.config/git/ignore`）によりignored状態であり、repo .gitignore追加の目的は他clone・CI環境での保護 | **修正**: 実態どおりの記述へ差し替え（§6リスク欄の同旨記述も整合） |
+| T31R-9 | P3 | §0のtmp/参照計数が列挙ベースで不正確。実測はdocs側8箇所（うちdesign-review.md:142はMR-37指摘文の歴史的引用のため変更不要）・research側6箇所・src側1箇所。また「規約内のtmp/言及（CLAUDE.md:15・.gitignore:2）は調整対象外」の明示が無い | **修正**: grep実測値に正確化し、対象外明示を追加 |
+
+**検証**: 指摘9件すべて設計書へ反映済み。docs/src/testsのgrep実測と計数の一致を確認（レビュー時点の`/home/tomo`言及はzellij-capabilities.md:52の1箇所のみ。実装で一般化済み）。実装は反映後の設計書を正本として実施。
+
+**段階8コードレビュー（codex・2026-08-26）**: TASK-31実装（LICENSE-MIT/LICENSE-APACHE・Cargo.toml metadata・README install章・.gitignore・docs/src文言調整・release workflow）に対し、codex（read-only）でコードレビュー。指摘5件（必須1件・推奨4件）、全件disposition=修正。IDはCR-n。
+
+| ID | severity | 指摘 | disposition |
+|---|---|---|---|
+| CR-1 | 必須 | Release archiveがLICENSEを同梱せず、Apache-2.0 §4(a)のObject form再配布時のlicense写し提供義務に非対応 | **修正**: package stepをstaging dir方式へ変更し、archiveに `zelper` / `LICENSE-MIT` / `LICENSE-APACHE` の3fileを同梱 |
+| CR-2 | 推奨 | `actions/checkout@v5` がtag参照（tag移動・supply chain改変余地）で、かつcredential保持がdefault有効 | **修正**: v5系最新release v5.1.0のcommit SHA固定（`fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09`）+ `persist-credentials: false` |
+| CR-3 | 推奨 | tagとCargo.toml versionの不一致がworkflowで機械検出されない。`gh release create` がtag実在を検証しない | **修正**: build前にtag/Cargo.toml version一致検証stepを追加（`cargo metadata` との比較）。`gh release create` に `--verify-tag` を追加 |
+| CR-4 | 推奨 | LICENSE-MITの文言は正本一致だが折り返し位置（改行）が手整形されておりverbatimでない | **修正**: rust-lang/rust の `LICENSE-MIT` を再取得し、差分が著作権行 `Copyright (c) 2026 TomoTom0` の1行のみになるよう改行・trailing newline含めverbatimで再配置 |
+| CR-5 | 推奨 | README install章のdownload手順がReleases page訪問と手動downloadを前提としcopy-paste完結しない（asset名にversionを埋める案内だと陳腐化も） | **修正**: `releases/latest/download/` URL（常に最新版を指す）による実行可能例へ変更。同一dirへ2file downloadする旨・archiveへのLICENSE同梱（CR-1反映）を本文に明記 |
+
+**検証**: 修正後 `cargo fmt --check` 差分なし・`cargo clippy --all-targets` 警告0・`cargo test` 85テスト合格・`actionlint .github/workflows/release.yml` pass・LICENSE-MITとrust-lang/rust正本のdiffが著作権行のみ・新しいpackage手順（staging dir・3file同梱）でのtar・sha256sums.txt再生成により `sha256sum -c` pass・tar内容3file確認。設計書（§2.1・§2.4・§2.5節以降のworkflow YAML・§4・§5・§7）も修正内容へ追従更新。

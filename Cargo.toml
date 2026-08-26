@@ -3,6 +3,10 @@ name = "zelper"
 version = "0.1.0"
 edition = "2024"
 description = "Structured automation/orchestration CLI over Zellij"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TomoTom0/zelper"
+readme = "README.md"
+authors = ["TomoTom0"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

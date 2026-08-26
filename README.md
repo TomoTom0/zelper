@@ -8,11 +8,46 @@ zelper read --tab agents                # agents tabの全paneの画面を読む
 zelper remap three                      # 動いているpaneをprocess保持のまま3分割layoutへ
 ```
 
-## build
+## install
+
+前提: zellij >= 0.44.1（`--layout-string`導入版。詳細は「互換性」章）
+
+### GitHub Releases から（推奨）
+
+Linux x86_64 用の静的binary（musl build。glibc versionを問わない）を配布。
+[Releases page](https://github.com/TomoTom0/zelper/releases) に各版の資産がある。
+archiveにはbinaryとともに `LICENSE-MIT` / `LICENSE-APACHE` が同梱される。
+以下は同じdirectoryへ2file（archiveとchecksum）をdownloadして検証・展開する手順。
+`releases/latest/download/` URLは常に最新版を指すためversion名の記載が不要になる:
 
 ```bash
-cargo build --release   # target/release/zelper
+curl -LO https://github.com/TomoTom0/zelper/releases/latest/download/zelper-x86_64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/TomoTom0/zelper/releases/latest/download/sha256sums.txt
+sha256sum -c sha256sums.txt
+tar xzf zelper-x86_64-unknown-linux-musl.tar.gz
+chmod +x zelper
+mkdir -p ~/.local/bin   # 多くのdistroで、存在すればlogin時にPATHへ含まれる
+mv zelper ~/.local/bin/
 ```
+
+### mise
+
+Linux x86_64向け（archiveが1つのみのためubiはplatform無判定で選択する。macOS/arm64では誤導入となる）
+
+```bash
+mise use -g ubi:TomoTom0/zelper
+```
+
+### 開発者向け
+
+```bash
+cargo install --git https://github.com/TomoTom0/zelper
+# または clone して
+cargo install --path .
+cargo build --release   # target/release/zelper（buildのみ）
+```
+
+License: MIT OR Apache-2.0（`LICENSE-MIT` / `LICENSE-APACHE` 参照）
 
 ## 対象session
 

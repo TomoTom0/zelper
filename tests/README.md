@@ -21,8 +21,8 @@
 
 ## L4統合テスト（実zellij）
 
-- runner/harness: `tmp/phase7/`（エフェメラル。podman + debian:12-slim + zellij 0.44.3 + zelper releaseバイナリ（musl static build）。common.sh + s1〜s11スクリプトで再現可能）
-- 実行記録: `tmp/phase7/integration-report.md` — **S1〜S11全PASS**（修正後再実行含む。remap保存はheartbeat pid継続+pane ID同一で実証、overflow tabs modeの再作成paneのcommand一致も検証、plugin config子nodeのslot除外はbare/wrapper両形式で検証）
+- runner/harness: repo管理外の検証作業dir（エフェメラル。podman + debian:12-slim + zellij 0.44.3 + zelper musl static binaryで構成）
+- 実行記録: repo管理外の検証作業dirに残置 — **S1〜S11全PASS**（修正後再実行含む。remap保存はheartbeat pid継続+pane ID同一で実証、overflow tabs modeの再作成paneのcommand一致も検証、plugin config子nodeのslot除外はbare/wrapper両形式で検証）
 - 既知の検証限界: zellij 0.44.3では空tabを作成できない（new-tabが必ずpaneを作る）ため、`remove tab --empty`の実削除は代替検証（dry-run計画・非空tab保護・error契約）のみ
 - 前提: config.kdl配置（Setup Wizard抑止）・表示200x60・heartbeatプロセス保存証明
 
@@ -31,7 +31,7 @@
 ```bash
 cargo test          # L1〜L3（85テスト）
 cargo clippy --all-targets && cargo fmt --check   # lint
-# L4はtmp/phase7/harnessをpodmanで実行（Phase 7記録を参照）
+# L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）
 ```
 
