@@ -1,0 +1,42 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: verify tag matches Cargo.toml version
+        run: |
+          tag_ver="${GITHUB_REF_NAME#v}"
+          cargo_ver="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if [ "$tag_ver" != "$cargo_ver" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_ver" >&2
+            exit 1
+          fi
+      - name: build (x86_64-unknown-linux-musl)
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl
+      - name: package
+        run: |
+          mkdir -p stage
+          cp target/x86_64-unknown-linux-musl/release/zelper stage/
+          cp LICENSE-MIT LICENSE-APACHE stage/
+          tar -C stage -czf zelper-x86_64-unknown-linux-musl.tar.gz zelper LICENSE-MIT LICENSE-APACHE
+          sha256sum zelper-x86_64-unknown-linux-musl.tar.gz > sha256sums.txt
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-release-notes \
+            zelper-x86_64-unknown-linux-musl.tar.gz sha256sums.txt

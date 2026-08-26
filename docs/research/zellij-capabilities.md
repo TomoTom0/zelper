@@ -8,7 +8,7 @@
 
 - 実機検証: podman sandbox（debian:12-slim、ホストzellijバイナリをread-only mount、`--network=none`、`script -qec`によるPTY駆動）で 0.44.3 を実行。プロセス保存の証明にはheartbeat手法（pane内プロセスがpid・連番付きで0.5秒ごとにログ追記、override後もpidと連番が継続すればプロセス保存と判定）を使用
 - docs調査: zellij.dev公式ドキュメント（cli-actions / layouts / creating-a-layout / swap-layouts / cli-recipes / programmatic-control / session-resurrection / compatibility）+ GitHub CHANGELOG/releases
-- 一次記録: `tmp/phase1/web-research.md`（docs調査）と `tmp/phase1/local-experiments.md`（実験記録。スクリプト `tmp/phase1/exp-*.sh`、生ログ `tmp/phase1/out/*.log` 全対応表付き）
+- 一次記録（調査メモ・実験script・生log）はrepo管理外の作業dirに残置。本書に検証結果・結論を集約
 - 本書の記載で「0.44.3実機」は実験で確認済み、「0.45.x docs」はdocs由来で0.44.3未検証を意味する
 
 ## 2. Capability matrix
@@ -47,9 +47,11 @@
 
 ## 3. 実験環境の再現
 
+`tmp/phase1`は当時の実験script格納dir（repo管理外・非公開）。script一式無しの完全再現は不可、harness構成の再構築は§1記述による
+
 ```bash
 podman run --rm --network=none \
-  -v /home/tomo/.local/share/mise/installs/zellij/latest/zellij:/usr/local/bin/zellij:ro \
+  -v "$(command -v zellij)":/usr/local/bin/zellij:ro \
   -v $PWD/tmp/phase1:/work -w /work \
   docker.io/library/debian:12-slim bash /work/exp-NN-*.sh
 ```
@@ -59,11 +61,11 @@ podman run --rm --network=none \
 - 外部操作: `zellij --session NAME action ...`（PTY不要）
 - **config.kdlを配置しないとFirst Run Setup Wizard（plugin pane）が現れ、`-d`付きnew-pane連続発行時にpaneが作成直後に消える**。テスト環境では必ずconfig.kdlを置く
 - プロセス保存検証: pane内で `bash /work/hb.sh <tag>`（0.5秒ごとに`timestamp tag i pid`を追記）を起動し、操作後にpidと連番iの継続を確認
-- 実験済みの全スクリプト・生ログ: `tmp/phase1/local-experiments.md` §1の対応表参照
+- 全script・生logの対応表は非公開の一次記録にあり、結果は本書§2以降に集約
 
 ## 4. override-layout 詳細（remap中核）
 
-0.44.3実機で確認した動作（出典: `tmp/phase1/out/04*.log`）:
+0.44.3実機で確認した動作（§1手法の実機検証。生logは非公開の一次記録）:
 
 | 状態 | 結果 | プロセス |
 |---|---|---|
@@ -81,7 +83,7 @@ podman run --rm --network=none \
 - 適用後のtabは**layout KDLに明示しない限りtab-bar/status-barを持たない**（pane領域が全面化）。bar維持なら生成KDLに `pane size=1 borderless=true { plugin location="zellij:tab-bar" }` を含める
 - slot↔paneの割当順はpane ID昇順ではなかった（観測値）。zelperは適用後に`list-panes`で実対応を検証する設計が必要
 
-### 4.1 複数tab layout適用とoverflow（`tmp/phase1/overflow-experiments.md`、out/p3-*.log）
+### 4.1 複数tab layout適用とoverflow（一次記録: 非公開）
 
 | 実験 | 状態 | 結果 | プロセス |
 |---|---|---|---|

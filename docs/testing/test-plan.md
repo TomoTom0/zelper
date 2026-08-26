@@ -134,7 +134,7 @@ tests/
     zellij/                      # 実出力JSON/text fixture
 ```
 
-L4統合テストは`tests/`外の`tmp/phase7/`（エフェメラルharness。podman構成は§1記載）で実行し、結果を`tmp/phase7/integration-report.md`に記録する。恒久化する場合は`tests/integration/`へ昇格する。
+L4統合テストはrepo管理外の作業dir（エフェメラルharness。podman構成は§1記載）で実行し、結果を記録する。恒久化する場合は`tests/integration/`へ昇格する。
 
 ## 5. 実装前テスト（fail-first対象）
 

@@ -24,7 +24,7 @@ zelper docs llm usage
 zelper docs readme
 ```
 
-zelperをインストールしていない環境では、repoから直接コピーしてもよい:
+zelperをインストールしていない環境では、まずREADMEの「install」章（Releases download / mise / cargo install）で導入し、`zelper docs llm skill` で取り出す。repoをclone済みでバイナリをbuildしない場合は、配布物fileを直接コピーしてもよい:
 
 ```bash
 cp -r docs/usage/skill ~/.claude/skills/zelper

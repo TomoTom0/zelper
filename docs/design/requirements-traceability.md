@@ -132,7 +132,7 @@ Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 ## 6. Phase 8 最終監査（P0要件・AC × 設計・実装・テスト）
 
 分類: implemented / implemented with documented limitation（文書化された制限付き）/ not implemented。
-テスト階層: L1 unit / L2 fake-backend / L3 CLI契約（`cargo test`63件）/ L4 実機統合（tmp/phase7、S1〜S10全PASS）。
+テスト階層: L1 unit / L2 fake-backend / L3 CLI契約（`cargo test`63件）/ L4 実機統合（S1〜S10全PASS。harness・実行記録はrepo管理外の検証作業dirに残置）。
 
 | 要件（requirements.md） | 設計 | 実装 | 自動テスト | L4 | 分類 |
 |---|---|---|---|---|---|

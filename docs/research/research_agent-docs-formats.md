@@ -3,7 +3,7 @@
 - 調査日: 2026-08-24
 - 調査方法: 一次情報源（公式サイト・公式docs）の直接fetch + 補足web検索
 - 目的: coding agentがzelperを文法エラー・誤用なく使いこなせるための文書配布形態 (a) docs/配下agent向けガイド (b) Agent Skills/skill形式 (c) zelper docsサブコマンド (d) llms.txt (e) AGENTS.md の比較検討の基礎資料
-- 備考: 本ファイルはtmp/配下の作業資材（TASK-24相対）。恒久化する場合はdocs/配下へ再配置・要約の前提で整備する
+- 備考: 本ファイルは旧作業dir（repo管理外）の調査資材をMR-37で移設したもの
 
 ---
 
