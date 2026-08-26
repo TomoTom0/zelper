@@ -26,7 +26,8 @@ curl -LO https://github.com/TomoTom0/zelper/releases/latest/download/sha256sums.
 sha256sum -c sha256sums.txt
 tar xzf zelper-x86_64-unknown-linux-musl.tar.gz
 chmod +x zelper
-mv zelper ~/.local/bin/    # PATHの通ったdirへ
+mkdir -p ~/.local/bin   # 多くのdistroで、存在すればlogin時にPATHへ含まれる
+mv zelper ~/.local/bin/
 ```
 
 ### mise
