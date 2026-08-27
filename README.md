@@ -32,11 +32,13 @@ mv zelper ~/.local/bin/
 
 ### mise
 
-Linux x86_64向け（archiveが1つのみのためubiはplatform無判定で選択する。macOS/arm64では誤導入となる）
+Linux x86_64向け（archiveが1つのみのためplatform判定なしで選択される。macOS/arm64では誤導入となる）
 
 ```bash
-mise use -g ubi:TomoTom0/zelper
+mise use -g github:TomoTom0/zelper
 ```
+
+miseはsupply-chain保護（`minimum_release_age`、default 24h）により公開24h以内のreleaseをlatest解決から隠す。公開直後のversionをinstallする場合は`@0.1.0`のようにversionを固定する。
 
 ### 開発者向け
 
