@@ -38,5 +38,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-release-notes \
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
             zelper-x86_64-unknown-linux-musl.tar.gz sha256sums.txt
