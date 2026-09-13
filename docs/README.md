@@ -7,13 +7,14 @@
 - `design/` — 設計
   - `first/260821/` — 初回ハンドオフパッケージ（requirements.md / basic-design.md / development-plan.md / README.md）
   - `requirements-traceability.md` — Phase 2/8。要件分類とP0→DD章マップ、制約と設計指示
-  - `detailed-design.md` — Phase 3。DD-1〜DD-12（CLI grammar / domain / backend / output / 操作設計 / remap・resize algorithm / safety）
+  - `detailed-design.md` — Phase 3。DD-1〜DD-12（CLI grammar / domain / backend / output / 操作設計 / remap v2・resize algorithm / safety）
   - `design-review.md` — Phase 4 + TASK-31整備時レビュー。DR-1〜DR-10 / T31R-1〜9（設計）/ CR-1〜5（実装・codex）の指摘とdisposition
+  - `conditions-migration.md` — TASK-29。テスト構成のtest-structure skill準拠（条件書方式）への移行設計（15条件書・covers tag・verify script・5段階適用）。移行完了（2026-09-13・TASK-58第4段。進捗はtests/design/README.md）
 - `research/` — 調査
-  - `zellij-capabilities.md` — Phase 1成果物。zellij 0.44.3実機検証済み機能マトリクス、override-layout詳細、overflow実験結果、remap設計への帰結
+  - `zellij-capabilities.md` — Phase 1成果物（E6・remap v2 L4まで反映）。zellij 0.44.3実機検証済み機能マトリクス、override-layout詳細、overflow実験結果、Plugin APIによるcross-tab移動の実証（E6）とremap v2実機検証（L4 S-v2-1〜6）、remap設計への帰結
   - `research_agent-docs-formats.md` — TASK-24成果物。agent向け配布形式の標準・仕様調査（AGENTS.md / Agent Skills / Claude Code skills / llms.txt。出典付き）
 - `testing/` — テスト設計
-  - `test-plan.md` — Phase 5。テスト階層（unit / fake-backend / CLI契約 / podman統合）、remap計画行列R1〜R10、failure injection、JSON契約、preservation実証手法
+  - `test-plan.md` — Phase 5（2026-09-13条件書移行後は縮小版）。テスト階層と実行環境（L1〜L4・podman構成）、領域別仕様の対応表（条件定義の正本はtests/design/の条件書・R番号定義も移譲）、L4統合test（要件・harness・実施記録S1〜S11・S-v2-1〜6）、tests/構成、fail-first履歴
 - `usage/` — zelperの使い方・agent向け配布物（`zelper docs`の出力正本）
   - `README.md` — 配布物索引（出力コマンドとの対応）
   - `distribution.md` — 適用手順（ユーザー実行）・形式比較の結論・保守規則

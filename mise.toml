@@ -1,0 +1,7 @@
+[tasks.install]
+description = "Build and install zelper to ~/.cargo/bin (same as README dev install)"
+run = "cargo install --path . --force"
+
+[tasks.verify-conditions]
+description = "Verify tests/design conditions.toml (tag/coverage/schema/source_lines sync)"
+run = "uv run --no-project scripts/design/verify-conditions.py --strict-source --complete"

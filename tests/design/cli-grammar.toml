@@ -1,0 +1,121 @@
+# CLI文法・排他・PANESPEC・session解決・completion（src/cli.rs）の検証条件。出典: test-plan §2.1・§2.9（zellij不在はexcluded）・DD-1.3〜1.7・design-review §4.9
+# 対応test: tests/cli/list_read_send.rs（部分6件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+[meta]
+feature = "cli-grammar"
+source_file = "src/cli.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test cli_list_read_send"
+source_hash = "7d474b8a1a54533d13ef945453b25e1c38035859"
+note = ""
+
+[[condition]]
+id = "cli-grammar.session-auto-resolve-single-live-with-exited"
+source_lines = "tests/cli/list_read_send.rs:177"
+target_function = "session解決（resolve_session）"
+source = "docs/testing/test-plan.md §2.1（session解決: --session > env > 単一session > error（候補列出）の優先順） + docs/design/detailed-design.md DD-1.2（対象session解決: 実行中sessionが1つのときそれ。実行中はlist-sessions -nのEXITED行を除外して数える） + docs/design/design-review.md §4.9 TASK-44（EXITED session解決）"
+description = "対象session解決の優先順位のうち「実行中sessionが1つなら自動解決する」段: EXITED（resurrection待ちdead session）を行数から除外するため、EXITED混在環境でも実行中1件なら--session指定なしで操作系verbが成立する。session解決を必要とするverb（list tabs/panes・read/send等）共通の基盤"
+given = "list-sessions -n出力がEXITED 1件（dead-a）と実行中1件（live-a・current）のfake zellij shimに対し、--session指定とZELLIJ_SESSION_NAMEなしでzelper read 1を実行"
+expect_return = "exit 0（live-aへ解決しreadが成功）。検証限界: 複数実行中session時のerror（候補列出）と--session > env優先の各段は本条件では未検証（単一実行中の正例のみのassert）"
+
+[[condition]]
+id = "cli-grammar.send-requires-double-dash-text-is-usage-error"
+source_lines = "tests/cli/list_read_send.rs:338"
+target_function = "send構文（TEXTの--区切り）"
+source = "docs/testing/test-plan.md §2.1（非例の全パターン（DD-1.6非例）: exit 2 + usage error） + docs/design/detailed-design.md DD-1.3（sendのTEXTは--以降。targets（positional）とTEXTの区切りを構文で保証） + DD-1.6非例（zelper send 1 2 y # -- がないためusage error）"
+description = "sendのTEXTは--以降という構文規則の負荷側: --なしのoperandはTEXTと解釈せずusage error。positional PANESPEC群とTEXTの混同を構文で防ぐ（scriptingでの誤爆送信防止）"
+given = "zelper send 1 y（--なし）の実行"
+expect_return = "exit 2（usage error）"
+
+[[condition]]
+id = "cli-grammar.send-text-keys-conflict-is-usage-error"
+source_lines = "tests/cli/list_read_send.rs:345"
+target_function = "send排他規則（-- TEXT × --keys）"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: send text/keys併用） + docs/design/detailed-design.md DD-1.5（send: -- TEXT と --keys は相互排他）"
+description = "sendの送信内容指定（-- TEXT / --keys）の相互排他: 両方指定はusage error。text送信とkey送信という別経路（write-chars / send-keys）の混在指定を構文段で拒否する"
+given = "zelper send 1 --keys Enter -- y の実行（textとkeysの同時指定）"
+expect_return = "exit 2（usage error）"
+
+[[condition]]
+id = "cli-grammar.remap-layout-sources-conflict-is-usage-error"
+source_lines = "tests/cli/list_read_send.rs:355"
+target_function = "remap排他規則（layout 3source）"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: remap 3source併用） + docs/design/detailed-design.md DD-1.5（remap: positional layout名 / --path / --inline の3者は相互排他） + docs/design/first/260821/requirements.md §2.9（mutually exclusive source forms must be rejected when supplied together。同一原則はCLI全体へ適用）"
+description = "remapのlayout指定3形式（positional layout名 / --path / --inline）の相互排他: 複数同時指定はusage error。DD-1.6非例「zelper remap ./three.kdl」（pathのpositional渡し）と同じ排他機構の負荷側"
+given = "zelper remap three --path ./x.kdl の実行（positional layout名と--pathの同時指定）"
+expect_return = "exit 2（usage error）。検証限界: 2source（positional×--path）併用のみのassertであり、3source同時・残り組合せ（positional×--inline・--path×--inline）は未検証（同一の排他検査経路）"
+
+[[condition]]
+id = "cli-grammar.invalid-pane-spec-is-usage-error"
+source_lines = "tests/cli/list_read_send.rs:365"
+target_function = "PANESPEC parse"
+source = "docs/testing/test-plan.md §2.1（PANESPEC正規形: 3→terminal_3正規化、plugin_1受理、不正文字はexit 2） + docs/design/detailed-design.md DD-1.3（PANESPEC = pane IDのみ。terminal_3 / plugin_1 / bare 3。名前・path・その他の暗黙解釈はしない）"
+description = "PANESPECはpane IDのみという規則の負荷側: 接頭辞DSL等の不正文字はusage error。bare数値→terminal_N正規化はread-send.read-single-and-multi-results条件が検証（read 1 の結果target=terminal_1）。検証限界: plugin_1受理は未検証（excluded参照）"
+given = "zelper read pane:12 の実行（selector接頭辞DSL形式。DD-1.6非例）"
+expect_return = "exit 2（usage error）"
+
+[[condition]]
+id = "cli-grammar.completion-generates-script"
+source_lines = "tests/cli/list_read_send.rs:372"
+target_function = "completionサブコマンド"
+source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（clap_completeによる動的生成。stdoutへscript出力。verb・noun・一部の値を補完）"
+description = "completionサブコマンドがshell補完scriptをstdoutへ出力する。top-levelに許容される文書化された例外コマンド（DD-1.1）の動作保証"
+given = "zelper completion bash の実行"
+expect_return_shape = "exit 0かつstdoutが空でない補完script（zelperを含む・100 bytes超）。検証限界: zsh/fish種別の出力と補完候補の内容（verb一覧の正確さ）は未assert"
+
+[[excluded]]
+item = "zellij不在（PATHに存在しない）でZellijUnavailable exit 4となる実行pathの検証"
+source = "docs/testing/test-plan.md §2.9"
+reason = "未test。exit code対応はjson-contract.class-exit-mapping-full-tableで検証済みだが、process起動失敗の実pathは未検証。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "resizeのequalizeとgrow|shrink構文の併用拒否（排他規則の残り組合せ）"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: resize equalize × grow/shrink 等） + docs/design/detailed-design.md DD-1.5（resize: equalizeとgrow|shrink構文は相互排他）"
+reason = "未test。既存133 testにresizeの構文排他を検証するtest fnが存在しないため本移行では条件化できない（移行は新規testを作らない）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "PANESPECのplugin_1（plugin pane ID）受理"
+source = "docs/testing/test-plan.md §2.1（PANESPEC正規形: plugin_1受理） + docs/design/detailed-design.md DD-1.3（PANESPEC = terminal_3 / plugin_1 / bare 3）"
+reason = "未test。既存133 testにplugin pane IDをPANESPECへ渡すtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "DD-1.6非例の残り（zelper remap ./three.kdl（pathのpositional渡し）・zelper read --json --json（重複option））"
+source = "docs/testing/test-plan.md §2.1（非例の全パターン（DD-1.6非例）: exit 2 + usage error） + docs/design/detailed-design.md DD-1.6非例"
+reason = "未test。非例4件のうちpane:12とsend 1 2 yは条件化済み（invalid-pane-spec・send-requires-double-dash各条件）。実装の排他はconflicts_with_all（併用時発火）のため、remapへの単独positional path渡しはparseを通過しlayout名解決の失敗としてLayoutNotFound系（exit 7）になる見込み。--json重複の実際の挙動は未確認。新規test追加時に条件化する（tm起票済み。test化時に§2.1期待値（exit 2）と実装の突合が必要）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "session解決の残り段（--session NAME直接指定・ZELLIJ_SESSION_NAME環境変数・複数実行中session時のerror（候補列出））"
+source = "docs/testing/test-plan.md §2.1（session解決: --session > env > 単一session > error（候補列出）の優先順） + docs/design/detailed-design.md DD-1.2（対象session解決の優先順）"
+reason = "未test。既存133 testにこれらの段を検証するtest fnが存在しないため本移行では条件化できない（session-auto-resolve条件は実行中1つの自動解決の正例のみ）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "DD-1.6のverb例のうちL2 test担当分（rename/resize/add/remove）のCLI parse（L2 testはapp層関数の直呼びでありCLI引数parseを経由しない）"
+source = "docs/testing/test-plan.md §2.1（各verbの正常系: DD-1.6の全exampleがparseされ意図するtyped requestになる） + docs/design/detailed-design.md DD-1.6（例）"
+reason = "未test。test-plan §2.1の「各verb正常系parse」は各verbの条件書へ分散帰属するが、rename/add-remove/resizeのL2 testはrun_pane/run_tab/run_equalize等の関数直呼びでありparse経路を検証しない。read/send/listのL3 testはfake shim経由でparseを検証済み。新規test追加時にL3側へ条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "DD-1.5併用系の正例（--tab（絞り込み）と--allの併合（--tab内のall）・--dry-runと--yesの併用時の「--yesは無視される旨」注意出力（MR-30））"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ） + docs/design/detailed-design.md DD-1.5（--tabと--allは併合・--dry-runと--yesの併用は可） + docs/design/design-review.md §4.2 MR-30（--yes+--dry-run併用の注意行追加）"
+reason = "未test。既存133 testにこれらの併用正例・注意出力を検証するtest fnが存在しないため本移行では条件化できない（remove-pane-safety-gate条件は--yes併用dry-runの実行優先までを検証、注意出力は未assert）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "completionのzsh/fish種別の出力（bash以外のshell種別）"
+source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（completion bash等）"
+reason = "未test。completion-generates-script条件はbash種別のみのassertのため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"

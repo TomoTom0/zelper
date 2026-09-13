@@ -1,0 +1,81 @@
+# resize操作（src/app/resize.rs）の検証条件。出典: test-plan §2.6・DD-9・design-review §4.2 MR-5/MR-21
+# 対応test: tests/fake_backend/resize.rs（7件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+[meta]
+feature = "resize"
+source_file = "src/app/resize.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test fake_resize"
+source_hash = "3b9c20b6a3978ad3e9f643bb3c6eaa7c16882c56"
+note = ""
+
+[[condition]]
+id = "resize.grow-applies-steps-with-geometry-verification"
+source_lines = "tests/fake_backend/resize.rs:27"
+target_function = "resize::run_pane（grow/shrink）"
+source = "docs/testing/test-plan.md §2.6（grow/shrink: STEPS回のresize呼び出し） + docs/design/detailed-design.md DD-9 grow/shrink（実行: resize <increase|decrease> <dir> -pをSTEPS回。postcondition: 各step後にlist-panes -gでgeometry取得）"
+description = "growのstep実行: 指定STEPS回のresize呼び出しと、各step後のgeometry検証を経て最終geometryへ到達する。検証限界: grow Right方向のみのassertであり、shrink・left/up/down方向は未検証（同一のrun_pane経路・fakeはright/downの増減のみ模擬）"
+given = "cols=10のterminal_1が1件のFakeBackendに対するresize::run_pane(b, 1, grow=true, Right, steps=3)"
+expect_return = "Okかつresize呼び出しが3回・最終cols=40（fakeのGrow(Right)は1 step +10）"
+
+[[condition]]
+id = "resize.noop-stops-early-with-warning"
+source_lines = "tests/fake_backend/resize.rs:42"
+target_function = "resize::run_pane（no-op検出）"
+source = "docs/testing/test-plan.md §2.6（grow/shrink: no-op 2連続で打ち切り+warning） + docs/design/detailed-design.md DD-9 grow/shrink（変化なしが2回連続 → それ以上のstepを実行せず「これ以上変更不可」と報告（exit 0、warning）。no-opがあり得るため無検証の成功を返さない）"
+description = "growのno-op検出: resizeがgeometryを変えない系列（2連続no-op）でstepを打ち切り、errorにせずexit 0で完了する。検証限界: warning文面（これ以上変更不可）の出力とresize呼び出し回数（打ち切り自体の発生）は未assert（完了とgeometry不変のみ）"
+given = "titleにfrozenを含む（fakeでresize no-opになる）terminal_1に対するresize::run_pane(b, 1, grow=true, Right, steps=5)"
+expect_return = "Okかつ最終cols=10（不変）"
+
+[[condition]]
+id = "resize.equalize-same-row-converges"
+source_lines = "tests/fake_backend/resize.rs:52"
+target_function = "resize::run_equalize（収束）"
+source = "docs/testing/test-plan.md §2.6（equalize: 3 pane横並びfixtureで目標均等幅計算が正しい） + docs/design/detailed-design.md DD-9 equalize（対象が同一直線配置（横1列→cols均等）の場合は算術均等・偏差が1行/列以下で終了）"
+description = "equalizeの横1列収束: 対象pane群のcolsが偏差1以内へ均等化され、総面積（cols総和）が保存される。検証限界: 2 paneでのassertでありtest-plan §2.6の3 pane横並びは未検証（算術均等機構は同一）"
+given = "cols=10とcols=30の2 pane（同一行）のFakeBackendに対するresize::run_equalize(b, [1, 2], tab=None)"
+expect_return_shape = "Okかつcolsの偏差が1以内・cols総和=40（保存）"
+
+[[condition]]
+id = "resize.equalize-oscillation-terminates-no-infinite-loop"
+source_lines = "tests/fake_backend/resize.rs:69"
+target_function = "resize::run_equalize（反復上限・近似契約）"
+source = "docs/testing/test-plan.md §2.6（収束ループ: fakeが途中でno-opを返す系列→20 iteration上限での打ち切り・報告 / 不可能目標（振動する幾何）→打ち切り+notes付きで成功（DD-9の近似契約。MR-5で確定）/ 無限ループ禁止の保証: 反復上限とno-op検出の両方が機能するケースを1テストで固定） + docs/design/detailed-design.md DD-9 equalize（最大20 iteration・完全均等を保証しない・反復上限とno-op検出により無限ループは構造的に不存在）"
+description = "equalizeの近似契約と無限ループ禁止: 均等化不能な幾何（10刻みresizeで均等化不能な合計25）でも反復上限とno-op検出により必ず正常完了する。達成geometryは不問・notesは出力側（CMR-5: §2.6の収束ループ3要求〔no-op系列打ち切り・不可能目標の成功・無限ループ禁止保証〕を1条件に統合）。検証限界: notes付き報告の内容は未assert（正常完了のみ）"
+given = "cols=10とcols=15の2 pane（同一行・合計25は10刻みで均等化不能→振動）のFakeBackendに対するresize::run_equalize(b, [1, 2], tab=None)"
+expect_return = "Ok（完了。幾何は不問）"
+
+[[condition]]
+id = "resize.equalize-missing-pane-and-cross-tab-rejected"
+source_lines = "tests/fake_backend/resize.rs:82"
+target_function = "resize::run_equalize（対象検証）"
+source = "docs/testing/test-plan.md §2.6 + docs/design/design-review.md §4.2 MR-21（equalizeのpositional不在ID黙除去・異tab混在無検証・expectパニック経路の修正: NoTarget/Preflight error化・Result化） + docs/design/detailed-design.md DD-9 equalize（1. 対象（--tab または PANESPEC群）のtiled pane群のgeometryを取得）"
+description = "equalizeの対象検証: 不在pane IDは黙って除外せずNoTarget、異tab混在は（resize操作のtab内性が保てないため）Preflight。MR-21回帰（CMR-5: 不在IDと異tab混在を1条件に統合）"
+given = "terminal_1・terminal_2が存在する状態でのrun_equalize(b, [1, 99])と、同一tabの2 paneをtab_id 0/1へ分けた状態でのrun_equalize(b, [1, 2])の各実行"
+expect_return = "前者はErr（ErrorClass=NoTarget）。後者はErr（ErrorClass=Preflight）"
+
+[[condition]]
+id = "resize.equalize-requires-targets"
+source_lines = "tests/fake_backend/resize.rs:105"
+target_function = "resize::run_equalize（対象必須）"
+source = "docs/design/detailed-design.md DD-1.2（resize equalize [--tab TABSPEC | PANESPEC...]。対象指定は構文上必須） + DD-9 equalize（対象のtiled pane群） + DD-4.3（Usage = exit 2）"
+description = "equalizeは--tab/PANESPECいずれかの対象指定を要求する: 対象なしはusage error。tabを対象とした一括resizeの誤爆防止"
+given = "空のFakeBackendに対するresize::run_equalize(b, [], tab=None)"
+expect_return = "Err（ErrorClass=Usage）"
+
+[[condition]]
+id = "resize.equalize-rejects-floating"
+source_lines = "tests/fake_backend/resize.rs:113"
+target_function = "resize::run_equalize（floating除外）"
+source = "docs/design/detailed-design.md DD-9 equalize（1. 対象のtiled pane群のgeometryをlist-panesで取得（floating paneは対象外））"
+description = "equalizeの対象はtiled paneに限る: floating pane指定は対象外としてPreflight失敗（黙って除外しない）。tiled幾何計算の前提固定"
+given = "is_floating=trueのterminal_1が1件のFakeBackendに対するresize::run_equalize(b, [1], tab=None)"
+expect_return = "Err（ErrorClass=Preflight）"
+
+[[excluded]]
+item = "equalizeの--tab TABSPEC指定（tab解決による対象選択）"
+source = "docs/design/detailed-design.md DD-1.2（resize equalize [--tab TABSPEC | PANESPEC...]） + DD-9 equalize（1. 対象（--tab または PANESPEC群））"
+reason = "未test。既存133 testに--tab指定のequalizeを検証するtest fnが存在しないため本移行では条件化できない（既存7件はすべてPANESPEC群指定）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"

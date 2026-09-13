@@ -1,191 +1,173 @@
-use crate::cli::OverflowMode;
 use crate::domain::{LayoutRef, PaneKindId, PaneState, TabId};
 use crate::error::{ErrorClass, ZelperError};
 use crate::layout;
-use crate::zellij::{LayoutSpec, NewTabSpec, OverrideSpec, ZellijBackend};
-use std::collections::BTreeMap;
+use crate::layout::generator::{SlotRun, generate_instance_kdl_v2};
+use crate::zellij::{LayoutSpec, OverrideSpec, ZellijBackend};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
-/// remap計画（DD-10）。plannerは純粋関数（fake backendなしで検証可能）。
+/// polling定数（DD-10.7）: 250ms間隔・10s deadline（list-panes再取得で条件判定）
+const POLL_INTERVAL: Duration = Duration::from_millis(250);
+const POLL_DEADLINE: Duration = Duration::from_secs(10);
+
+// ---------------------------------------------------------------------------
+// planner（DD-10.6）
+// ---------------------------------------------------------------------------
+
+/// remap v2計画（DD-10.6）。対象はsession全pane（selectable・tiled・terminal）。
+/// M pane + N slot layout -> k = max(1, ceil(M/N)) instance反復で全paneを配置。
+/// 全paneプロセス保存・kill/restartなし（M>N error廃止）。
 #[derive(Debug, Clone, PartialEq)]
-pub struct RemapPlan {
-    pub tab: TabId,
-    pub tab_name: String,
+pub struct V2Plan {
+    /// slot数（layout最初のtab subtreeの末端terminal slot数）
     pub n_slots: usize,
-    pub mode: PlanMode,
-    pub instances: Vec<InstancePlan>,
+    /// source pane数
+    pub m: usize,
+    /// instance数 = max(1, ceil(M/N))
+    pub k: usize,
+    /// instance 0のtab（既定 = active tab。--tab指定時はそのtab。DD-10.5/10.6）
+    pub anchor: TabId,
+    /// instance tab名の接頭（layout名 / --pathのfile stem / "remap"（--inline））
+    pub base: String,
+    pub instances: Vec<V2InstancePlan>,
+    /// preflight warning（DD-10.13: pane_commandに `"` / `\` を含むpane等。実行は可）
+    pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlanMode {
-    /// M <= N: 単一instance・全pane保存
-    Fill,
-    /// M > N + nest: 単一instance・全pane保存・形状不保証
-    Nest,
-    /// M > N + tabs: layout反復・overflow paneは再作成
-    Tabs,
-}
-
+/// instance jの割当（j=0 は anchor tab。tab名は保持・renameしない。
+/// j>=1 は新規tab `<base>-<j+1>`）
 #[derive(Debug, Clone, PartialEq)]
-pub struct InstancePlan {
+pub struct V2InstancePlan {
     pub index: usize,
-    /// slot -> pane（tabs modeのinstance >= 1はpreserved=false）
-    pub assignments: Vec<Assignment>,
-    /// 空slot数（bare pane = 既定shellで埋まる）
+    pub assignments: Vec<V2Assignment>,
+    /// 空slot数（既定shellで埋まる。最終instanceにのみ発生）
     pub empty_slots: usize,
 }
 
+/// slot割当1件。全paneがpreserved（kill/restartは存在しないため区別fieldは持たない）
 #[derive(Debug, Clone, PartialEq)]
-pub struct Assignment {
+pub struct V2Assignment {
     pub slot: usize,
     pub pane: PaneKindId,
-    pub preserved: bool,
-    pub command_argv: Vec<String>,
-    pub cwd: Option<String>,
+    /// 注入run。pane_commandがSomeならSome(空白分割argv)・None（shell pane）ならNone
+    pub run: Option<Vec<String>>,
 }
 
-/// planner（DD-10.3）。source: visual orderのremap対象pane列。
-pub fn plan(
-    tab: TabId,
-    tab_name: &str,
+/// v2 planner（DD-10.6）。純粋関数（fake backendなしで検証可能）。
+/// sourceはselectable・tiledなterminal pane列（visual order未整列でもよい。
+/// plannerが (tab_position, pane_y, pane_x) 昇順に割当順を固定する）。
+/// 割当: source visual orderのpane index i（0開始）→ instance j = floor(i/N)・
+/// slot = i % N。N=0はLayoutInvalid。
+///
+/// 決定論性の保証範囲（DD-10.6 (i)〜(iii)）: group（instance/tab）所属と、run
+/// （command+args）に一意なpaneのslot対応は決定論的。同一runの複数pane間・複数
+/// shell pane（run=None）間のslot順は保証外（zellijのrun一致照合がrun等価なpaneを
+/// 互いに区別しないための、要件の決定論性からの明示例外）
+pub fn plan_v2(
     source: &[PaneState],
     n_slots: usize,
-    overflow: Option<OverflowMode>,
-) -> Result<RemapPlan, ZelperError> {
-    let m = source.len();
+    anchor: TabId,
+    base: &str,
+) -> Result<V2Plan, ZelperError> {
     if n_slots == 0 {
         return Err(ZelperError::new(
             ErrorClass::LayoutInvalid,
             "layout has no terminal pane slots",
         ));
     }
-    if m <= n_slots {
-        // fill mode: 既存M paneがslotに配置され、残りN-Mは既定shell
-        let assignments = source
-            .iter()
-            .enumerate()
-            .map(|(i, p)| Assignment {
-                slot: i,
+    let mut sorted: Vec<&PaneState> = source.iter().collect();
+    sorted.sort_by_key(|p| p.visual_key());
+    let m = sorted.len();
+    let k = m.div_ceil(n_slots).max(1);
+    let mut warnings = Vec::new();
+    let mut instances = Vec::with_capacity(k);
+    for j in 0..k {
+        let start = j * n_slots;
+        let end = m.min(start + n_slots);
+        let mut assignments = Vec::with_capacity(end - start);
+        for (slot, p) in sorted[start..end].iter().enumerate() {
+            // pane_commandがSomeなら単語1つのshell起動paneでも注入する（DD-10.8）
+            let run = p
+                .command
+                .as_ref()
+                .map(|c| c.split_whitespace().map(str::to_string).collect());
+            if let Some(cmd) = &p.command
+                && needs_quoting_warning(cmd)
+            {
+                // 空白分割でquoteが復元できずrun一致が外れるためwarning（実行は可。
+                // DD-10.13。(b)検証のpane数==Nが重複spawnとして検出する）
+                warnings.push(format!(
+                    "pane {} pane_command {:?} contains quotes, backslashes, newlines or \
+control characters; whitespace split cannot restore quoting and slot matching may miss",
+                    p.id.as_spec(),
+                    cmd
+                ));
+            }
+            assignments.push(V2Assignment {
+                slot,
                 pane: p.id,
-                preserved: true,
-                command_argv: Vec::new(),
-                cwd: None,
-            })
-            .collect();
-        return Ok(RemapPlan {
-            tab,
-            tab_name: tab_name.to_string(),
-            n_slots,
-            mode: PlanMode::Fill,
-            instances: vec![InstancePlan {
-                index: 0,
-                assignments,
-                empty_slots: n_slots - m,
-            }],
+                run,
+            });
+        }
+        instances.push(V2InstancePlan {
+            index: j,
+            assignments,
+            empty_slots: n_slots - (end - start),
         });
     }
-
-    // M > N
-    match overflow {
-        None => Err(ZelperError::new(
-            ErrorClass::Preflight,
-            format!(
-                "layout has {n_slots} slots but {m} panes are selected. \
-Zellij cannot preserve overflow panes across tabs (verified experimentally). \
-Pass --overflow nest (preserve all panes, layout shape not guaranteed) \
-or --overflow tabs (repeat the layout on new tabs; overflow panes are closed and their commands restarted)"
-            ),
-        )),
-        Some(OverflowMode::Nest) => {
-            let assignments = source
-                .iter()
-                .enumerate()
-                .map(|(i, p)| Assignment {
-                    slot: i.min(n_slots - 1),
-                    pane: p.id,
-                    preserved: true,
-                    command_argv: Vec::new(),
-                    cwd: None,
-                })
-                .collect();
-            Ok(RemapPlan {
-                tab,
-                tab_name: tab_name.to_string(),
-                n_slots,
-                mode: PlanMode::Nest,
-                instances: vec![InstancePlan {
-                    index: 0,
-                    assignments,
-                    empty_slots: 0,
-                }],
-            })
-        }
-        Some(OverflowMode::Tabs) => {
-            let instances_count = m.div_ceil(n_slots);
-            let mut instances = Vec::new();
-            for j in 0..instances_count {
-                let start = j * n_slots;
-                let end = m.min(start + n_slots);
-                let mut assignments = Vec::new();
-                for (k, p) in source[start..end].iter().enumerate() {
-                    assignments.push(Assignment {
-                        slot: k,
-                        pane: p.id,
-                        preserved: j == 0,
-                        command_argv: if j == 0 {
-                            Vec::new()
-                        } else {
-                            shell_aware_argv(p)
-                        },
-                        cwd: if j == 0 { None } else { p.cwd.clone() },
-                    });
-                }
-                instances.push(InstancePlan {
-                    index: j,
-                    assignments,
-                    empty_slots: n_slots - (end - start),
-                });
-            }
-            Ok(RemapPlan {
-                tab,
-                tab_name: tab_name.to_string(),
-                n_slots,
-                mode: PlanMode::Tabs,
-                instances,
-            })
-        }
-    }
+    Ok(V2Plan {
+        n_slots,
+        m,
+        k,
+        anchor,
+        base: base.to_string(),
+        instances,
+        warnings,
+    })
 }
 
-/// pane_command文字列の空白分割（DD-10.3制限: 引用は失われる）。
-/// shellのみ（argv長1かつshell名）はbare pane扱い（空vec）。
-fn shell_aware_argv(p: &PaneState) -> Vec<String> {
-    let Some(cmd) = &p.command else {
-        return Vec::new();
-    };
-    let argv: Vec<String> = cmd.split_whitespace().map(|s| s.to_string()).collect();
-    if argv.len() == 1
-        && matches!(
-            argv[0].as_str(),
-            "/bin/sh" | "sh" | "/bin/bash" | "bash" | "zsh" | "fish"
-        )
-    {
-        return Vec::new();
-    }
-    argv
-}
+// ---------------------------------------------------------------------------
+// 実行（DD-10.7全体）
+// ---------------------------------------------------------------------------
 
-/// remap実行（DD-10全体）
+/// remap実行引数
 pub struct RemapArgs<'a> {
     pub layout: Option<&'a str>,
     pub path: Option<&'a std::path::Path>,
     pub inline: Option<&'a str>,
     pub tab: Option<&'a str>,
-    pub session_scope: bool,
-    pub overflow: Option<OverflowMode>,
     pub embed_floating: bool,
     pub dry_run: bool,
     pub json: bool,
 }
+
+/// pane_commandの空白分割でrunが壊れうる文字を含むか（DD-10.13 preflight warning条件。
+/// `"`・`'`・`\`・改行・制御文字。実行は可）
+fn needs_quoting_warning(cmd: &str) -> bool {
+    cmd.contains('"')
+        || cmd.contains('\'')
+        || cmd.contains('\\')
+        || cmd.chars().any(char::is_control)
+}
+
+/// nonce連番（実行毎に一意なprobe titleのための後付けエントロピー。DD-10.3）
+static NONCE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn new_nonce() -> String {
+    let seq = NONCE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}-{seq}-{}", std::process::id())
+}
+
+/// 権限hint（DD-10.4。probe不成立・移動polling timeout時に付与）
+const PERMISSION_HINT: &str = "the companion plugin may lack permissions: the \
+permissions.kdl seed may not be picked up by a session started before seeding, the \
+permission dialog may be pending, or the plugin protocol may be incompatible \
+(proven combination: zellij 0.44.3 + zellij-tile 0.44.3 only). restart the session \
+after seeding, or grant permissions to the companion plugin manually, then re-run";
 
 pub fn run(backend: &dyn ZellijBackend, args: &RemapArgs) -> Result<(), ZelperError> {
     let spec = LayoutSpec {
@@ -201,478 +183,632 @@ pub fn run(backend: &dyn ZellijBackend, args: &RemapArgs) -> Result<(), ZelperEr
         _ => unreachable!(),
     };
 
-    if args.session_scope {
-        // DD-10.2: 各tabに独立適用（cross-tab統合は提供しない）
-        let tabs = backend.list_tabs()?;
-        for t in tabs.iter().filter(|t| t.selectable_tiled_panes_count > 0) {
-            run_on_tab(backend, &layout_ref, t.id, args)?;
-        }
-        return Ok(());
-    }
-    // 対象tab解決（--tab省略時はactive tab。以降の処理はactive tabに依存しない）
-    let target = match args.tab {
-        Some(raw) => {
-            let tabs = backend.list_tabs()?;
-            crate::selector::resolve_tab(raw, &tabs)?
-        }
+    // 1. snapshot（DD-10.7 step 1。報告・復旧用。dry-runは表示のみのため省略）
+    let panes_now = backend.list_panes()?;
+    let tabs_now = backend.list_tabs()?;
+    let snapshot_len = if args.dry_run {
+        0
+    } else {
+        backend.dump_layout()?.len()
+    };
+
+    // 2. anchor id（step 2。list-tabs直前取得・直後に消費。DD-2）
+    //    --tab TABSPEC時は対象tabのsource絞り込みとanchorの両方に使う（DD-10.5）
+    let anchor = match args.tab {
+        Some(raw) => crate::selector::resolve_tab(raw, &tabs_now)?,
         None => backend.current_tab()?.id,
     };
-    run_on_tab(backend, &layout_ref, target, args)
-}
 
-fn run_on_tab(
-    backend: &dyn ZellijBackend,
-    layout_ref: &LayoutRef,
-    target: TabId,
-    args: &RemapArgs,
-) -> Result<(), ZelperError> {
-    // dry-runはbackendの状態を一切変更しない（DD-12）ためtab切替も行わない。
-    // 実行時のみ対象tabをactive化し、元のactive tabを実行後に復帰する（DD-10.2）
-    let restore_tab = if !args.dry_run {
-        let current = backend.current_tab()?;
-        if current.id != target {
-            backend.go_to_tab(target)?;
-            Some(current.id)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let result = execute_on_tab(backend, layout_ref, target, args);
-
-    if let Some(t) = restore_tab {
-        let _ = backend.go_to_tab(t); // 復帰失敗は操作失敗に加えない（best-effort）
+    // 3. layout解決・slot数N（状態変更前に失敗しうる検証をすべて済ませる）
+    let kdl_text = layout::load_kdl(&layout_ref)?;
+    let doc = layout::parse(&kdl_text)?;
+    let base_sub = layout::base_subtree(&doc);
+    let n_slots = layout::count_terminal_slots(&base_sub);
+    if n_slots == 0 {
+        return Err(ZelperError::new(
+            ErrorClass::LayoutInvalid,
+            "layout has no terminal pane slots",
+        ));
     }
-    result
-}
 
-fn execute_on_tab(
-    backend: &dyn ZellijBackend,
-    layout_ref: &LayoutRef,
-    target: TabId,
-    args: &RemapArgs,
-) -> Result<(), ZelperError> {
-    // 1. preflight: 現状取得（対象tabは引数で確定済み。active tabに依存しない）
-    let panes_now = backend.list_panes()?;
-    let tabs = backend.list_tabs()?;
-    let tab = tabs.iter().find(|t| t.id == target).ok_or_else(|| {
-        ZelperError::new(ErrorClass::NoTarget, format!("tab {0} not found", target.0))
-    })?;
-
-    let floating: Vec<_> = panes_now
+    // 4. source（scope = 既定でsession全体。--tab時はそのtab。DD-10.5）
+    let in_scope = |p: &PaneState| args.tab.is_none() || p.tab_id == anchor;
+    let floating: Vec<PaneState> = panes_now
         .iter()
-        .filter(|p| p.tab_id == target && p.is_floating && p.is_selectable)
+        .filter(|p| {
+            p.is_floating
+                && p.is_selectable
+                && matches!(p.id, PaneKindId::Terminal(_))
+                && in_scope(p)
+        })
+        .map(|p| (*p).clone())
         .collect();
     if !floating.is_empty() && !args.embed_floating {
-        let ids: Vec<_> = floating.iter().map(|p| p.id.as_spec()).collect();
+        let ids: Vec<String> = floating.iter().map(|p| p.id.as_spec()).collect();
         return Err(ZelperError::with_candidates(
             ErrorClass::Preflight,
             format!(
-                "tab has {} floating pane(s); remap would destroy them. \
-Use --embed-floating to convert them to tiled (processes preserved) first",
+                "scope has {} floating pane(s) which remap cannot move (unverified for \
+break panes); use --embed-floating to convert them to tiled first (processes preserved)",
                 floating.len()
             ),
             ids,
         ));
     }
-
-    // 2. layout解決・slot数。Nは「適用対象 = 先頭tab」のslot数とする
-    //    （override-layout --apply-only-to-active-tab はlayoutの先頭tabのみ適用する。
-    //     実機help確認済み。全tab合計で数えるとoverflow判定が狂う）
-    //    状態を変更する操作（floating paneのtiled化）より前に失敗しうる
-    //    検証をすべて済ませる（layout miss/invalid・plan errorが状態変更後に起こらないように）
-    let kdl_text = layout::load_kdl(layout_ref)?;
-    let doc = layout::parse(&kdl_text)?;
-    let base = layout::base_subtree(&doc);
-    let n_slots = layout::count_terminal_slots(&base);
-
-    // 3. source（visual order）。--embed-floatingのfloating paneはtiled化「予定」として
-    //    計画に含める。toggle前のsnapshotから仮想的に含めるため、dry-runと実行が
-    //    同じ計画になる
+    // --embed-floatingのfloating paneはtiled化「予定」として計画に含める。toggle前の
+    // snapshotから仮想的に含めるため、dry-runと実行が同じ計画になる（MR-1/MR-34）
     let mut source: Vec<PaneState> = panes_now
         .iter()
         .filter(|p| {
-            p.tab_id == target
+            in_scope(p)
                 && (p.is_remap_source()
-                    || (args.embed_floating
-                        && p.is_floating
-                        && p.is_selectable
-                        && matches!(p.id, PaneKindId::Terminal(_))))
+                    || (args.embed_floating && floating.iter().any(|f| f.id == p.id)))
         })
         .map(|p| (*p).clone())
         .collect();
     source.sort_by_key(|p| p.visual_key());
 
-    // 4. plan（これも状態変更前）
-    let p = plan(target, &tab.name, &source, n_slots, args.overflow)?;
-    let plan_json = plan_to_json(&p);
+    // 5. plan（これも状態変更前）
+    let base_name = match &layout_ref {
+        LayoutRef::Name(n) => n.clone(),
+        LayoutRef::Path(p) => p
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "remap".to_string()),
+        LayoutRef::Inline(_) => "remap".to_string(),
+    };
+    let plan = plan_v2(&source, n_slots, anchor, &base_name)?;
+    for w in &plan.warnings {
+        eprintln!("warning: {w}");
+    }
 
+    // 6. dry-runはplan出力のみで一切の状態変更を行わない（DD-10.10）
     if args.dry_run {
+        let kdls = instance_kdls(&plan, &base_sub)?;
         if args.json {
             println!(
                 "{}",
-                crate::output::json::ok(serde_json::json!({ "dry_run": true, "plan": plan_json }))
+                crate::output::json::ok(dry_run_json(&plan, &source, &kdls))
             );
         } else {
-            print_plan_human(&p);
+            print_dry_run_human(&plan, &source, &kdls, &tabs_now);
         }
         return Ok(());
     }
 
-    // 5. floating paneをtiled化（全検証通過後の初めての状態変更。
-    //    dry-runはここに到達しない = 状態を一切変更しない DD-12）
-    if !floating.is_empty() {
-        for fp in &floating {
-            backend.toggle_embed_floating(&fp.id)?;
-        }
-    }
+    execute(
+        backend,
+        args,
+        &plan,
+        &source,
+        &base_sub,
+        snapshot_len,
+        &floating,
+    )
+}
 
-    // 6. 実行
-    let layout_spec = LayoutSpec {
-        name: matches!(layout_ref, LayoutRef::Name(_)).then(|| match layout_ref {
-            LayoutRef::Name(n) => n.clone(),
-            _ => unreachable!(),
-        }),
-        path: matches!(layout_ref, LayoutRef::Path(_)).then(|| match layout_ref {
-            LayoutRef::Path(p) => p.clone(),
-            _ => unreachable!(),
-        }),
-        inline: matches!(layout_ref, LayoutRef::Inline(_)).then(|| match layout_ref {
-            LayoutRef::Inline(s) => s.clone(),
-            _ => unreachable!(),
-        }),
-    };
-    let snapshot = backend.dump_layout()?;
+/// instance jの移動前のsource pane所属tab（break-id対象・break-new完了条件に使用）
+fn source_tab_of(source: &[PaneState], pane: PaneKindId) -> Option<TabId> {
+    source.iter().find(|p| p.id == pane).map(|p| p.tab_id)
+}
 
-    // tabs modeの進捗（部分適用報告に使用）
-    let mut created_tabs: Vec<(usize, TabId)> = Vec::new();
+/// 実行sequenceの移動phase以降（DD-10.7 step 3〜7。preflight完了後の呼び出し）。
+/// `floating`: preflightで特定した--embed-floating対象のselectable floating terminal
+/// pane列（toggleはこのID集合のみ。probe自動launchのnon-selectableなcompanion plugin
+/// paneはDD-10.3/10.5により対象外）
+fn execute(
+    backend: &dyn ZellijBackend,
+    args: &RemapArgs,
+    plan: &V2Plan,
+    source: &[PaneState],
+    base_sub: &kdl::KdlDocument,
+    snapshot_len: usize,
+    floating: &[PaneState],
+) -> Result<(), ZelperError> {
+    let anchor = plan.anchor;
 
-    let exec_result: Result<(), ZelperError> = (|| {
-        match p.mode {
-            PlanMode::Fill | PlanMode::Nest => {
-                backend.override_layout(&OverrideSpec {
-                    source: layout_spec,
-                    apply_only_to_active_tab: true,
-                    retain_terminal: true,
-                    retain_plugin: true,
-                })?;
-            }
-            PlanMode::Tabs => {
-                // 4a. overflow paneをclose（kill。明示flagによる同意）
-                let overflow_ids: Vec<String> = p
-                    .instances
-                    .iter()
-                    .skip(1)
-                    .flat_map(|i| i.assignments.iter().map(|a| a.pane.as_spec()))
-                    .collect();
-                for inst in p.instances.iter().skip(1) {
-                    for a in &inst.assignments {
-                        backend.close_pane(&a.pane).map_err(|e| {
-                            partial(
-                                &format!("closing overflow pane {}", a.pane.as_spec()),
-                                e,
-                                &created_tabs,
-                            )
-                        })?;
-                    }
-                }
-                let _ = overflow_ids;
-                // 4b. instance 0: 対象tabへ適用
+    // --- step 3: companion setup（移動が必要な場合のみ。DD-10.3/10.4） ---
+    // 移動が不要ならprobeもpluginも不使用（remapはcompanion pluginなしで完結する）
+    let group0_outbound: Vec<PaneKindId> = plan.instances[0]
+        .assignments
+        .iter()
+        .filter(|a| source_tab_of(source, a.pane) != Some(anchor))
+        .map(|a| a.pane)
+        .collect();
+    let move_needed = plan.k > 1 || !group0_outbound.is_empty();
+    let wasm = if move_needed {
+        let path = crate::companion::ensure_companion_wasm()?;
+        crate::companion::ensure_permissions(
+            &crate::companion::permissions_path()?,
+            &path.to_string_lossy(),
+            None,
+        )?;
+        // probe pipe: 状態変更前の応答性・権限確認（設計レビューR3）。
+        // probe不成立（timeout）は一切の状態変更前に中断する
+        let nonce = new_nonce();
+        let want_title = format!("zelper-probe-{nonce}");
+        backend.pipe_plugin(&path, "probe", &nonce).map_err(|e| {
+            ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!(
+                    "probe pipe did not complete; no session state was changed. {e}. \
+{PERMISSION_HINT}"
+                ),
+            )
+        })?;
+        poll(
+            || {
                 backend
-                    .override_layout(&OverrideSpec {
-                        source: layout_spec,
-                        apply_only_to_active_tab: true,
-                        retain_terminal: true,
-                        retain_plugin: true,
-                    })
-                    .map_err(|e| partial("applying layout to the target tab", e, &created_tabs))?;
-                // 4c. instance >= 1: 新規tab生成 + rename
-                let base_name = match layout_ref {
-                    LayoutRef::Name(n) => n.clone(),
-                    _ => "remap".to_string(),
-                };
-                for inst in p.instances.iter().skip(1) {
-                    let mut slot_cmds: BTreeMap<usize, layout::SlotCommand> = BTreeMap::new();
-                    for a in &inst.assignments {
-                        if !a.command_argv.is_empty() || a.cwd.is_some() {
-                            slot_cmds.insert(
-                                a.slot,
-                                layout::SlotCommand {
-                                    command_argv: a.command_argv.clone(),
-                                    cwd: a.cwd.clone(),
-                                },
-                            );
-                        }
-                    }
-                    let tab_name = format!("{base_name}-{}", inst.index + 1);
-                    let kdl = layout::generate_instance_kdl(&base, &tab_name, &slot_cmds).map_err(
-                        |e| {
-                            partial(
-                                &format!("generating KDL for instance {}", inst.index),
-                                e,
-                                &created_tabs,
-                            )
-                        },
-                    )?;
-                    let new_tab = backend
-                        .new_tab(&NewTabSpec {
-                            name: None, // KDL側のtab nameを使用
-                            cwd: None,
-                            layout: Some(LayoutSpec {
-                                name: None,
-                                path: None,
-                                inline: Some(kdl),
-                            }),
-                            command: vec![],
-                        })
-                        .map_err(|e| {
-                            partial(
-                                &format!("creating tab for instance {}", inst.index),
-                                e,
-                                &created_tabs,
-                            )
-                        })?;
-                    backend.rename_tab(new_tab, &tab_name).map_err(|e| {
-                        partial(
-                            &format!("renaming instance tab {}", inst.index),
-                            e,
-                            &created_tabs,
-                        )
-                    })?;
-                    created_tabs.push((inst.index, new_tab));
-                }
-            }
-        }
-        Ok(())
-    })();
-
-    exec_result?;
-
-    // 5. 検証（DD-10.4）。tabs modeはinstance毎に「そのtabの中」で検証する
-    //    （session全体のcommand一致検索は同command paneとの交差matchを生むため）
-    let after = backend.list_panes()?;
-    let mut mapping: Vec<serde_json::Value> = Vec::new();
-    let mut missing: Vec<String> = Vec::new();
-    match p.mode {
-        PlanMode::Fill | PlanMode::Nest => {
-            for inst in &p.instances {
-                for a in &inst.assignments {
-                    let alive = after.iter().any(|q| q.id == a.pane);
-                    mapping.push(serde_json::json!({
-                        "pane": a.pane.as_spec(), "preserved": true, "alive": alive,
-                    }));
-                    if !alive {
-                        missing.push(a.pane.as_spec());
-                    }
-                }
-            }
-        }
-        PlanMode::Tabs => {
-            // instance 0: 対象tab内で保存検証
-            for a in &p.instances[0].assignments {
-                let alive = after.iter().any(|q| q.id == a.pane && q.tab_id == target);
-                mapping.push(serde_json::json!({
-                    "pane": a.pane.as_spec(), "preserved": true, "alive": alive,
-                }));
-                if !alive {
-                    missing.push(a.pane.as_spec());
-                }
-            }
-            // instance >= 1: 作成tab内で pane数 + command一致を検証
-            for (index, tab_id) in &created_tabs {
-                let panes_in_tab: Vec<&PaneState> =
-                    after.iter().filter(|q| q.tab_id == *tab_id).collect();
-                let tiled_count = panes_in_tab.iter().filter(|q| q.is_remap_source()).count();
-                let expected_slots = p.n_slots;
-                let count_ok = tiled_count == expected_slots;
-                if !count_ok {
-                    missing.push(format!("instance {index} tab: expected {expected_slots} tiled panes, found {tiled_count}"));
-                }
-                let inst = p
-                    .instances
-                    .iter()
-                    .find(|i| i.index == *index)
-                    .expect("instance");
-                for a in &inst.assignments {
-                    let found = if a.command_argv.is_empty() {
-                        // shell paneはbare paneで再現される: command None or 既定shell
-                        panes_in_tab.iter().any(|q| {
-                            q.command.is_none() || is_shell(q.command.as_deref().unwrap_or(""))
-                        })
-                    } else {
-                        let argv = a.command_argv.join(" ");
-                        panes_in_tab.iter().any(|q| {
-                            q.command
-                                .as_deref()
-                                .map(|c| c.contains(&argv))
-                                .unwrap_or(false)
-                        })
-                    };
-                    mapping.push(serde_json::json!({
-                        "old_pane": a.pane.as_spec(), "preserved": false, "restarted_match": found,
-                    }));
-                    if !found {
-                        // 再作成されなかったcommandは検証失敗（ok:trueのまま成功扱いにしない）
-                        missing.push(format!(
-                            "instance {index}: command not restarted for {}",
-                            a.pane.as_spec()
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    // 検証結果出力。JSON時は成功のみここでenvelopeを出し、失敗時は出力しない
-    // （mainがerror.data付きの単一error envelopeを出す。stdoutに2つのJSON documentが
-    //  並び、単一response契約を破るのを防ぐ）
-    if missing.is_empty() {
-        if args.json {
-            let env = serde_json::json!({
-                "schema_version": crate::output::json::SCHEMA_VERSION,
-                "ok": true,
-                "data": { "mode": format!("{:?}", p.mode), "mapping": mapping,
-                          "snapshot_len": snapshot.len() },
-            });
-            println!("{env}");
-        } else {
-            for m in &mapping {
-                println!("{m}");
-            }
-        }
-        return Ok(());
-    }
-    if !args.json {
-        for m in &mapping {
-            println!("{m}");
-        }
-    }
-    Err(ZelperError::new(
-        ErrorClass::VerificationFailed,
-        format!("remap verification failed: {missing:?}"),
-    )
-    .with_data(serde_json::json!({
-        "mode": format!("{:?}", p.mode),
-        "mapping": mapping,
-        "missing": missing,
-        "snapshot_len": snapshot.len(),
-    })))
-}
-
-fn is_shell(cmd: &str) -> bool {
-    matches!(
-        cmd,
-        "/bin/sh" | "sh" | "/bin/bash" | "bash" | "zsh" | "fish"
-    )
-}
-
-/// 実行途中失敗時に、実行済みの状態をerror messageに載せる（DD-10.5・DD-12）
-fn partial(step: &str, e: ZelperError, created_tabs: &[(usize, TabId)]) -> ZelperError {
-    let applied = if created_tabs.is_empty() {
-        "instances: 0 applied".to_string()
+                    .list_panes()
+                    .map(|ps| ps.iter().any(|p| p.title == want_title))
+                    .map(|hit| hit.then_some(()))
+            },
+            || {
+                ZelperError::new(
+                    ErrorClass::OperationFailed,
+                    format!(
+                        "probe not observed within 10s (companion plugin did not respond); \
+no session state was changed. {PERMISSION_HINT}"
+                    ),
+                )
+            },
+        )?;
+        Some(path)
     } else {
-        format!(
-            "instances: 0..={} applied (tabs {:?})",
-            created_tabs.last().map(|(i, _)| *i).unwrap_or(0),
-            created_tabs.iter().map(|(_, t)| t.0).collect::<Vec<_>>()
-        )
+        None
     };
+
+    // --- step 4: --embed-floating時のtiled化（最初の状態変更。DD-10.5） ---
+    // 対象はpreflightで特定したselectable floating terminal pane（ID基準。DD-2）。
+    // probeの自動launchで現れるcompanion plugin pane（non-selectable）はtoggleしない
+    for fp in floating {
+        backend.toggle_embed_floating(&fp.id)?;
+    }
+
+    // --- step 5: 移動phase（plugin pipeはfire-and-forget。効果はpollingで確認） ---
+    let mut targets: Vec<TabId> = Vec::with_capacity(plan.k);
+    targets.push(anchor);
+
+    // 5-a. group 0のanchor外paneをbreak-idでanchorへ。
+    //      group 0のinboundを後続groupのoutboundより先に行う（anchorが一時的に空に
+    //      なり自動closeする事態を構造的に排除する不変条件。DD-10.7 5-a）
+    if !group0_outbound.is_empty() {
+        let ids = group0_outbound
+            .iter()
+            .map(|p| p.as_spec())
+            .collect::<Vec<_>>()
+            .join(",");
+        let payload = format!("{} {ids}", anchor.0);
+        let wasm = wasm.as_deref().expect("move needed implies companion wasm");
+        backend
+            .pipe_plugin(wasm, "break-id", &payload)
+            .map_err(|e| move_pipe_error("break-id", 0, e, plan))?;
+        let group0: Vec<PaneKindId> = plan.instances[0]
+            .assignments
+            .iter()
+            .map(|a| a.pane)
+            .collect();
+        poll(
+            || {
+                let done = backend
+                    .list_panes()?
+                    .iter()
+                    .filter(|p| group0.contains(&p.id))
+                    .all(|p| p.tab_id == anchor);
+                Ok(done.then_some(()))
+            },
+            || move_timeout_error("break-id", 0, plan),
+        )?;
+    }
+
+    // 5-b. j>=1はbreak-newで新規tabへ。完了条件 = pane id基準のmembership一致
+    //     （tab id再利用に耐える特定方法。DD-10.7 5-b）
+    for inst in plan.instances.iter().skip(1) {
+        let j = inst.index;
+        let ids: Vec<PaneKindId> = inst.assignments.iter().map(|a| a.pane).collect();
+        // 移動前の所属tab（source snapshot時点）: 完了条件で「移動がまだ」を弁別する
+        // ために使う（移動前からmembership一致しているだけのtabを誤認しない）
+        let pre_tabs: Vec<Option<TabId>> = ids.iter().map(|p| source_tab_of(source, *p)).collect();
+        let payload = ids
+            .iter()
+            .map(|p| p.as_spec())
+            .collect::<Vec<_>>()
+            .join(",");
+        let wasm = wasm.as_deref().expect("k>1 implies companion wasm");
+        backend
+            .pipe_plugin(wasm, "break-new", &payload)
+            .map_err(|e| move_pipe_error("break-new", j, e, plan))?;
+        let target = poll(
+            || {
+                let panes = backend.list_panes()?;
+                let mut tabs: Vec<TabId> = Vec::with_capacity(ids.len());
+                for (i, p) in ids.iter().enumerate() {
+                    let Some((tab, _)) = q_lookup(&panes, *p) else {
+                        return Ok(None); // pane消失はpolling継続（timeoutで報告）
+                    };
+                    if Some(tab) == pre_tabs[i] {
+                        return Ok(None); // まだ移動していない
+                    }
+                    tabs.push(tab);
+                }
+                if tabs.iter().any(|t| *t != tabs[0]) {
+                    return Ok(None); // 同一tabに集まっていない
+                }
+                let candidate = tabs[0];
+                Ok(membership_matches(&panes, candidate, &ids).then_some(candidate))
+            },
+            || move_timeout_error("break-new", j, plan),
+        )?;
+        // 直後にrename-tab-by-idで命名（break-newのname引数は不使用。DD-10.2 #8）
+        let name = format!("{}-{}", plan.base, j + 1);
+        backend
+            .rename_tab(target, &name)
+            .map_err(|e| partial_phase(j, "renaming instance tab", e, &targets, plan))?;
+        targets.push(target);
+    }
+
+    // --- step 6: layout適用phase（生成KDLを各instance tabへ。DD-10.7 6） ---
+    let kdls = instance_kdls(plan, base_sub)?;
+    for (j, kdl) in kdls.iter().enumerate() {
+        backend
+            .go_to_tab(targets[j])
+            .map_err(|e| partial_phase(j, "focusing instance tab", e, &targets, plan))?;
+        backend
+            .override_layout(&OverrideSpec {
+                source: LayoutSpec {
+                    name: None,
+                    path: None,
+                    inline: Some(kdl.clone()),
+                },
+                apply_only_to_active_tab: true,
+                retain_terminal: true,
+                retain_plugin: true,
+            })
+            .map_err(|e| partial_phase(j, "applying layout", e, &targets, plan))?;
+    }
+
+    // --- step 7: 検証 → anchor tabへfocus復帰（best-effort。DD-10.9/10.7 7） ---
+    let result = verify(backend, args, plan, &targets, snapshot_len);
+    let _ = backend.go_to_tab(anchor); // 復帰失敗は操作失敗に含めない（R42）
+    result
+}
+
+fn q_lookup(panes: &[PaneState], pane: PaneKindId) -> Option<(TabId, bool)> {
+    panes
+        .iter()
+        .find(|q| q.id == pane)
+        .map(|q| (q.tab_id, q.is_remap_source()))
+}
+
+/// tabのselectable tiled terminal pane集合 == group（pane id基準のmembership一致）
+fn membership_matches(panes: &[PaneState], tab: TabId, ids: &[PaneKindId]) -> bool {
+    let in_tab: Vec<PaneKindId> = panes
+        .iter()
+        .filter(|p| p.tab_id == tab && p.is_remap_source())
+        .map(|p| p.id)
+        .collect();
+    in_tab.len() == ids.len() && ids.iter().all(|p| in_tab.contains(p))
+}
+
+/// polling（DD-10.7: 250ms間隔・10s deadline）。条件は最初に評価するため、
+/// 即座に成立する場合はsleepしない。成立時に条件値（例: 新規tab id）を返す。
+/// deadlineは条件評価（list_panes等のbackend呼出）の所要時間を含めて保証する:
+/// 呼出し後にdeadlineを再検査し、超過後の条件成立は成立扱いにしない（遅延実行を
+/// 成功と誤認しない）。sleepは残時間を超えない
+fn poll<T>(
+    mut cond: impl FnMut() -> Result<Option<T>, ZelperError>,
+    timeout: impl FnOnce() -> ZelperError,
+) -> Result<T, ZelperError> {
+    let deadline = Instant::now() + POLL_DEADLINE;
+    loop {
+        let hit = cond()?;
+        if Instant::now() >= deadline {
+            return Err(timeout());
+        }
+        if let Some(v) = hit {
+            return Ok(v);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(POLL_INTERVAL));
+    }
+}
+
+fn move_pipe_error(op: &str, j: usize, e: ZelperError, plan: &V2Plan) -> ZelperError {
     ZelperError::new(
         e.class().clone(),
         format!(
-            "remap failed at step '{step}': {}. partial state: {applied}; remaining instances were not created (no rollback performed)",
-            e.message()
+            "move phase failed at '{op}' for group {j}: {}. {}. partial state: moved \
+groups 0..{}, not moved: groups {}..{} (no rollback performed; panes survive)",
+            e.message(),
+            PERMISSION_HINT,
+            j.saturating_sub(1),
+            j,
+            plan.k.saturating_sub(1)
         ),
     )
 }
 
-fn plan_to_json(p: &RemapPlan) -> serde_json::Value {
+fn move_timeout_error(op: &str, j: usize, plan: &V2Plan) -> ZelperError {
+    ZelperError::new(
+        ErrorClass::OperationFailed,
+        format!(
+            "timed out waiting for '{op}' effect on group {j}: moved groups 0..{}, not \
+moved: groups {j}..{} (panes survive). note: a piped command may be delayed and still \
+execute server-side after the CLI fails, so state may change later. {PERMISSION_HINT}",
+            j.saturating_sub(1),
+            plan.k.saturating_sub(1)
+        ),
+    )
+}
+
+/// 実行途中失敗時に、実行済み/失敗/未実行の区分をerror messageに載せる（DD-10.11）
+fn partial_phase(
+    j: usize,
+    step: &str,
+    e: ZelperError,
+    targets: &[TabId],
+    plan: &V2Plan,
+) -> ZelperError {
+    ZelperError::new(
+        e.class().clone(),
+        format!(
+            "remap failed at {step} of instance {j}: {}. partial state: instances 0..={} \
+applied (tabs {:?}), failed at instance {j}, not executed: instances {}..{} (no rollback \
+performed; panes survive on their assigned tabs, only the layout shape is unapplied)",
+            e.message(),
+            j.saturating_sub(1),
+            targets.iter().map(|t| t.0).collect::<Vec<_>>(),
+            j + 1,
+            plan.k.saturating_sub(1)
+        ),
+    )
+}
+
+/// 各instanceの生成KDL（DD-10.8。slot -> runの写像を文書順で組み立てる）
+fn instance_kdls(plan: &V2Plan, base_sub: &kdl::KdlDocument) -> Result<Vec<String>, ZelperError> {
+    plan.instances
+        .iter()
+        .map(|inst| {
+            let runs: Vec<SlotRun> = (0..plan.n_slots)
+                .map(|slot| {
+                    inst.assignments
+                        .iter()
+                        .find(|a| a.slot == slot)
+                        .and_then(|a| a.run.clone())
+                })
+                .collect();
+            generate_instance_kdl_v2(base_sub, &runs)
+        })
+        .collect()
+}
+
+/// postcondition検証（DD-10.9）。失敗時は単一error（--jsonはmainがerror envelope）
+fn verify(
+    backend: &dyn ZellijBackend,
+    args: &RemapArgs,
+    plan: &V2Plan,
+    targets: &[TabId],
+    snapshot_len: usize,
+) -> Result<(), ZelperError> {
+    let after = backend.list_panes()?;
+    let tabs_after = backend.list_tabs()?;
+    let mut mapping: Vec<serde_json::Value> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+
+    // (a) 全source pane idが生存し、割当instanceのtabに所属（pane id基準）
+    for (j, inst) in plan.instances.iter().enumerate() {
+        let target = targets[j];
+        for a in &inst.assignments {
+            let found = after.iter().find(|p| p.id == a.pane);
+            let ok = found.map(|p| p.tab_id == target).unwrap_or(false);
+            mapping.push(serde_json::json!({
+                "pane": a.pane.as_spec(), "instance": j, "slot": a.slot,
+                "tab": target.0, "preserved": true, "alive": ok,
+            }));
+            if !ok {
+                missing.push(format!(
+                    "pane {} expected on instance {j} tab {}, found {}",
+                    a.pane.as_spec(),
+                    target.0,
+                    found
+                        .map(|p| format!("tab {}", p.tab_id.0))
+                        .unwrap_or_else(|| "gone".to_string())
+                ));
+            }
+        }
+        // (b) 各instance tabのselectable tiled terminal pane数 == N
+        //     （command照合missによる重複spawn・未照合paneの入れ子残留を検出）
+        let count = after
+            .iter()
+            .filter(|p| p.tab_id == target && p.is_remap_source())
+            .count();
+        if count != plan.n_slots {
+            missing.push(format!(
+                "instance {j} tab {}: expected {} selectable tiled panes, found {count}",
+                target.0, plan.n_slots
+            ));
+        }
+        // (c) 新規tab名が <base>-<j+1> どおり。target tab自身のIDと名前を対応付けて
+        //     検証する（同名tabの存在のみでは競合・後続変更を見逃す。tab id照合は
+        //     id再利用回避のため補助のみで、pane id基準の(a)が主検証）
+        if j >= 1 {
+            let want = format!("{}-{}", plan.base, j + 1);
+            match tabs_after.iter().find(|t| t.id == target) {
+                Some(t) if t.name == want => {}
+                Some(t) => missing.push(format!(
+                    "instance {j} tab {} named {:?}, expected {want}",
+                    target.0, t.name
+                )),
+                None => missing.push(format!("instance {j} tab {} missing after remap", target.0)),
+            }
+        }
+    }
+    // (c) 続き: tab一覧にanchorが残存
+    if !tabs_after.iter().any(|t| t.id == plan.anchor) {
+        missing.push(format!("anchor tab {} missing after remap", plan.anchor.0));
+    }
+
+    if !missing.is_empty() {
+        // --json時は成功envelopeを出さず、mapping/missingをerror.dataに載せた
+        // 単一のerror envelopeをmainから出す（stdoutに2つのJSON documentが並ぶのを防ぐ）
+        return Err(ZelperError::new(
+            ErrorClass::VerificationFailed,
+            format!("remap verification failed: {}", missing.join("; ")),
+        )
+        .with_data(serde_json::json!({
+            "m": plan.m, "n": plan.n_slots, "k": plan.k,
+            "mapping": mapping, "missing": missing, "snapshot_len": snapshot_len,
+        })));
+    }
+    if args.json {
+        println!(
+            "{}",
+            crate::output::json::ok(serde_json::json!({
+                "m": plan.m, "n": plan.n_slots, "k": plan.k,
+                "mapping": mapping,
+                "tabs": targets.iter().enumerate().map(|(j, t)| serde_json::json!({
+                    "index": j, "id": t.0, "name": if j == 0 {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(format!("{}-{}", plan.base, j + 1))
+                    },
+                })).collect::<Vec<_>>(),
+                "snapshot_len": snapshot_len,
+            }))
+        );
+    } else {
+        println!(
+            "remap: {} pane(s) preserved into {} instance(s) of {} slot(s)",
+            plan.m, plan.k, plan.n_slots
+        );
+        for m in &mapping {
+            println!("{m}");
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// dry-run出力（DD-10.10）
+// ---------------------------------------------------------------------------
+
+/// dry-runの--json data（R48/R49: source一覧・M/N/k・割当表・生成KDL preview・操作列）
+fn dry_run_json(plan: &V2Plan, source: &[PaneState], kdls: &[String]) -> serde_json::Value {
     serde_json::json!({
-        "mode": format!("{:?}", p.mode),
-        "n_slots": p.n_slots,
-        "operations": plan_operations(p),
-        "instances": p.instances.iter().map(|i| serde_json::json!({
-            "index": i.index,
-            "empty_slots": i.empty_slots,
-            "assignments": i.assignments.iter().map(|a| serde_json::json!({
-                "slot": a.slot, "pane": a.pane.as_spec(), "preserved": a.preserved,
-                "command": if a.command_argv.is_empty() { serde_json::Value::Null } else { serde_json::json!(a.command_argv.join(" ")) },
-            })).collect::<Vec<_>>(),
+        "dry_run": true,
+        "m": plan.m, "n": plan.n_slots, "k": plan.k,
+        "anchor": plan.anchor.0, "base": plan.base,
+        "source": source.iter().map(|p| serde_json::json!({
+            "pane": p.id.as_spec(), "title": p.title,
+            "tab_id": p.tab_id.0, "tab_name": p.tab_name, "tab_position": p.tab_position,
+            "command": p.command,
         })).collect::<Vec<_>>(),
+        "instances": plan.instances.iter().zip(kdls).map(|(inst, kdl)| serde_json::json!({
+            "index": inst.index,
+            "empty_slots": inst.empty_slots,
+            "assignments": inst.assignments.iter().map(|a| serde_json::json!({
+                "slot": a.slot, "pane": a.pane.as_spec(), "preserved": true,
+                "run": a.run.as_ref().map(|v| v.join(" ")).unwrap_or_default(),
+            })).collect::<Vec<_>>(),
+            "kdl": kdl,
+        })).collect::<Vec<_>>(),
+        "operations": plan_operations(plan, source),
     })
 }
 
-fn print_plan_human(p: &RemapPlan) {
+fn print_dry_run_human(
+    plan: &V2Plan,
+    source: &[PaneState],
+    kdls: &[String],
+    tabs: &[crate::domain::TabState],
+) {
+    let anchor_name = tabs
+        .iter()
+        .find(|t| t.id == plan.anchor)
+        .map(|t| t.name.as_str())
+        .unwrap_or("?");
     println!(
-        "[plan] mode={:?} slots={} instances={}",
-        p.mode,
-        p.n_slots,
-        p.instances.len()
+        "[plan] remap layout base=\"{}\" slots={} panes={} instances={} anchor=tab {} ({})",
+        plan.base, plan.n_slots, plan.m, plan.k, plan.anchor.0, anchor_name
     );
-    for i in &p.instances {
+    println!("[plan] source (visual order):");
+    for p in source {
         println!(
-            "[plan] instance {} (tab: {})",
-            i.index,
-            if i.index == 0 {
-                p.tab_name.clone()
-            } else {
-                format!("{}-{}", p.tab_name, i.index + 1)
+            "[plan]   {} (tab {} \"{}\"){}",
+            p.id.as_spec(),
+            p.tab_id.0,
+            p.tab_name,
+            match &p.command {
+                Some(c) => format!(" cmd: {c}"),
+                None => String::new(),
             }
         );
-        for a in &i.assignments {
-            let kind = if a.preserved { "preserve" } else { "recreate" };
+    }
+    for (inst, kdl) in plan.instances.iter().zip(kdls) {
+        let tab_desc = if inst.index == 0 {
+            format!("anchor {}", anchor_name)
+        } else {
+            format!("{}-{}", plan.base, inst.index + 1)
+        };
+        println!("[plan] instance {} (tab: {})", inst.index, tab_desc);
+        for a in &inst.assignments {
             println!(
-                "[plan]   slot {} <- {} ({}){}",
+                "[plan]   slot {} <- {} (preserve){}",
                 a.slot,
                 a.pane.as_spec(),
-                kind,
-                if a.command_argv.is_empty() {
-                    String::new()
-                } else {
-                    format!(" cmd={}", a.command_argv.join(" "))
+                match &a.run {
+                    Some(argv) => format!(" run: {}", argv.join(" ")),
+                    None => String::new(),
                 }
             );
         }
-        if i.empty_slots > 0 {
-            println!("[plan]   {} empty slot(s) -> default shell", i.empty_slots);
+        if inst.empty_slots > 0 {
+            println!(
+                "[plan]   {} empty slot(s) -> default shell",
+                inst.empty_slots
+            );
+        }
+        println!("[plan] generated KDL preview (instance {}):", inst.index);
+        for line in kdl.lines() {
+            println!("[plan]   {line}");
         }
     }
     println!("[plan] planned backend operations:");
-    for op in plan_operations(p) {
+    for op in plan_operations(plan, source) {
         println!("[plan]   {op}");
     }
 }
 
-/// dry-runに表示する実行予定backend操作列（DD-10.4 (d)）
-fn plan_operations(p: &RemapPlan) -> Vec<String> {
+/// 実行予定backend操作列（種別表示。DD-10.10 (e)。R50）
+fn plan_operations(plan: &V2Plan, source: &[PaneState]) -> Vec<String> {
+    let group0_outbound: Vec<String> = plan.instances[0]
+        .assignments
+        .iter()
+        .filter(|a| source_tab_of(source, a.pane) != Some(plan.anchor))
+        .map(|a| a.pane.as_spec())
+        .collect();
     let mut ops = Vec::new();
-    if p.mode == PlanMode::Tabs {
-        let overflow: Vec<String> = p
-            .instances
-            .iter()
-            .skip(1)
-            .flat_map(|i| i.assignments.iter().map(|a| a.pane.as_spec()))
-            .collect();
+    if plan.k > 1 || !group0_outbound.is_empty() {
+        ops.push("companion setup (wasm extract + permissions.kdl seed)".to_string());
+        ops.push("probe pipe (companion plugin responsiveness check)".to_string());
+    }
+    if !group0_outbound.is_empty() {
         ops.push(format!(
-            "close-pane {} (overflow, destructive)",
-            overflow.join(" ")
+            "break pipe: break-id {} {}",
+            plan.anchor.0,
+            group0_outbound.join(",")
         ));
     }
-    ops.push(
-        "override-layout --apply-only-to-active-tab --retain-existing-terminal-panes --retain-existing-plugin-panes"
-            .to_string(),
-    );
-    if p.mode == PlanMode::Tabs {
-        for i in p.instances.iter().skip(1) {
-            ops.push(format!(
-                "new-tab (layout instance {}) + rename-tab \"{}-{}\"",
-                i.index,
-                p.tab_name,
-                i.index + 1
-            ));
-        }
+    for inst in plan.instances.iter().skip(1) {
+        let ids: Vec<String> = inst.assignments.iter().map(|a| a.pane.as_spec()).collect();
+        ops.push(format!("break pipe: break-new {}", ids.join(",")));
+        ops.push(format!("rename tab {}-{}", plan.base, inst.index + 1));
+    }
+    for inst in &plan.instances {
+        ops.push(format!(
+            "go-to tab + override-layout (instance {})",
+            inst.index
+        ));
     }
     ops
 }

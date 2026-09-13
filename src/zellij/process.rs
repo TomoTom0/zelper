@@ -34,8 +34,13 @@ impl ZellijCliBackend {
 
     /// 生のaction呼び出し
     fn run_action(&self, args: &[&str]) -> Result<String, ZelperError> {
+        self.run_action_as(&self.session, args)
+    }
+
+    /// session名を明示するaction呼び出し（list_tabs_for用）
+    fn run_action_as(&self, session: &str, args: &[&str]) -> Result<String, ZelperError> {
         let full: Vec<String> = std::iter::once("--session".to_string())
-            .chain(std::iter::once(self.session.clone()))
+            .chain(std::iter::once(session.to_string()))
             .chain(std::iter::once("action".to_string()))
             .chain(args.iter().map(|s| s.to_string()))
             .collect();
@@ -130,6 +135,11 @@ impl ZellijBackend for ZellijCliBackend {
 
     fn list_tabs(&self) -> Result<Vec<TabState>, ZelperError> {
         let out = self.run_action(&["list-tabs", "-a", "--json"])?;
+        parser::parse_tabs(&out)
+    }
+
+    fn list_tabs_for(&self, session: &str) -> Result<Vec<TabState>, ZelperError> {
+        let out = self.run_action_as(session, &["list-tabs", "-a", "--json"])?;
         parser::parse_tabs(&out)
     }
 
@@ -325,19 +335,39 @@ impl ZellijBackend for ZellijCliBackend {
         self.run_action(&["toggle-pane-embed-or-floating", "-p", &p])?;
         Ok(())
     }
+
+    fn pipe_plugin(
+        &self,
+        path: &std::path::Path,
+        name: &str,
+        payload: &str,
+    ) -> Result<(), ZelperError> {
+        // action pipe --plugin file:<path> --name <name> -- <payload>（DD-10.3）。
+        // 権限dialog pending等でblockし得るためrun_actionのtimeoutが必須。
+        // 効果の成否は戻り値に現れない（成功時に即座exit 0）ため、callerが
+        // polling + postcondition検証で判定する
+        let plugin = format!("file:{}", path.display());
+        self.run_action(&["pipe", "--plugin", &plugin, "--name", name, "--", payload])?;
+        Ok(())
+    }
 }
 
-/// 起動時のversion/可用性チェック（DD-3.5）
+/// 起動時のversion/可用性チェック（DD-3.5 compatibility policy）。
+/// 実行時要件はzellij >=0.44.3。実証済み組合せはzellij 0.44.3 + zellij-tile 0.44.3
+/// のみのため、0.44.x系列を超える未来version（0.45.0等）も受け付けない
 pub fn check_capability(backend: &dyn ZellijBackend) -> Result<(), ZelperError> {
     let out = backend.version()?;
     match parser::parse_version(&out) {
-        Some(v) if v.0 > MIN_SUPPORTED.0 => Err(ZelperError::new(
-            ErrorClass::UnsupportedVersion,
-            format!(
-                "zellij {}.{}.{} is from a newer major version; this zelper supports the {}.x series",
-                v.0, v.1, v.2, MIN_SUPPORTED.0
-            ),
-        )),
+        Some(v) if v.0 > MIN_SUPPORTED.0 || (v.0 == MIN_SUPPORTED.0 && v.1 > MIN_SUPPORTED.1) => {
+            Err(ZelperError::new(
+                ErrorClass::UnsupportedVersion,
+                format!(
+                    "zellij {}.{}.{} is unverified; only zellij 0.44.3 is a proven \
+combination (zellij 0.44.3 + zellij-tile 0.44.3)",
+                    v.0, v.1, v.2
+                ),
+            ))
+        }
         Some(v) if v >= MIN_SUPPORTED => Ok(()),
         Some(v) => Err(ZelperError::new(
             ErrorClass::UnsupportedVersion,

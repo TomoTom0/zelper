@@ -1,0 +1,91 @@
+# remap CLI契約（src/app/remap.rs: 廃止flag・version gate・dry-run出力）の検証条件。出典: test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側・DD-12・design-review §4.7/§4.8
+# 対応test: tests/cli/remap.rs（8件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# fake zellij shimをtest実行時に生成する（実zellijに依存しない。L3）
+[meta]
+feature = "remap-cli"
+source_file = "src/app/remap.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test cli_remap"
+source_hash = "588b2fb3bc89f175275abf4d25f37f47329174d4"
+note = "廃止flag・version gateは src/cli.rs・src/zellij/process.rs も検証対象"
+
+[[condition]]
+id = "remap-cli.r43-removed-flags-are-usage-error-exit2"
+source_lines = "tests/cli/remap.rs:101"
+target_function = "remap CLI parse（廃止option）"
+source = "docs/testing/test-plan.md §2.7 (g) R43（--overflow nest / --overflow tabs / --session-scope はusage error（exit 2）。remap本体は実行されない） + docs/design/detailed-design.md DD-1.2/1.5・DD-10.2 #11・DD-12 + docs/design/design-review.md §4.8（TASK-43: 廃止optionの即時削除）"
+description = "廃止optionの拒否: v0.1.xで削除済みの --overflow nest / --overflow tabs / --session-scope の指定はusage error（exit 2）でremap本体は実行されない。stdoutには何も出ず、usage errorはstderrへ出る"
+given = "3-pane fixture（M=N=3・k=1）のfake zellij shimで、remap --inline <3-slot layout> に各廃止optionを付けて実行"
+expect_return = "いずれもexit 2・stdout空・stderrにusage error"
+
+[[condition]]
+id = "remap-cli.r44-removed-flag-json-keeps-stdout-empty"
+source_lines = "tests/cli/remap.rs:130"
+target_function = "remap CLI parse（廃止option × --json）"
+source = "docs/testing/test-plan.md §2.7 (g) R44（--json併用時もstdoutには何も出ない（usage errorはclap経由でstderrのみ。単一envelope契約を破るstdout出力は存在しない）） + docs/design/detailed-design.md DD-4・DD-12"
+description = "廃止optionと--jsonの併用: usage errorはclap経由でstderrのみに出て、stdoutは空のまま（--json時でもerror envelopeではなくclap usage error。単一envelope契約を破るstdout出力は存在しない）"
+given = "remap --inline <layout> --session-scope --json の実行"
+expect_return = "exit 2・stdout空・stderrにusage error"
+
+[[condition]]
+id = "remap-cli.r45-removed-flags-absent-from-help"
+source_lines = "tests/cli/remap.rs:151"
+target_function = "remap CLI help（廃止optionの非表示）"
+source = "docs/testing/test-plan.md §2.7 (g) R45（当該optionはclap helpに出現しない） + docs/design/detailed-design.md DD-1.2・DD-12 + docs/design/design-review.md §4.6 R6（clap側のhelp非表示化を固定するtest要件）"
+description = "廃止optionのhelp非表示: remap --help に --overflow・--session-scope は出現せず、廃止対象外のoption（--embed-floating）は見える"
+given = "remap --help の実行"
+expect_return = "exit 0。helpに--overflow・--session-scopeを含まず--embed-floatingを含む"
+
+[[condition]]
+id = "remap-cli.r46-below-minimum-and-future-series-exit4"
+source_lines = "tests/cli/remap.rs:171"
+target_function = "version gate（zellij --version判定）"
+source = "docs/testing/test-plan.md §2.7 (h) R46（zellij <0.44.3（0.44.2 / 0.43.1）→ UnsupportedVersion exit 4。実証済み0.44.x系列超過（0.45.0等）も同様） + docs/design/detailed-design.md DD-3.1（最小サポート0.44.3）・DD-3.5（compatibility policy）"
+description = "version gateの拒否範囲: 最小0.44.3未満（0.44.2・0.43.1）と実証済み0.44.x系列超過（0.45.0）の両方をUnsupportedVersion（exit 4）で拒否する"
+given = "fake zellij shimの--version応答を 0.44.2 / 0.43.1 / 0.45.0 に差し替えたremap --inline <layout> の各実行"
+expect_return = "いずれもexit 4"
+
+[[condition]]
+id = "remap-cli.r48-dry-run-json-reports-source-mnk-and-partition"
+source_lines = "tests/cli/remap.rs:187"
+target_function = "remap dry-run（--json出力）"
+source = "docs/testing/test-plan.md §2.7 (i) R48（source一覧（visual order・現在tab付き）・M/N/k・pane割当表（全件preserved・empty slot数）を出力） + docs/design/detailed-design.md DD-10.10 (a)(b)(c)"
+description = "dry-run --jsonの計画報告: source一覧4件（visual order）・M=4/N=3/k=2・割当表（全4 paneがassignmentsに載る・instance 1はempty_slots=2）を出す。成功envelope（ok:true・schemaに沿うdata）。検証限界: source一覧は4件という件数のみassertであり、visual order順序・現在tab付きの表示内容は未assert"
+given = "4 pane / 2 tab fixture（M=4, N=3 → k=2）のfake zellij shimで remap --inline <3-slot layout> --dry-run --json を実行"
+expect_return_shape = "JSONでok=true・data.m=4・data.n=3・data.k=2・data.sourceが4件・data.instancesが2 instanceでassignments合計4件・instance 1のempty_slots=2"
+
+[[condition]]
+id = "remap-cli.r49-dry-run-shows-kdl-preview-per-instance"
+source_lines = "tests/cli/remap.rs:219"
+target_function = "remap dry-run（生成KDL preview）"
+source = "docs/testing/test-plan.md §2.7 (i) R49（生成KDL preview（instance毎。humanは [plan] block・--jsonは instances[].kdl）） + docs/design/detailed-design.md DD-10.10 (d)"
+description = "dry-runの生成KDL preview: --jsonは各instanceのkdl文字列（3-slotのpane nodeを含む）をinstances[].kdlへ載せ、human形式は [plan] blockとして出す（CMR-5統合: json形式とhuman形式を1条件に統合）"
+given = "4 pane / 2 tab fixtureで remap --inline <3-slot layout> --dry-run --json と --dry-run（human）の各実行"
+expect_return_shape = "--jsonは2 instanceの各kdlが3-slotの生成KDL（paneの出現3回以上）。humanはstdoutに [plan] blockを含む"
+
+[[condition]]
+id = "remap-cli.r50-dry-run-lists-planned-operation-kinds"
+source_lines = "tests/cli/remap.rs:253"
+target_function = "remap dry-run（操作列種別表示）"
+source = "docs/testing/test-plan.md §2.7 (i) R50（実行予定backend操作列の種別表示（companion setup・probe pipe・break pipe・rename・go-to・override）） + docs/design/detailed-design.md DD-10.10 (e)"
+description = "dry-runの操作列種別表示: 実行予定のbackend操作種別（companion・probe・break・rename・go-to・override）を表示する。M=4/N=3/k=2では全種別が計画に現れる（floatingの計画一致はremap-sequence.r50がL2で検証）"
+given = "4 pane / 2 tab fixtureで remap --inline <3-slot layout> --dry-run（human）を実行"
+expect_return_shape = "stdoutにcompanion・probe・break・rename・go-to・overrideの全種別が現れる"
+
+[[condition]]
+id = "remap-cli.both-removed-flags-together-still-usage-error"
+source_lines = "tests/cli/remap.rs:274"
+target_function = "remap CLI parse（廃止option同時指定）"
+source = "docs/design/design-review.md §4.7 C7（TASK-39レビュー: --session-scopeと--overflowの同時指定でwarningが2行出る → 統合。関連: docs/testing/test-plan.md §2.7 (g) R43（両flag同時指定を含む）） + docs/design/design-review.md §4.8（TASK-43: option削除によりwarning統合問題は消滅。同時指定もusage error）"
+description = "廃止option同時指定の拒否（C7回帰）: --session-scopeと--overflow tabsの同時指定（--json併用含む）も単一のusage error（exit 2）で拒否される。旧warning出力の統合問題はoption削除で消滅しており、stdoutには何も出ない"
+given = "remap --inline <layout> --session-scope --overflow tabs --json の実行"
+expect_return = "exit 2・stdout空"
+
+[[excluded]]
+item = "未実証組合せ（zellij 0.44.4以降・新series）での実機確認"
+source = "docs/testing/test-plan.md §2.11"
+reason = "L4任意・tile pin更新とセットで実施（P1）。安全網（probe R30/R31・postcondition R37〜R41）はL2条件として条件化済み"
+decided_at = "2026-09-13"
+decided_by = "human"

@@ -1,5 +1,5 @@
 use clap::Parser;
-use zelper::cli::{Cli, Verb};
+use zelper::cli::{Cli, ListResource, Verb};
 use zelper::error::ZelperError;
 use zelper::zellij::ZellijBackend;
 use zelper::zellij::process::{ZellijCliBackend, check_capability};
@@ -64,9 +64,22 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
             resource,
             tab,
             json,
+            compact,
         } => {
-            let backend = mk_backend(&cli)?;
-            zelper::app::list::run(backend.as_ref(), *resource, tab.as_deref(), *json)
+            // Sessions/Layoutsは対象session解決を必要としない（一覧表示自体が目的で、
+            // EXITED混在・複数実行中でも表示できるべき）。Tabs/Panesは対象sessionが必要。
+            // Sessionsはzellijを呼ぶため起動時capability gateは他verbと同じく適用する
+            // （Layoutsはzellijを呼ばないためgateなし・zellij不在でも動く）
+            let backend: Box<dyn ZellijBackend> = match resource {
+                ListResource::Sessions => {
+                    let probe = ZellijCliBackend::new("zelper-probe-unused");
+                    check_capability(&probe)?;
+                    Box::new(probe)
+                }
+                ListResource::Layouts => Box::new(ZellijCliBackend::new("zelper-probe-unused")),
+                _ => mk_backend(&cli)?,
+            };
+            zelper::app::list::run(backend.as_ref(), *resource, tab.as_deref(), *json, *compact)
         }
         Verb::Read {
             panes,
@@ -208,8 +221,6 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
             path,
             inline,
             tab,
-            session_scope,
-            overflow,
             embed_floating,
             dry_run,
             json,
@@ -220,8 +231,6 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                 path: path.as_deref(),
                 inline: inline.as_deref(),
                 tab: tab.as_deref(),
-                session_scope: *session_scope,
-                overflow: *overflow,
                 embed_floating: *embed_floating,
                 dry_run: *dry_run,
                 json: *json,

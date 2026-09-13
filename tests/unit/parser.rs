@@ -4,6 +4,7 @@ use zelper::zellij::parser::{
     parse_created_pane, parse_created_tab, parse_panes, parse_sessions, parse_tabs, parse_version,
 };
 
+// [covers:backend-parser.version-strings]
 #[test]
 fn version_strings() {
     assert_eq!(parse_version("zellij 0.44.3\n"), Some((0, 44, 3)));
@@ -13,15 +14,44 @@ fn version_strings() {
     assert_eq!(parse_version("garbage"), None);
 }
 
+// [covers:backend-parser.sessions-text-basic-form]
 #[test]
 fn sessions_text_parse() {
     let out = "zelper-p1-basic [Created 10s ago]\nzelper-p1-ops [Created 2m ago]\n";
     let s = parse_sessions(out);
     assert_eq!(s.len(), 2);
     assert_eq!(s[0].name, "zelper-p1-basic");
+    assert_eq!(s[0].created.as_deref(), Some("10s ago"));
+    assert!(!s[0].current);
+    assert!(!s[0].exited);
     assert_eq!(s[1].name, "zelper-p1-ops");
 }
 
+// [covers:backend-parser.sessions-parse-flags-current-and-exited]
+#[test]
+fn sessions_parse_flags_current_and_exited() {
+    // 実出力形式: suffixなし / (current) / (EXITED - attach to resurrect)。
+    // parseは全行を返し、current/exited flagを付ける（絞り込みは呼び出し側）
+    let out = "dead-one [Created 2h ago] (EXITED - attach to resurrect)\n\
+               live-one [Created 1m ago] (current)\n\
+               live-two [Created 3d ago]\n";
+    let s = parse_sessions(out);
+    assert_eq!(s.len(), 3);
+    assert_eq!(s[0].name, "dead-one");
+    assert!(s[0].exited);
+    assert!(!s[0].current);
+    assert_eq!(s[1].name, "live-one");
+    assert!(!s[1].exited);
+    assert!(s[1].current);
+    assert_eq!(s[2].name, "live-two");
+    assert!(!s[2].exited);
+    assert!(!s[2].current);
+    // 実行中のみへの絞り込み（resolve_session・list sessionsが行うfilter）
+    let live: Vec<_> = s.into_iter().filter(|x| !x.exited).collect();
+    assert_eq!(live.len(), 2);
+}
+
+// [covers:backend-parser.created-ids-from-stdout]
 #[test]
 fn created_ids_parse() {
     assert_eq!(
@@ -33,6 +63,7 @@ fn created_ids_parse() {
     assert!(parse_created_tab("abc").is_err());
 }
 
+// [covers:backend-parser.panes-json-full-fields-from-real-output]
 #[test]
 fn panes_json_parse_from_real_output_shape() {
     // Phase 1実出力（out/02-panes-multi.json）の一部を簡略化したfield構成
@@ -70,6 +101,7 @@ fn panes_json_parse_from_real_output_shape() {
     assert!(!panes[1].is_remap_source());
 }
 
+// [covers:backend-parser.tabs-json-from-real-output]
 #[test]
 fn tabs_json_parse_from_real_output_shape() {
     let json = r#"[

@@ -1,0 +1,84 @@
+# remap v2 生成KDL（src/layout/generator.rs: generate_instance_kdl_v2）の検証条件。出典: test-plan §2.7 (b) R13〜R19・(a) R9 KDL側・DD-10.8
+# 対応test: tests/unit/layout_generator.rs（8件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# generatorは純粋関数（slot列→run写像のKDL生成。DD-10.8）
+[meta]
+feature = "layout-generator"
+source_file = "src/layout/generator.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test layout_generator"
+source_hash = "f717c81c59032039f85405c227f042e4d951b98a"
+note = ""
+
+[[condition]]
+id = "layout-generator.r13-occupied-slot-injects-command-and-args"
+source_lines = "tests/unit/layout_generator.rs:23"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R13 + docs/design/detailed-design.md DD-10.8（occupied slot: pane_commandを注入。command = 空白分割のargv[0]、args = 残り）"
+description = "occupied slotへのrun注入: pane_commandを空白分割しcommand=argv[0]・args=残りを別要素（command属性 + args子node）として注入する。run一致照合（既存paneの決定論的slot配置）の根拠"
+given = "3-slot layout baseに対しrun列 [bash /work/hb.sh p1, codex exec, None] をgenerate_instance_kdl_v2へ与える"
+expect_return = "slot毎のcommand argv列が [bash /work/hb.sh p1][codex exec][空]。生成KDLはcommand=\"bash\"属性とargs \"/work/hb.sh\" \"p1\"子nodeを含む"
+
+[[condition]]
+id = "layout-generator.r14-single-word-shell-command-still-injected"
+source_lines = "tests/unit/layout_generator.rs:51"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R14 + docs/design/detailed-design.md DD-10.8（pane_commandがSomeなら単語1つのshell起動paneでも注入する。旧shell_aware_argvの「shell名のみはbare扱い」はv2で廃止）"
+description = "単語1つのshell起動paneも注入対象: pane_commandがSome（例: bash）ならbare slot（run=None）にせずcommandとして注入する（command=\"bash\"起動paneはbare slotとrun一致しないため）"
+given = "3-slot layout baseに対しrun列 [bash, None, None] をgenerate_instance_kdl_v2へ与える"
+expect_return = "slot 0のcommand argv列が [bash]・残り2 slotは空。生成KDLはcommand=\"bash\"を含む"
+
+[[condition]]
+id = "layout-generator.r15-shell-pane-stays-bare"
+source_lines = "tests/unit/layout_generator.rs:67"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R15 + docs/design/detailed-design.md DD-10.8（shell pane（pane_command None）: bare pane slotのまま（run=None一致））"
+description = "shell paneはbare維持: pane_command Noneのpaneはbare pane slotのまま（command属性を書かない。bare slotはshell pane（invoked_with=None）のみと一致するrun照合の対になる規則）"
+given = "3-slot layout baseに対しrun列 [None, htop, None] をgenerate_instance_kdl_v2へ与える"
+expect_return = "slot毎のcommand argv列が [空][htop][空]で、slot 0にcommand属性（sh等の代理値）は現れない"
+
+[[condition]]
+id = "layout-generator.r16-empty-slots-normalized-to-bare-and-cwd-never-injected"
+source_lines = "tests/unit/layout_generator.rs:82"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R16（空slotは常にbare pane・cwd注入は全廃） + docs/design/detailed-design.md DD-10.2 #9（空slot = 常にbare pane（既定shell）に正規化）・DD-10.8（cwd注入は全廃。再作成paneが存在しないため）"
+description = "空slotの正規化とcwd全廃: layout宣言にcommand・cwdがあっても空slotはbare paneに正規化され（宣言commandは起動しない）、cwd属性はどのslotにも注入しない（CMR-5統合: 空slot正規化とcwd全廃を1条件に統合）"
+given = "pane command=\"htop\" cwd=\"/x\"・pane cwd=\"/y\"・bare pane の宣言3-slot layoutに対しrun列 [codex, None, None]（M=1）をgenerate_instance_kdl_v2へ与える"
+expect_return = "slot毎のargv列が [codex][空][空]。生成KDLにhtop・cwdを含まない"
+
+[[condition]]
+id = "layout-generator.r9-fewer-panes-normalizes-declared-commands"
+source_lines = "tests/unit/layout_generator.rs:103"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R9（(a)表のKDL側: M<N・layoutにcommand付きslot → 空slotはすべてbare paneに正規化（layout宣言commandは起動しない）） + docs/design/detailed-design.md DD-10.2 #9・DD-10.8"
+description = "R9のgenerator側条件: M<Nでlayoutがcommand付きslotを宣言していても、空slotはすべてbare paneに正規化される（宣言commandの起動は行わない。planner側のk=1維持はlayout-planner.r9）"
+given = "3 slotすべてにcommand宣言（htop・vim /etc/x・top）のあるlayoutに対しrun列 [codex exec, None, None]（M=1）をgenerate_instance_kdl_v2へ与える"
+expect_return = "slot毎のargv列が [codex exec][空][空]。生成KDLにvim・topを含まない"
+
+[[condition]]
+id = "layout-generator.r17-newline-separated-quoted-output-is-reparseable"
+source_lines = "tests/unit/layout_generator.rs:124"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R17（改行区切り形式（dump-layout形式）・値quote必須（DD-3.3）） + docs/design/detailed-design.md DD-3.3・DD-10.8（改行区切り形式・値quote必須。zellij 0.44.3はbare値・単行;区切りを拒否する）"
+description = "生成KDLの形式契約: 改行区切り（単行;区切りでない）・値はquote必須。生成物がそのままzellijへ渡せる（再parse可能でslot数が保存される）ことの固定"
+given = "3-slot layout baseに対しrun列 [bash /work/hb.sh, None, None] をgenerate_instance_kdl_v2へ与える"
+expect_return_shape = "command=\"bash\"・args \"/work/hb.sh\" のquoted値を含み「; 」を含まないKDL文字列。再parseするとslot数3"
+
+[[condition]]
+id = "layout-generator.r18-plugin-leaf-preserved-without-consuming-slot"
+source_lines = "tests/unit/layout_generator.rs:140"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R18（plugin leafはslotを消費せず維持。size / split_direction / name等のnode属性もlayout宣言を維持。barの自動注入は行わない） + docs/design/detailed-design.md DD-10.8・DD-3.2 + docs/design/design-review.md §4.2 MR-32"
+description = "plugin leafの保存と非消費: layout宣言のplugin leaf（tab-bar等）はslotを消費せずそのまま維持し、run注入はterminal slotのみへ行う（plugin leafに注入されると以降のslotが1つずれる。MR-32/S11回帰）。node属性（size・split_direction・name）はlayout宣言を維持し、barの自動注入は行わない"
+given = "pane wrapper内tab-bar plugin leaf + split_direction/name属性付き2 terminal slot のlayoutに対しrun列 [cmdA, cmdB] をgenerate_instance_kdl_v2へ与える"
+expect_return = "terminal slotのargv列が [cmdA][cmdB]。生成KDLはplugin location=\"zellij:tab-bar\"・size=1・split_direction=\"vertical\"・name=\"left\" を維持し、pluginの出現は宣言分の1回のみ"
+
+[[condition]]
+id = "layout-generator.r19-same-run-panes-share-instance-slot-order-unspecified"
+source_lines = "tests/unit/layout_generator.rs:168"
+target_function = "generate_instance_kdl_v2"
+source = "docs/testing/test-plan.md §2.7 (b) R19（同一runの複数pane間・複数shell pane間のslot順は保証しない。要件例外のtest固定） + docs/design/detailed-design.md DD-10.6 (iii)/10.13（決定論性の保証範囲: 同一runの複数pane間・複数shell pane（run=None）間のslot順は保証外。プロセス保存・pane数・所属tabは保証） + docs/design/design-review.md §4.6 R7"
+description = "決定論性の明示例外の固定: 同一runが複数slotに現れることを妨げず、それらのslot間の優劣をgeneratorは決めない。複数のNone run（shell pane）も区別されないbare slotとして並ぶ。保証されるのはgroup所属・プロセス保存・pane数・所属tab"
+given = "3-slot layout baseに対しrun列 [codex exec, codex exec, None] と [None, None, htop] をそれぞれgenerate_instance_kdl_v2へ与える"
+expect_return_shape = "前者は3 slot中slot 0と1が同一run（等価なargv）でslot 2が空。後者は2つの空slotと [htop] の1 slot"

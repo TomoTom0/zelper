@@ -1,0 +1,145 @@
+# permissions.kdl seed（src/companion.rs）の検証条件。出典: test-plan §2.7 (c) R21〜R28・(j) seed書換競合・DD-10.4・design-review §4.7 C2/C4
+# 対応test: tests/fake_backend/companion_seed.rs（14件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# tempdir実file込みで検証する（L2）。形式はE6実験（node名 = plugin wasm絶対pathのquoted KDL node・権限は子のbare node）に基づく
+[meta]
+feature = "companion-seed"
+source_file = "src/companion.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test companion_seed"
+source_hash = "4bc719128858e09a36adcd591f05362bb29548ed"
+note = ""
+
+[[condition]]
+id = "companion-seed.r21-missing-file-creates-fresh-node"
+source_lines = "tests/fake_backend/companion_seed.rs:34"
+target_function = "seeded_content"
+source = "docs/testing/test-plan.md §2.7 (c) R21（file不存在 → dir作成 + companion nodeのみの新規file） + docs/design/detailed-design.md DD-10.4 手順1"
+description = "seed判定の純粋部分（file不存在）: 既存内容がNoneならcompanion node（必要3権限付き）のみの新規file内容を返す。dir作成を伴う実file書込はr21-ensure-creates-dir-and-file-when-missing条件が検証"
+given = "seeded_content(None, companion node名) を呼ぶ"
+expect_return = "Some（companion node blockのみ・必要3権限すべての子nodeを持つ新規file内容）"
+
+[[condition]]
+id = "companion-seed.r22-node-with-all-permissions-is-no-change"
+source_lines = "tests/fake_backend/companion_seed.rs:43"
+target_function = "seeded_content"
+source = "docs/testing/test-plan.md §2.7 (c) R22（node存在・必要3権限すべてあり → 何もしない（書き込まない）） + docs/design/detailed-design.md DD-10.4 手順2"
+description = "seed判定の純粋部分（権限充足）: companion nodeが存在し必要3権限すべてあれば書込内容なし（None）を返す（冪等check）。実fileの非書換はr22-ensure-leaves-complete-file-untouched条件が検証"
+given = "companion nodeが必要3権限すべてを持つ既存内容をseeded_contentへ与える"
+expect_return = "None（書込不要）"
+
+[[condition]]
+id = "companion-seed.r23-missing-permissions-appended-keeping-others"
+source_lines = "tests/fake_backend/companion_seed.rs:50"
+target_function = "seeded_content"
+source = "docs/testing/test-plan.md §2.7 (c) R23（node存在・権限不足 → 不足権限のみ追記して書戻し（他node・他権限は保持）） + docs/design/detailed-design.md DD-10.4 手順2"
+description = "権限不足時の追記: 不足権限のみをcompanion nodeへ追記し、既存の他node・他権限は保持する（過剰な重複追記をしない）"
+given = "他plugin node（ReadApplicationStateのみ）と、権限2つのみのcompanion nodeを含む既存内容をseeded_contentへ与える"
+expect_return = "Some（companion nodeに不足していたReadCliPipesが追記され、他plugin nodeは保持され、既存権限は重複しない（ReadApplicationState 2回・ChangeApplicationState 1回））"
+
+[[condition]]
+id = "companion-seed.r24-absent-node-pure-text-append-with-newline-guard"
+source_lines = "tests/fake_backend/companion_seed.rs:74"
+target_function = "seeded_content"
+source = "docs/testing/test-plan.md §2.7 (c) R24（node不在 → file末尾へのtext純append。既存内容が改行終端でなければ先頭に改行を補完） + docs/design/detailed-design.md DD-10.4 手順2（設計レビューR1） + docs/design/design-review.md §4.6 R1"
+description = "node不在時の純append: kdl round-trip整形によらずfile末尾へtextとしてappendする（既存内容は改変されない）。既存内容が改行終端でなければ先頭に改行を補い、前行末尾への連結によるKDL破壊を防ぐ（設計レビューR1）"
+given = "他plugin nodeのみの既存内容（改行終端あり）と改行終端なしの2種をseeded_contentへ与える"
+expect_return = "両者とも既存内容を先頭にそのまま保持し末尾にcompanion node blockが追記される。改行終端なしの場合は追記部の前に改行が補完される"
+
+[[condition]]
+id = "companion-seed.r25-unparsable-existing-file-is-preflight-error"
+source_lines = "tests/fake_backend/companion_seed.rs:99"
+target_function = "seeded_content / ensure_permissions"
+source = "docs/testing/test-plan.md §2.7 (c) R25（既存fileのKDL parse失敗 → 書き換えずPreflight error（手動修復を促す）） + docs/design/detailed-design.md DD-10.4 手順3"
+description = "parse失敗時の防御: 既存fileがKDLとして不正なら書き換えずPreflight error（ユーザーの他plugin権限を壊すリスクの排除を優先）。実fileも書き換えない（CMR-5統合: 判定と実file非書換を1条件に統合）"
+given = "未closeのquote nodeを含む不正KDLをseeded_contentへ与える場合と、同内容の実fileに対しensure_permissionsを実行する場合"
+expect_return = "両者ともErr（ErrorClass=Preflight）。実fileの内容は不正KDLのまま不変"
+
+[[condition]]
+id = "companion-seed.r21-ensure-creates-dir-and-file-when-missing"
+source_lines = "tests/fake_backend/companion_seed.rs:119"
+target_function = "ensure_permissions"
+source = "docs/testing/test-plan.md §2.7 (c) R21（dir作成 + companion nodeのみの新規file） + docs/design/detailed-design.md DD-10.4 手順1（当該dirを作成し新規file）"
+description = "seedの実file書込（file不存在）: 中間dirごと存在しないpathでもdirを作成し、companion nodeのみの新規fileを書く"
+given = "存在しないdir/zellij/permissions.kdl（親dirごと不在）に対しensure_permissionsを実行"
+expect_return = "Ok。fileが作成され、内容は必要3権限付きcompanion node block"
+
+[[condition]]
+id = "companion-seed.r22-ensure-leaves-complete-file-untouched"
+source_lines = "tests/fake_backend/companion_seed.rs:129"
+target_function = "ensure_permissions"
+source = "docs/testing/test-plan.md §2.7 (c) R22（node存在・必要3権限すべてあり → 何もしない（書き込まない）） + docs/design/detailed-design.md DD-10.4 手順2"
+description = "seedの実file書込（権限充足）: 権限が揃っている既存fileは書き換えない（冪等。毎回checkはfile読込1回で安価というDD-10.2 #3の前提）。検証限界: testはfile内容の同一性のみassertであり、mtime等による書込非発生の直接確認は未assert"
+given = "必要3権限すべてを持つcompanion nodeのfileに対しensure_permissionsを実行"
+expect_return = "Ok。file内容は実行前と完全に同一"
+
+[[condition]]
+id = "companion-seed.r26-write-is-atomic-single-complete-content"
+source_lines = "tests/fake_backend/companion_seed.rs:141"
+target_function = "ensure_permissions"
+source = "docs/testing/test-plan.md §2.7 (c) R26（書込みは同dir temp file作成 + atomic rename（readerが途中状態を観測しない）） + docs/design/detailed-design.md DD-10.4（書込みの原子性）"
+description = "atomic書込のL2側検証: 書込結果はseeded_contentの結果と完全に一致する単一の完全な内容であり（部分書込・新旧混在がない）、同dirに一時fileが残留しない。検証限界: temp file + renameの機構自体の実機確認はL4（S-v2-1。remap-sequence.tomlのexcluded参照）"
+given = "他plugin node（古い内容）の既存fileに対しensure_permissionsを実行"
+expect_return = "Ok。書込後のfile内容がseeded_contentの期待内容と完全一致し、同dirにはpermissions.kdlのみ存在"
+
+[[condition]]
+id = "companion-seed.r27-conflicting-rewrite-is-retried-on-new-content"
+source_lines = "tests/fake_backend/companion_seed.rs:170"
+target_function = "ensure_permissions"
+source = "docs/testing/test-plan.md §2.7 (c) R27（書戻し直前の再読込で内容が変化していたら、変化後の内容に対してやり直す（bounded retry 3回）） + docs/design/detailed-design.md DD-10.4（書戻し直前の再読込・変更検知） + docs/design/design-review.md §4.6 R2"
+description = "競合時のretry: 書戻し直前の再読込でzellij他processの書換（競合）を検出したら、変化後の内容に対してseed判定をやり直す。1回の競合なら成功し、最終内容は競合後の内容に基づく（他node保持・不足権限追記）"
+given = "他plugin nodeの既存fileに対しensure_permissionsを、再読込のtimingで1回だけ他内容（他plugin node + 権限1つのみのcompanion node）へ書き替えるhook付きで実行"
+expect_return = "Ok。最終file内容は競合後内容への追記結果（他plugin node保持・companion nodeにReadCliPipesとChangeApplicationStateが揃う）"
+
+[[condition]]
+id = "companion-seed.r28-persistent-conflict-aborts-without-writing"
+source_lines = "tests/fake_backend/companion_seed.rs:207"
+target_function = "ensure_permissions"
+source = "docs/testing/test-plan.md §2.7 (c) R28（retry打ち切り後も競合が続く → 書込まずPreflight error（last-writer-winsで他pluginの権限を黙って失わせない）） + docs/design/detailed-design.md DD-10.4 + docs/design/design-review.md §4.6 R2"
+description = "競合継続時の中断: 再読込のたびに内容が変わり続ける（競合が続く）系列では、bounded retry打ち切り後に書込まずPreflight errorで中断する。errorには競合であることが伝わり、zelperはfileへ何も書いていない"
+given = "再読込毎に異なる内容（カウンタ増加するrace node）へ書き替えるhook付きでensure_permissionsを実行"
+expect_return = "Err（ErrorClass=Preflight・messageにconflict/retryを含む）。fileにcompanion nodeは存在しない（zelper未書込）"
+
+[[condition]]
+id = "companion-seed.concurrent-seeds-serialize-via-advisory-lock"
+source_lines = "tests/fake_backend/companion_seed.rs:259"
+target_function = "ensure_permissions（advisory lock）"
+source = "docs/design/design-review.md §4.7 C2（TASK-39レビュー: permissions.kdlの「再読込一致→rename」間のTOCTOU残存への (a) zelper自身の並行実行に対するadvisory lock（flock）で読込→書込区間を直列化。直列化の回帰テスト（BがAのlock解放までblockすることの所要時間固定）を追加） + docs/design/detailed-design.md DD-10.4（既知の残リスク (b)）"
+description = "zelper間書込の直列化（C2回帰）: Aがcritical section内で遅延している間に開始したBは、Aのlock解放（= Aの書込完了）までblockする。Bの所要時間で固定し、最終内容はlost-updateなし（Aの書込をBが読んで追記）。lock fileは抜けたら削除される"
+given = "同一permissions.kdlへ、hook内で300ms遅延するA（companion node追記）と、Aのhook突入後に開始するB（別versionのcompanion node追記）を並行実行"
+expect_return_shape = "Bの所要時間が250ms以上（Aの残り保持時間以上）でhook実行順はA→B。最終内容に他plugin node・Aのnode・Bのnode・追記権限がすべて含まれ、lock fileは残留しない"
+
+[[condition]]
+id = "companion-seed.stale-lock-file-tolerated-and-removed"
+source_lines = "tests/fake_backend/companion_seed.rs:332"
+target_function = "ensure_permissions（advisory lock）"
+source = "docs/design/design-review.md §4.7 C2（残留lock fileの追試） + docs/design/detailed-design.md DD-10.4（advisory lock file（flock）・Dropでunlock+削除）"
+description = "残留lock file耐性（C2回帰）: 異常終了等で残留したlock fileがあってもacquireは機能し、抜ける時にlock fileを削除する"
+given = "lock file（.zelper-seed.lock）を事前に置いたdirのpermissions.kdl（不存在）に対しensure_permissionsを実行"
+expect_return = "Ok。lock fileは削除され、fileは必要3権限付きcompanion node blockで作成される"
+
+[[condition]]
+id = "companion-seed.failed-seed-write-leaves-no-partial-temp-file"
+source_lines = "tests/fake_backend/companion_seed.rs:346"
+target_function = "ensure_permissions"
+source = "docs/design/design-review.md §4.7 C4（TASK-39レビュー: temp fileのwrite自体の失敗時に部分書込tempが残留。write失敗経路でbest-effortのremove_fileを追加。temp pathをdirectoryで塞いでwrite失敗を発生させるテスト） + docs/design/detailed-design.md DD-10.4"
+description = "seed書込失敗時のtemp残留なし（C4回帰）: temp file pathをdirectoryで塞いでwrite失敗を発生させても、zelperは新規の部分書込temp fileを残留させない（best-effort cleanup）。失敗はPreflight error"
+given = "権限1つのみのcompanion node file（書込が試みられる状態）と、temp file pathを塞ぐdirectoryを置いたdirでensure_permissionsを実行"
+expect_return = "Err（ErrorClass=Preflight）。dir内の残留は事前に作ったdirectoryとpermissions.kdlのみ（zelperは新規fileを作っていない）"
+
+[[condition]]
+id = "companion-seed.failed-wasm-extract-write-leaves-no-partial-temp-file"
+source_lines = "tests/fake_backend/companion_seed.rs:382"
+target_function = "ensure_companion_wasm"
+source = "docs/design/design-review.md §4.7 C4（TASK-39レビュー: wasm extract・permissions seed両方のwrite失敗経路でbest-effortのremove_fileを追加。テスト2件） + docs/design/detailed-design.md DD-10.3（runtime配置: cache dirへextract。書込は同dirのtemp file + atomic rename）"
+description = "wasm extract失敗時のtemp残留なし（C4回帰）: companion wasm extractのtemp書込失敗でも新規fileを残留しない。XDG_CACHE_HOME隔離下でcompanion_dir()の解決から検証"
+given = "隔離XDG_CACHE_HOME下でcompanion_dir()を作成し、wasm temp file pathを塞ぐdirectoryを置いた状態でensure_companion_wasmを実行"
+expect_return = "Err（ErrorClass=Preflight）。dir内の残留は事前に作ったdirectoryのみ"
+
+[[excluded]]
+item = "XDG_CACHE_HOME未設定時の既定cache path（~/.cache）でのcompanion配置・permissions.kdl対象解決"
+source = "docs/design/detailed-design.md DD-10.3（$XDG_CACHE_HOME/zelper/companion/<version>/）・DD-10.4（XDG_CACHE_HOME未設定時は~/.cache/zellij/） + docs/testing/test-plan.md §2.7 (c)（対象: $XDG_CACHE_HOME/zellij/permissions.kdl）"
+reason = "未test。既存14 testは隔離XDG_CACHE_HOME（未設定の既定path解決は未経由）か引数で指定したpathに対する検証であり、未設定時の~/.cache既定解離の実pathは未検証。新規test追加時に条件化する（移行実施時にtm起票）"
+decided_at = "2026-09-13"
+decided_by = "claude"

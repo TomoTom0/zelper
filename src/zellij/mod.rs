@@ -92,6 +92,9 @@ pub trait ZellijBackend {
     fn version(&self) -> Result<String, ZelperError>;
     fn list_sessions(&self) -> Result<Vec<SessionRef>, ZelperError>;
     fn list_tabs(&self) -> Result<Vec<TabState>, ZelperError>;
+    /// 指定session名でlist-tabs（list sessionsのPANES概要用。対象session解決に
+    /// 依らず任意の実行中sessionのtab構成を取る）
+    fn list_tabs_for(&self, session: &str) -> Result<Vec<TabState>, ZelperError>;
     fn list_panes(&self) -> Result<Vec<PaneState>, ZelperError>;
     fn current_tab(&self) -> Result<TabState, ZelperError>;
     fn dump_screen(&self, pane: &PaneKindId, full: bool) -> Result<String, ZelperError>;
@@ -109,7 +112,18 @@ pub trait ZellijBackend {
     fn go_to_tab(&self, tab: TabId) -> Result<(), ZelperError>;
     fn dump_layout(&self) -> Result<String, ZelperError>;
     fn toggle_embed_floating(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
+    fn pipe_plugin(
+        &self,
+        path: &std::path::Path,
+        name: &str,
+        payload: &str,
+    ) -> Result<(), ZelperError>;
+    // action pipe --plugin file:<path> --name <name> -- <payload>（DD-10.3）。
+    // 権限dialog pending等でblockするためtimeout必須。効果の成否は戻り値に現れない
+    // （成功時に即座exit 0）ため、callerがpolling + postcondition検証で判定する
 }
 
-/// 最小サポートversion（DD-3.1: 0.44.1 = --layout-string導入）
-pub const MIN_SUPPORTED: (u32, u32, u32) = (0, 44, 1);
+/// 最小サポートversion（DD-3.1/3.5。DD-10 v2改訂に伴い引き上げ）。
+/// 実行時要件はzellij >=0.44.3。実証済み組合せはzellij 0.44.3 + zellij-tile 0.44.3
+/// （companion plugin build）のみで、0.44.x系列を超える未来versionは受け付けない
+pub const MIN_SUPPORTED: (u32, u32, u32) = (0, 44, 3);

@@ -22,18 +22,29 @@ pub fn parse_version(out: &str) -> Option<(u32, u32, u32)> {
 }
 
 /// `list-sessions -n`テキスト（例: `zelper-p1-basic [Created 10s ago]`）→ SessionRef列
+/// 実行形式は `NAME [Created X ago]` + suffix（なし / `(current)` /
+/// `(EXITED - attach to resurrect)`）。EXITED行もparseして返す（resurrection待ちの
+/// dead session）。実行中のみへの絞り込みは呼び出し側の責務
 pub fn parse_sessions(out: &str) -> Vec<SessionRef> {
     out.lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| {
-            let name = l.split_whitespace().next()?;
-            if name.is_empty() {
-                None
-            } else {
-                Some(SessionRef {
-                    name: name.to_string(),
-                })
-            }
+            let mut words = l.split_whitespace();
+            let name = words.next()?;
+            let rest = words.collect::<Vec<_>>().join(" ");
+            // `[Created 1m 45s ago]` → `1m 45s ago`（"Created " prefixを除去）
+            let created = rest.find('[').and_then(|start| {
+                rest[start + 1..]
+                    .split(']')
+                    .next()
+                    .map(|inner| inner.strip_prefix("Created ").unwrap_or(inner).to_string())
+            });
+            Some(SessionRef {
+                name: name.to_string(),
+                created,
+                current: rest.contains("(current)"),
+                exited: rest.contains("EXITED"),
+            })
         })
         .collect()
 }

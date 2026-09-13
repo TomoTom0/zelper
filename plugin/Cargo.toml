@@ -1,0 +1,17 @@
+[package]
+name = "zelper-companion-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "companion plugin for zelper remap (driven via zellij action pipe)"
+license = "MIT OR Apache-2.0"
+authors = ["TomoTom0"]
+publish = false
+
+# bin crateであること（cdylibは_start export欠落でzellijにloadされない。E6事実2）
+[[bin]]
+name = "zelper-companion-plugin"
+path = "src/main.rs"
+
+[dependencies]
+# exact pin。実証済み組合せはzellij 0.44.3 + tile 0.44.3のみ（DD-3.5 compatibility policy）
+zellij-tile = "=0.44.3"

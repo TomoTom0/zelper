@@ -1,6 +1,6 @@
 # zelper usage（LLM向け参照）
 
-この文書はLLM/agentがzelperを文法エラー・誤用なく使うための機械的参照。人間向け説明は `zelper docs readme`。前提: `zellij` >= 0.44.1 がPATHにあること。
+この文書はLLM/agentがzelperを文法エラー・誤用なく使うための機械的参照。人間向け説明は `zelper docs readme`。前提: `zellij` >= 0.44.3 がPATHにあること。
 
 ## 対象session解決（全verb共通）
 
@@ -18,14 +18,14 @@
 ## 全verb文法
 
 ```text
-zelper list sessions|tabs|panes|layouts [--tab T] [--json]
+zelper list sessions|tabs|panes|layouts [--tab T] [--json] [-c|--compact]
 zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
 zelper rename pane PANE NAME [--json]
 zelper rename tab TAB NAME [--json]
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS] [--json]
 zelper resize equalize [--tab T | PANE...] [--json]
-zelper remap LAYOUT [--tab T | --session-scope] [--overflow nest|tabs] [--embed-floating] [--dry-run] [--json]
+zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...] [--json]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...] [--json]
@@ -37,13 +37,14 @@ zelper docs readme | llm usage|skill|snippet
 
 排他・依存規則（違反はusage error exit 2）:
 
+- `list --compact`（`-c`）: human出力の縮小（panesは `TAB<TAB>短縮cwd` のみ・他resourceは名前のみ）。`--json` 併用時はJSONを優先しcompactは無視
 - `send`: `--keys` はtext（`--`以降）と排他。`--enter` はtext指定時にのみ有効
-- `remap`: layout名 / `--path` / `--inline` の3sourceは相互排他。`--tab` と `--session-scope` は排他
+- `remap`: layout名 / `--path` / `--inline` の3sourceは相互排他
 - `add tab`: `--layout` / `--path` / `--inline` は相互排他
 - `send` / `add` のcommand textは `--` 以降（`last = true`。`--`より前のoptionと混在可）
 - `remove tab --empty` はTAB省略可。省略時は全空tab（selectable paneが0個のtab）が対象
 
-既定値: `add pane/tab --count 1`、`resize pane STEPS 1`、`remap --overflow` 無指定時のoverflowはerror。
+既定値: `add pane/tab --count 1`、`resize pane STEPS 1`。
 
 ## JSON出力契約（`--json`）
 
@@ -68,8 +69,9 @@ zelper docs readme | llm usage|skill|snippet
 ```
 
 - `detail` / `error` は該当時のみ。部分失敗は隠されない（一部失敗でexit 6、全対象失敗はexit 5）
-- `remap --session-scope` はresults[]を生成しない。tab毎に独立したenvelopeを順に出力し、失敗時は最初のerrorで中断（それまでに適用したtabは残る）
-- `list sessions` のみJSONをzellijが提供しないためテキストparse。session名は正確、付帯情報（作成時刻等）は簡略。過信しないこと
+- `remap` は単一のenvelope。成功時の `data` は `m` / `n` / `k`・`mapping[]`（pane / instance / slot / tab / preserved / alive）・`tabs[]`。検証失敗時は `error.data` にmappingとmissingが載る。`--dry-run` の `data` は `source[]`（visual order）・M/N/k・割当表（`instances[].assignments[]`）・instance毎の生成KDL（`instances[].kdl`）・操作列（`operations[]`）で、状態は一切変更しない
+- `list sessions` のみJSONをzellijが提供しないためテキストparse。name / created（zellijの相対表記）/ current / panes_per_tab（tab毎tiled pane数。取得失敗時null）を返す。EXITED（dead session）は表示・session解決から除外される
+- `list layouts` の `layouts` は `{name, size, modified_epoch}` の配列（stat失敗時はsize/modified_epochがnull）
 
 ## exit codeとerror class対応
 
@@ -78,8 +80,8 @@ zelper docs readme | llm usage|skill|snippet
 | 0 | - | 成功 |
 | 2 | `Usage` | 引数・文法・排他規則違反 |
 | 3 | `NoTarget` / `AmbiguousTarget` | 対象解決失敗（0件 / 複数ヒット。candidates参照） |
-| 4 | `ZellijUnavailable` / `UnsupportedVersion` | zellij不在 / version < 0.44.1 |
-| 5 | `OperationFailed` | zellij操作の失敗 |
+| 4 | `ZellijUnavailable` / `UnsupportedVersion` | zellij不在 / version < 0.44.3 または未実証の上位series（0.45.0等） |
+| 5 | `OperationFailed` | zellij操作の失敗（remapのprobe不成立・移動timeoutを含む。いずれもpaneは無傷） |
 | 6 | `PartialFailure` | multi-targetの一部失敗（results[]参照） |
 | 7 | `LayoutNotFound` / `LayoutInvalid` / `Preflight` / `VerificationFailed` | layout不在 / KDL不正 / 事前条件違反 / 適用後検証不一致 |
 
@@ -89,16 +91,18 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 
 - `remove`: 対象2件以上（または `--empty`）は破壊的とみなし、`--yes` か `--dry-run` がない限りerror（`Preflight` exit 7のgate。単一対象は即実行）
 - `remove --dry-run`: 削除計画を表示して実行しない
-- `remap --overflow tabs`: overflow paneをcloseしてcommand再起動（そのpaneのみ破壊的）。`--dry-run` で保存/再作成の別を事前確認
-- `--dry-run` は一切のsession状態を変更しない（tab切替もしない）
+- `remap` に破壊的経路は存在しない（kill/restartなし）。移動が必要な場合はprobe（companion plugin応答性確認）成功後に状態変更を開始し、不成立なら一切の状態変更前に中断
+- `--dry-run` は一切のsession状態を変更しない（tab切替・companion pluginのwasm展開・permissions.kdl書換も発生しない）
 
 ## remap意味論要点
 
-- 既存paneのprocessを保持したままlayoutへ再配置。適用はtab単位、他tabは保護
-- pane数 M <= slot数 N: 全pane保存。空slotは既定shellで埋まる
-- M > N: 既定は `Preflight` error。`--overflow nest`（全pane保存、第1tab内入れ子、layout形状不保証）/ `--overflow tabs`（layout反復、overflow paneは再起動）
-- floating pane存在時は `Preflight` error。`--embed-floating` でtiled化（process保持）して組入れ
-- 適用後、pane ID生存（tabs modeでは再作成paneのcommand一致）を検証。不一致は `VerificationFailed`（exit 7）
+- 既存paneのprocessを**すべて**保持したままlayoutへ再配置。対象はsession全体のselectable・tiled terminal pane（`--tab` はsource絞り込み兼anchor指定）
+- pane数 M > slot数 N でもerrorにならない: k = max(1, ceil(M/N)) 個のlayout instanceで反復し全paneを配置。kill/restart経路は存在しない
+- instance 0 = anchor tab（`--tab`指定時そのtab・省略時active tab・tab名は保持）。j >= 1 は新規tab `<base>-<j+1>`（baseはlayout名 / file stem / `remap`（`--inline`））
+- 割当順はvisual order（tab position → y → x）で決定的。空slotは既定shellで埋まる。移動で空になったtabは自動close
+- 移動が必要な場合のみcompanion plugin（binary埋込wasm + permissions.kdl seed）を使用し、probe成功後に移動。probe不成立は状態変更前に中断（`OperationFailed` exit 5）
+- floating pane存在時は `Preflight` error（exit 7）。`--embed-floating` でtiled化（process保持）して組入れ
+- 適用後、pane ID生存・割当tab所属・各tabのpane数を検証。不一致は `VerificationFailed`（exit 7）
 - atomicityは主張しない。途中失敗は実行済み/失敗/未実行を報告
 
 ## 誤用と正解
@@ -114,8 +118,8 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 
 ## 既知の制限（agentが前提にしてはならないこと）
 
-- 既存paneを別tabへprocess保持で移す手段はZellijに存在しない
+- remapのslot割当はgroup（instance/tab）所属とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証外
+- `pane_command` に `"` `'` `\` 改行・制御文字を含むpaneは、空白分割でquotingを復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
-- `--overflow tabs` の再構成commandは `pane_command` の空白分割のため、引用を含むcommandは崩れうる
 - tab IDはclose後に再利用される。取得したtab IDは即時使用のみ
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。config.kdlの `layout_dir` は読まない

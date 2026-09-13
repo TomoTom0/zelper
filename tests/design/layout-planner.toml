@@ -1,0 +1,147 @@
+# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・design-review §4.2/§4.7
+# 対応test: tests/unit/layout_planner.rs（15件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# plannerは純粋関数（fake backendなしで検証。DD-10.6）
+[meta]
+feature = "layout-planner"
+source_file = "src/app/remap.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test layout_planner"
+source_hash = "588b2fb3bc89f175275abf4d25f37f47329174d4"
+note = ""
+
+[[condition]]
+id = "layout-planner.r1-one-pane-into-three-slots-k1-empty-two"
+source_lines = "tests/unit/layout_planner.rs:63"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R1 + docs/design/detailed-design.md DD-10.6（割当: i → j=floor(i/N)・slot=i%N、空slot: 最終instanceにのみ発生）"
+description = "M<N最小例のplan形状: 1 pane / 3-slot layoutはk=1で全paneをgroup 0 slot 0へ割当て、残り2 slotは空（既定shell。KDL側のbare正規化はlayout-generator.r16、実行側のshell pane埋めはremap-sequence.r40）"
+given = "1 pane（command=cmd0）とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・m=1・n_slots=3・instances長1・割当1件（pane terminal_0・slot 0）・empty_slots=2"
+
+[[condition]]
+id = "layout-planner.r2-three-into-three-no-move-no-plugin"
+source_lines = "tests/unit/layout_planner.rs:78"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R2 + docs/design/detailed-design.md DD-10.6（instance 0 = anchor既定・移動の必要がない構成）"
+description = "M=N同一tab構成のplan: k=1で割当はvisual順3件・空slotなし。group 0にanchor外tabのpaneが存在しないためcompanion plugin不使用となる計画上の前提（実行側の「移動不要ならprobeもpluginも不使用」はremap-sequence.r29が検証）"
+given = "3 pane（同一tab 0・visual順）とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・instances長1・割当はterminal_0/1/2の3件・empty_slots=0"
+
+[[condition]]
+id = "layout-planner.r3-four-panes-into-three-slots-k2"
+source_lines = "tests/unit/layout_planner.rs:97"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R3 + 同§2.7冒頭（v2はM>N既定error廃止） + docs/design/detailed-design.md DD-10.6（k = max(1, ceil(M/N))）"
+description = "M>Nのinstance反復: 4 pane / 3-slotはk=2・group 0=visual順先頭3・group 1=残1（M>Nでもerrorにならない。旧仕様のM>N既定error廃止の置換例）"
+given = "4 pane（同一tab・visual順）とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=2・instances長2・group 0の割当3件・group 1の割当はterminal_3のslot 0のみ・empty_slotsはgroup 0=0・group 1=2"
+
+[[condition]]
+id = "layout-planner.r4-six-into-three-two-full-instances"
+source_lines = "tests/unit/layout_planner.rs:116"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R4 + docs/design/detailed-design.md DD-10.6"
+description = "M=2Nの均等分割: 6 pane / 3-slotはk=2で各instanceちょうど3 pane（端数slotなし）"
+given = "6 pane（同一tab・visual順）とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=2・両instanceの割当各3件・instance 1のempty_slots=0"
+
+[[condition]]
+id = "layout-planner.r5-seven-into-three-third-instance-partial"
+source_lines = "tests/unit/layout_planner.rs:126"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R5 + docs/design/detailed-design.md DD-10.6"
+description = "M>Nかつ最終instanceが部分埋め: 7 pane / 3-slotはk=3で第3 instanceは1 pane + 2空slot（空slotは既定shell）"
+given = "7 pane（同一tab・visual順）とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=3・instances長3・instance 2の割当1件・empty_slots=2"
+
+[[condition]]
+id = "layout-planner.r6-cross-tab-groups-follow-visual-order"
+source_lines = "tests/unit/layout_planner.rs:137"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R6 + docs/design/detailed-design.md DD-10.6（scope = session全体・割当はvisual order）"
+description = "tab分散sessionの一括plan: 5 pane / 3 tabはk=2でgroup 0 = visual順先頭3 pane（tab跨ぎ。anchorへの集中は実行側）・group 1 = 残2。session全体を1度のplanで扱う例（worked example #6）"
+given = "5 paneが3 tabに分散（tab 0に2・tab 1に2・tab 2に1）するvisual順のsource列とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=2・group 0の割当 = terminal_1/2/3（tab 0の2 pane + tab 1の1 pane）・group 1の割当 = terminal_4/5。検証限界: 空になったsource tabの自動closeは実行側の挙動でありplan上は未検証（remap-sequence.r37/r39が検証）"
+
+[[condition]]
+id = "layout-planner.r7-empty-session-all-slots-empty"
+source_lines = "tests/unit/layout_planner.rs:168"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R7 + docs/design/detailed-design.md DD-10.6（M=0: k=1、全slot空（既定shellで埋まる））"
+description = "空sessionのplan: M=0でもk=1のinstanceを1つ作り全slotを空slotとする（remap自体は成立し、layout適用で全slotが既定shellになる）"
+given = "空のpane列とN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・m=0・instances長1・割当0件・empty_slots=3"
+
+[[condition]]
+id = "layout-planner.r9-fewer-panes-than-slots-keeps-k1"
+source_lines = "tests/unit/layout_planner.rs:182"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R9（planner側: k=1維持） + docs/design/detailed-design.md DD-10.6。空slotのbare pane正規化（layout宣言commandは起動しない）はKDL側のlayout-generator.r9-fewer-panes-normalizes-declared-commandsが検証"
+description = "M<N・layoutにcommand付きslotの場合のplanner側の条件: k=1を維持し不足slot分をempty_slotsとして計上する（M<Nを理由にinstanceを増やさない・errorにしない）"
+given = "2 paneとN=3・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・instance 0のempty_slots=1"
+
+[[condition]]
+id = "layout-planner.r10-assignment-follows-visual-order-regardless-of-input-order"
+source_lines = "tests/unit/layout_planner.rs:192"
+target_function = "plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R10 + docs/design/detailed-design.md DD-10.5（順序: list-panesの (tab_position, pane_y, pane_x) 昇順（visual order）。文書化されtestで固定）"
+description = "割当順の決定性: 割当は (tab_position, pane_y, pane_x) 昇順で固定され、入力列の並び順に依存しない。slot番号はvisual order順に0..N-1"
+given = "visual orderでない並び（reverse済み）の4 pane（tab 0の2 pane（y=1,5）とtab 1の2 pane（x=0,100））とN=4をplan_v2へ与える"
+expect_return = "instance 0の割当は (tab0,y1)(tab0,y5)(tab1,x0)(tab1,x100) の順でslot 0..3"
+
+[[condition]]
+id = "layout-planner.r11-zero-slot-layout-invalid-and-missing-layout-not-found"
+source_lines = "tests/unit/layout_planner.rs:218"
+target_function = "plan_v2 / layout::load_kdl"
+source = "docs/testing/test-plan.md §2.7 (a) R11（layout解決不能 / slot数 N=0 → LayoutNotFound / LayoutInvalid（exit 7）） + docs/design/detailed-design.md DD-10.6（N=0はLayoutInvalid）・DD-10.14"
+description = "layoutがplanに使えない2経路の拒否: slot数N=0はLayoutInvalid、layout解決不能（存在しないlayout名）はLayoutNotFound。いずれもexit 7系のpreflight失敗（CMR-5統合: R11の2失敗経路を1条件に統合）"
+given = "1 paneとN=0をplan_v2へ与える場合と、LayoutRef::Name(\"no-such-layout-xyz\")をlayout::load_kdlへ与える場合"
+expect_return = "前者はErr（ErrorClass=LayoutInvalid）・後者はErr（ErrorClass=LayoutNotFound）"
+
+[[condition]]
+id = "layout-planner.r12-slot-count-uses-first-tab-subtree-excluding-plugin-leaves"
+source_lines = "tests/unit/layout_planner.rs:231"
+target_function = "layout::count_terminal_slots / base_subtree"
+source = "docs/testing/test-plan.md §2.7 (a) R12（slot数 N の算出: layout最初のtab subtreeの末端terminal slot数。plugin leaf除外（config子node持ち・bare両方=MR-32回帰。plugin配下は再帰しない）） + docs/design/design-review.md §4.2 MR-32 + docs/design/detailed-design.md DD-10.6"
+description = "N算出規則の本体: N = 最初のtab subtreeの末端terminal slot数。plugin leaf（pane wrapper内・bare・config子node持ちの全形式）はslotを消費せず、plugin配下は再帰しない。container・floating_panes・templateはSKIP_NODES規則で対象外（MR-32回帰）"
+given = "3-slot bare layout・pane wrapper内plugin leaf入りlayout（bare pane 2つ）・bare plugin node（config子node持ち）入りlayout（bare pane 1つ）・pane_template/floating_panes/container混在layoutの4種をparseしてbase_subtreeのcount_terminal_slots"
+expect_return = "それぞれ3・2・1・2"
+
+[[condition]]
+id = "layout-planner.r12-multi-tab-layout-counts-first-tab-shape-only"
+source_lines = "tests/unit/layout_planner.rs:260"
+target_function = "layout::count_terminal_slots / plan_v2"
+source = "docs/testing/test-plan.md §2.7 (a) R12（multi-tab layoutは先頭tab形状） + docs/design/detailed-design.md DD-10.6（multi-tab layoutは最初のtab形状を反復単位とする）"
+description = "multi-tab layoutのN算出: 2-tab layout（各3 slot）のNは先頭tab形状の3（全tab合計ではない）。N=3として4 paneはk=2（M>N error廃止の再確認込み）"
+given = "各3 slotの2-tab layoutをparseしてcount_terminal_slots、および4 paneとN=3をplan_v2へ与える"
+expect_return = "N=3・plan_v2のk=2"
+
+[[condition]]
+id = "layout-planner.r12-zellij-bare-bools-and-property-nodes-parse"
+source_lines = "tests/unit/layout_planner.rs:274"
+target_function = "layout::parse"
+source = "docs/testing/test-plan.md §2.7 (a) R12（実機KDL形式のparse頑健性） + docs/design/design-review.md §4.2 MR-16（zellij layout常用のbare boolをparse拒否する回帰） + docs/design/detailed-design.md DD-10.6"
+description = "実機zellij layoutが常用する形式のparse頑健性: bare bool属性（borderless=true・focus=true）・property node（cwd / start_suspended）を含むlayoutがparse時にquote正規化されslot数として数えられる（MR-16回帰）"
+given = "bare bool属性付きbar plugin layout・cwd property node付きlayout・start_suspended property node付きlayoutの3種をparseしてcount_terminal_slots"
+expect_return = "いずれもparse成功し、slot数は1・1・1"
+
+[[condition]]
+id = "layout-planner.r20-quoted-chars-in-pane-command-warn-but-do-not-fail"
+source_lines = "tests/unit/layout_planner.rs:294"
+target_function = "plan_v2（preflight warning）"
+source = "docs/testing/test-plan.md §2.7 (b) R20 + docs/design/detailed-design.md DD-10.13（pane_command空白分割は引数のquoteを復元不可 → 該当paneのrun一致が外れるためpreflight warning（実行は可））"
+description = "quoting warningの基本条件: pane_commandに `\"` / `\\` を含むpaneがあればpreflight warningを出し実行は可（errorにしない）。対象paneがいなければwarningなし"
+given = "codex exec（通常）・double quoteを含む echo \"x\"・backslash 1文字を含む echo C:［backslash］path の3 paneをN=3でplan_v2へ与える場合と、通常3 paneのみを与える場合"
+expect_return = "前者はOk（k=1）かつwarningsにterminal_2・terminal_3を含みterminal_1を含まない。後者はwarningsが空"
+
+[[condition]]
+id = "layout-planner.quoting-warning-covers-single-quotes-newlines-control-chars"
+source_lines = "tests/unit/layout_planner.rs:327"
+target_function = "needs_quoting_warning"
+source = "docs/design/design-review.md §4.7 C6（TASK-39レビュー。関連: docs/testing/test-plan.md §2.7 (b) R20） + docs/design/detailed-design.md DD-10.13"
+description = "quoting warningの文字種拡張（C6回帰）: warning対象は `\"` / `\\` に加え `'`・改行・制御文字（split_whitespaceでargvが壊れうる文字）を含むpane_command。通常の引数区切り空白は対象外"
+given = "単quoteを含む bash -lc 'echo a b'・改行を含む echo a（途中でLF）b・ESC制御文字（U+001B）を含む echo（ANSI escape）・通常の codex exec --plan の4 paneをN=4でplan_v2へ与える"
+expect_return = "warningsにterminal_1・terminal_2・terminal_3を含み、terminal_4（通常の引数区切り空白のみ）を含まない"

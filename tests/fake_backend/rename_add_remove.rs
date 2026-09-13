@@ -40,6 +40,7 @@ fn tab(id: u32, tiled: u32) -> TabState {
     }
 }
 
+// [covers:rename.pane-rename-call-and-postcondition]
 #[test]
 fn rename_pane_updates_title_and_verifies() {
     let b = FakeBackend::new(vec![pane(1, "old", 0, 0, 0)], vec![tab(0, 1)]);
@@ -52,6 +53,7 @@ fn rename_pane_updates_title_and_verifies() {
     assert_eq!(b.state.borrow().panes[0].title, "new-name");
 }
 
+// [covers:rename.pane-backend-failure-is-operation-failed]
 #[test]
 fn rename_verification_failure_detected() {
     let b = FakeBackend::new(vec![pane(1, "old", 0, 0, 0)], vec![tab(0, 1)]);
@@ -61,6 +63,7 @@ fn rename_verification_failure_detected() {
     assert_eq!(*err.class(), ErrorClass::OperationFailed); // backend呼び出し自体の失敗
 }
 
+// [covers:rename.pane-silent-noop-detected-by-postcondition]
 #[test]
 fn rename_pane_silent_noop_detected_by_postcondition() {
     let b = FakeBackend::new(vec![pane(1, "old", 0, 0, 0)], vec![tab(0, 1)]);
@@ -71,6 +74,7 @@ fn rename_pane_silent_noop_detected_by_postcondition() {
     assert_eq!(b.state.borrow().panes.len(), 1);
 }
 
+// [covers:add-remove.add-pane-count-and-postcondition]
 #[test]
 fn add_pane_count_and_postcondition() {
     let b = FakeBackend::new(vec![pane(1, "a", 0, 0, 0)], vec![tab(0, 1)]);
@@ -82,6 +86,7 @@ fn add_pane_count_and_postcondition() {
     assert_eq!(s.panes.len(), 3);
 }
 
+// [covers:add-remove.add-tab-layout-sources-conflict]
 #[test]
 fn add_tab_layout_conflict_rejected() {
     let b = FakeBackend::new(vec![], vec![tab(0, 1)]);
@@ -102,6 +107,7 @@ fn add_tab_layout_conflict_rejected() {
     assert_eq!(*err.class(), ErrorClass::Usage);
 }
 
+// [covers:add-remove.remove-pane-safety-gate]
 #[test]
 fn remove_single_pane_no_gate_multi_requires_yes() {
     let b = FakeBackend::new(
@@ -127,6 +133,7 @@ fn remove_single_pane_no_gate_multi_requires_yes() {
     assert_eq!(b.state.borrow().panes.len(), 1); // pane 3のみ残存
 }
 
+// [covers:add-remove.remove-empty-unknown-tab-name-is-error-not-silent-widen]
 #[test]
 fn remove_empty_with_unknown_tab_name_is_error_not_silent_widen() {
     // レビュー回帰: 解決不能なTABSPECは黙って捨てずerror（全空tabへの暗黙拡大防止）
@@ -157,6 +164,7 @@ fn remove_empty_with_unknown_tab_name_is_error_not_silent_widen() {
     assert_eq!(s.tabs[0].id, TabId(0));
 }
 
+// [covers:add-remove.remove-empty-selects-only-empty-tabs]
 #[test]
 fn remove_empty_tabs_selects_only_empty() {
     // tab0: pane 2個（空でない）/ tab1: 空tab
@@ -172,6 +180,7 @@ fn remove_empty_tabs_selects_only_empty() {
     assert_eq!(s.tabs[0].id, TabId(0));
 }
 
+// [covers:add-remove.remove-empty-requires-gate-even-for-single]
 #[test]
 fn remove_empty_requires_gate_even_for_single() {
     let b = FakeBackend::new(vec![], vec![tab(0, 0), tab(1, 3)]);
@@ -179,6 +188,7 @@ fn remove_empty_requires_gate_even_for_single() {
     assert_eq!(*err.class(), ErrorClass::Preflight);
 }
 
+// [covers:add-remove.remove-missing-pane-is-no-target]
 #[test]
 fn remove_missing_pane_is_no_target() {
     let b = FakeBackend::new(vec![pane(1, "a", 0, 0, 0)], vec![tab(0, 1)]);
