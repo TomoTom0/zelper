@@ -391,3 +391,35 @@ TASK-37レビュー時点（§4.6 R6・DD-10.2 #11）では廃止option（`--ses
 **検証**: 修正後 `mise run verify-conditions` pass（`OK: 15 files, 135 conditions, 135 tags, 31 excluded (0 files synced)`）・`cargo test` 135件全PASS・clippy警告0・fmt差分なし。観点3（回帰検出力）は指摘なし: "/tm"は"/tmp"の真の前方一致・"agent"はagent-a/agent-b双方の部分文字列であり、完全一致比較が前方一致/部分一致へ変質すればtestがfailすることを確認。
 
 **総評**: 機能的・事実的な問題なし。指摘は様式・運用留意点のみ。
+
+### 4.19 TASK-59設計レビュー（zellij error出力→error class変換の条件化）
+
+レビュー日: 2026-09-13。対象: TASK-59の条件書設計文案（tests/design/backend-process.toml新規作成案・backend-parser.tomlのexcluded削除とnote追記案・tests/design/README.md・tests/README.md更新案）。方法: 作成者と別subagentによる独立レビュー（実態突合せ: src/zellij/process.rs・src/zellij/mod.rsの実装、tests/design/*.toml既存条件・id実在、README各記載行の突合）。検証結果概要: 事実主張はほぼ一致。指摘5件（P2×2・P3×3）。IDはTR59-1〜TR59-5（§4.18 TR61-nに続く。TR59 = TASK-59 Review）。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| TR59-1 | P2 | 設計文案excluded（timeout） | timeout超過（→OperationFailed）を除外した理由が事実誤認: private field timeoutへ短い値を直接設定したin-module testからsleepするfake scriptで決定的に引起できる | **修正** | timeoutを5条件目backend-process.timeout-operation-failedとして条件化（excludedから削除）。検証手段（timeout fieldへの短時間直接設定×sleepするfake script）をdescriptionへ明記 |
+| TR59-2 | P2 | README更新案 | lib内test「3件」の言及がtests/design/README.mdに4箇所（:27・:49・:123・:138）あり、更新対象行が曖昧（:27はlist-display行の内訳10+3=13・:123は第2段歴史記録であり書換えると歴史記録を壊す） | **修正** | 更新対象を:49・:138へ限定し、:27・:123は不変として明示 |
+| TR59-3 | P3 | 設計文案 | src/zellij/process.rsのerror分岐の列挙漏れ: :161-168 current_tabの"unexpected current-tab-info output"分岐・:249/:299 new_tab/override_layout内validate_exclusive失敗分岐が条件化・excluded記録のいずれにもない | **修正** | error return起点で全分岐を走査のうえ対応決定: (1) current_tab非単一tab出力は条件化（backend-process.current-tab-unexpected-output-operation-failed。fake script応答を2要素tab JSON配列へ固定し決定的に検証） (2) validate_exclusive失敗分岐はexcludedへ記録（covered by add-remove.add-tab-layout-sources-conflict。実在確認: tests/design/add-remove.toml:23。error生成はLayoutSpec::validate_exclusiveの単一実装でprocess.rs側は`?`伝播のみ） (3) parse系error伝播（parse_sessions/parse_tabs/parse_panes/parse_created_pane/parse_created_tabの各`?`）はexcludedへ記録（error生成はsrc/zellij/parser.rs側・backend-parser.toml管轄）。追加条件は1件で原則2件以内 |
+| TR59-4 | P3 | 設計文案条件4（version-unparseable） | 本条件がparse_versionのNone変換に依存していることが条件書上から読めず、backend-parser側条件との依存関係が不明 | **対応** | 条件4のdescriptionへ「parse_version("not-a-version\n")→None（backend-parser.version-stringsがparse関数側を検証）に依存する」を1文追記 |
+| TR59-5 | P3 | 設計文案 | 条件のsource欄が未指定 | **却下** | 設計全文案にはsource欄が記載済み。レビュー委任へ渡された要約版でsource欄が省略されていたことに起因する誤検出 |
+
+**検証**: cargo test --lib 9 passed（新規6+既存3・回帰なし）/ cargo test全件 141 passed・0 failed / mise run verify-conditions exit 0（OK: 16 files, 141 conditions, 141 tags, 37 excluded） / cargo clippy --all-targets 0 warning / cargo fmt --check clean / source_hash aa1ba000f2c98b037968168f83a2785163e34ea0
+
+**総評**: 指摘5件（P2×2・P3×3）は修正3（TR59-1 timeout条件化・TR59-2 対象行限定・TR59-3 列挙追加とcurrent-tab条件化）・対応1（TR59-4 依存明記）・却下1（TR59-5）で解消。条件6件・excluded 7件として確定し全verify pass。
+
+#### code review（codex・read-only・2026-09-13〜14）
+
+既存の設計レビュー結果および実装・条件書・進捗記録をread-onlyで突合し、TASK-59仕上げ時点のcode reviewを実施した。指摘5件（P1×1・P2×3・P3×1）。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| CR59-1 | P2 | tests/design/backend-process.toml 条件3 description | root環境では実行権限のない0644 fileのexecが許可され、testが失敗する懸念 | **修正** | 条件3 descriptionへLinuxの根拠を明記。kernelはCAP_DAC_OVERRIDEでもS_IXUGO必須のため、0644はrootもEACCESとなることを追記 |
+| CR59-2 | P2 | tests/design/README.md :114/:128 | 進捗記録の旧数値（15file・133条件等）が現行と混同されうる | **修正** | :114/:128へ、記載値が移行完了時点の値である旨を明記 |
+| CR59-3 | P2 | tests/design/backend-process.toml header/note・tests/design/README.md | toml header/note・READMEに作業途中記述（後段委任等）が残存 | **修正** | header・note・READMEを完了状態へ更新 |
+| CR59-4 | P3 | src/zellij/process.rs test module内 setup_fake_zellij | helper temp pathはtag+pid固定・cleanupなしであり、tempfile::tempdir()の方がより堅牢 | **却下** | 既存L3 shim（tests/cli/remap.rs setup_fake_zellij）と同一方式を意図的に踏襲。cleanupはtemp dirのOS管理に委ねる運用 |
+| CR59-5 | P1 | src/zellij/process.rs test module内 setup_fake_zellij・fake zellij test | 検証再実行時にtest 6件が約1/3のrunで散発失敗（failするtestは毎回変化）。class assertへmessage出力を追加して捕捉した実態はETXTBSY (os error 26): fake scriptのexecve時点で対象fileがwrite open状態になる競合。strace下37回非再現・/proc/self/fd採取でも恒常的write fd漏れなし | **修正** | setup_fake_zellijをstaging fileへwrite/chmod後にcloseしatomic renameで公開し、FAKE_ZELLIJ_LOCKによるtest直列化を実施。src実装本体は不変。cargo test --lib 50回loop 0失敗を確認。L3側helperの同一潜在競合は別taskとして起票済み |
+
+**検証（最終）**: `cargo test --lib` 50回loop 0失敗（stability log: `tmp/20260913_test_task59_stability.log`） / `cargo test`全件 pass / `mise run verify-conditions` exit 0（16 files・141 conditions・141 tags・37 excluded） / clippy 0 warning / fmt clean。
+
+**総評**: 設計レビュー5件＋code review 5件の計10指摘は、修正8・却下2で解消し、条件6件・excluded 7件・test 6件として確定した。

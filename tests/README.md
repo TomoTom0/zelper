@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書15file（正本）+ README.md（条件書一覧・R番号→条件id対応表・進捗・範囲明示）
+- `design/` — テスト設計条件書16file（正本）+ README.md（条件書一覧・R番号→条件id対応表・進捗・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。6条件）
@@ -23,7 +23,7 @@
   - `remap.rs` — remap-sequence.toml（20条件）
 - `fixtures/zellij/` — 実zellij 0.44.3出力fixture（panes.json / tabs.json）
 
-lib内test 3件（`src/app/list.rs`）はlist-display.tomlが管轄（src/のままtag付け。条件数の内訳13条件に含む）。
+lib内test 9件（`src/app/list.rs` 3件・`src/zellij/process.rs` 6件）はlist-display.toml・backend-process.tomlが管轄（src/のままtag付け。条件数の内訳13条件・6条件に含む）。
 
 ## L4統合テスト（実zellij）
 
@@ -32,7 +32,7 @@ lib内test 3件（`src/app/list.rs`）はlist-display.tomlが管轄（src/のま
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（135テスト。条件書135条件とcovers tagで1:1）
+cargo test          # L1〜L3（141テスト。条件書141条件とcovers tagで1:1）
 mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）

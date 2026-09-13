@@ -13,9 +13,9 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（第4段で切替。検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（15 file・135条件。§2.2確定構成133条件 + TASK-61でselectorへ2条件追加）
+## 条件書一覧（16 file・141条件。§2.2確定構成133条件 + TASK-61でselectorへ2条件追加 + TASK-59でbackend-processへ6条件追加）
 
-設計書§2.2の確定構成（133条件）に、移行後の未test項目条件化（TASK-61: selector +2）を加えた現行構成。verified列はmeta検証記録（verified = true）の実績値。
+設計書§2.2の確定構成（133条件）に、移行後の未test項目条件化（TASK-61: selector +2・TASK-59: backend-process +6）を加えた現行構成。verified列はmeta検証記録（verified = true）の実績値。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -34,6 +34,7 @@ mise run verify-conditions
 | 13 | remap-sequence | src/app/remap.rs | fake_remap（20件） | 20 | true（2026-09-13） |
 | 14 | remap-cli | src/app/remap.rs | cli_remap（8件） | 8 | true（2026-09-13） |
 | 15 | docs-verb | src/app/docs.rs | cli_docs（7件） | 7 | true（2026-09-13） |
+| 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（6件） | 6 | true（2026-09-13） |
 
 source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
@@ -46,7 +47,7 @@ test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）
 
 - `tests/cli/list_read_send.rs` 23件 = cli-grammar 6 / read-send 5 / list-display 10 / json-contract 2
 - `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
-- lib内test 3件（src/app/list.rs）= list-displayへ帰属
+- lib内test 9件（src/app/list.rs 3件・src/zellij/process.rs 6件）= list-display・backend-processへ帰属
 
 ## R番号→条件id対応表
 
@@ -110,7 +111,7 @@ design-review §4.7 C6（R20拡張）= layout-planner.quoting-warning-covers-sin
 
 ## 進捗記録
 
-段階適用（設計書§9）の進捗。**全段完了・移行完了（2026-09-13）**: 検証条件の正本は条件書15file（133条件・133tag・excluded 33件）へ移譲済み。test-plan §2は対応表へ縮小（旧§2.7本文のR番号定義は条件書source欄とR番号対応表へ）、L4要件はtest-plan §3「L4統合test」節へ集約、`tests/README.md`は索引化、mise taskは`--complete`付きへ切替済み。
+段階適用（設計書§9）の進捗。**全段完了・移行完了（2026-09-13）**: 検証条件の正本は条件書15file（133条件・133tag・excluded 33件。これは移行完了時点の値であり、現行値とは異なる。以降の追加は「移行後の条件追加」参照）へ移譲済み。test-plan §2は対応表へ縮小（旧§2.7本文のR番号定義は条件書source欄とR番号対応表へ）、L4要件はtest-plan §3「L4統合test」節へ集約、`tests/README.md`は索引化、mise taskは`--complete`付きへ切替済み。
 
 | 段 | 対象 | 状態 | 完了日 |
 |---|---|---|---|
@@ -124,9 +125,11 @@ design-review §4.7 C6（R20拡張）= layout-planner.quoting-warning-covers-sin
 
 第3段の内訳（65条件・65tag）: layout-planner 15 / layout-generator 8 / companion-seed 14 / remap-sequence 20 / remap-cli 8。R番号対応はR1〜R50の全行を上表へ記入済み（分割: R9×2・R12×3・R21×2・R22×2・R50×2）。excluded 8件（設計書§8.2確定分4件〔remap-sequence 3・remap-cli 1。「zellij不在」は第2段のcli-grammar.tomlに記録済み〕+ 出典走査で追加発見の未test要求3件〔remap --tab絞り込み・layout適用phase失敗報告・XDG未設定既定path。TASK-69〜71起票〕+ 第3段レビューCMR5-4で追加のcompanion setup失敗1件〔TASK-70へ併載〕）。
 
-残作業: なし（全段完了）。meta最終確認も済み（全15fileのverified = true・source_hashが現行実装と一致）。
+残作業: なし（全段完了）。meta最終確認も済み（移行完了時点の全15fileのverified = true・source_hashが現行実装と一致。15file・133条件等は移行完了時点の値）。
 
 移行後の条件追加: TASK-61（2026-09-13）: selector.tomlのexcluded 2件（--cwd一致filter・filter 0件→NoTarget）をtest fn追加により条件化（selector.filter-cwd-exact-match・selector.filter-zero-matches-no-target。133→135条件・excluded 33→31件）。あわせてCMR3-3の--name完全一致検証限界を--name部分一致負例の追加で解除。残るexcluded 31件のうち未test対応を約定するものはTASK-62〜71（順次条件化するか要件変更時に再判断）。
+
+移行後の条件追加: TASK-59（2026-09-13）: backend-parser.toml移行時excluded 1件（zellijのerror出力→error class変換）をsrc/zellij/process.rs内test追加により条件化し、条件書backend-process.tomlを新規起票。6条件の内訳: 非zero exit→OperationFailed・spawn NotFound→ZellijUnavailable・spawn NotFound以外（権限なし等）→ZellijUnavailable・version parse不能→UnsupportedVersion・timeout超過→OperationFailed（TR59-1）・current-tab-info非単一tab出力→OperationFailed（TR59-3）。excluded 7件の内訳: check_capability最小version未満・系列超過（remap-cli.r46-below-minimum-and-future-series-exit4がcover）・check_capability受理・try_wait失敗・run()成功系・run_action argv組み立て・validate_exclusive伝播（add-remove.add-tab-layout-sources-conflictがcover。TR59-3）・parse系error伝播（backend-parser管轄。TR59-3）。条件135→141・excluded 31→37件（backend-parser側1件削除・backend-process側7件追加）。設計レビューTR59-1〜5はdesign-review §4.19。test fn追加・verify・meta検証記録まで完了。
 
 移行限定資産の役割終了: 付け漏れ検出対照表（`tmp/20260913_bootstrap_conditions_task54/`）は使い捨てであり、`--complete`（検査(f)）有効化により用途を終えた（対照表diff運用は移行中のみ。設計書§5.5）。残置のみとし削除しない。
 
@@ -135,5 +138,5 @@ design-review §4.7 C6（R20拡張）= layout-planner.quoting-warning-covers-sin
 - `tests/fake_backend/fake.rs`: test支援資産（fake backend実装）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
 - `tests/fixtures/`（`tests/fixtures/zellij/*.json`等）: fixtures。scanner走査対象外
 - L4統合test harness（podman・実zellij）: repo管理外。要件・実施記録は`docs/testing/test-plan.md`のL4節へ集約（設計書§6.1）。該当要求は各条件書の`[[excluded]]`から参照行で指す
-- lib内test: `src/app/list.rs`の3件はsrc/のままtag付けし、list-display.tomlが管轄する（file移動しない。設計書§4.3）
+- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の6件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
 - companion plugin実装（`plugin/src/`）: 現在test fnなし。test追加時はremap系の関連条件書へ条件化し、scanner走査対象（`plugin/src/**/*.rs`）に含まれる

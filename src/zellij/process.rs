@@ -30,7 +30,7 @@ impl ZellijCliBackend {
         self.program = program;
         self
     }
-    // 注: with_programはfake backend差し替え用の将来拡張ポイントとして残置
+    // 注: with_programはfake zellij program差し替えの拡張点。src内#[cfg(test)]（backend-process条件書）が使用
 
     /// 生のaction呼び出し
     fn run_action(&self, args: &[&str]) -> Result<String, ZelperError> {
@@ -380,5 +380,184 @@ combination (zellij 0.44.3 + zellij-tile 0.44.3)",
             ErrorClass::UnsupportedVersion,
             format!("failed to parse zellij version output: {out:?}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    static FAKE_ZELLIJ_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// fake zellij実行可能fileをtemp dirに生成し、program pathを返す
+    /// （L3 shimと同様にcleanupなし。CR59-5対応: staging fileをwrite/chmod後にatomic renameで公開）
+    fn setup_fake_zellij(tag: &str, script: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("zelper-fake-process-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("zellij");
+        // 実行内容とmode確定後にのみ公開する。最終の実行pathはwrite open状態にならない
+        // （LinuxのETXTBSY回避）。
+        let staged = dir.join("zellij.staged");
+        std::fs::write(&staged, script).unwrap();
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(staged, &shim).unwrap();
+        shim
+    }
+
+    /// test-plan §2.3・DD-5:265・DD-10.14:512: zellijの非zero exitは常に
+    /// OperationFailedへ変換され、messageへexit statusとtrim済みstderr本文が埋め込まれる
+    /// （stderr内容によるclass切替は設計上存在しない）
+    // [covers:backend-process.nonzero-exit-operation-failed]
+    #[test]
+    fn nonzero_exit_becomes_operation_failed() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let program = setup_fake_zellij(
+            "nonzero-exit",
+            "#!/usr/bin/env bash\necho \"Failed to load layout: can't find layout default\" >&2\nexit 1\n",
+        );
+        let backend = ZellijCliBackend::new("s").with_program(program);
+        let err = backend.run(&["--version".to_string()]).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::OperationFailed,
+            "message: {}",
+            err.message()
+        );
+        let msg = err.message();
+        assert!(msg.contains("exit status: 1"), "message: {msg}");
+        assert!(msg.contains("Failed to load layout"), "message: {msg}");
+        assert!(!msg.contains('\n'), "message: {msg}");
+    }
+
+    /// test-plan §2.9・DD-3.1: program不在（spawn ErrのErrorKind=NotFound）の
+    /// 起動失敗はZellijUnavailableへ分類される
+    // [covers:backend-process.spawn-notfound-zellij-unavailable]
+    #[test]
+    fn spawn_notfound_becomes_zellij_unavailable() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let missing = std::env::temp_dir().join(format!(
+            "zelper-fake-process-notfound-{}-no-such/zellij",
+            std::process::id()
+        ));
+        let backend = ZellijCliBackend::new("s").with_program(missing);
+        let err = backend.run(&["--version".to_string()]).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::ZellijUnavailable,
+            "message: {}",
+            err.message()
+        );
+        assert!(
+            err.message()
+                .contains("zellij executable not found in PATH"),
+            "message: {}",
+            err.message()
+        );
+    }
+
+    /// DD-5・src/zellij/process.rs:66-70: NotFound以外のspawn失敗（実行権限なし等）も
+    /// ZellijUnavailableへ分類され、messageへ起動error本文を埋め込む
+    // [covers:backend-process.spawn-permission-denied-zellij-unavailable]
+    #[test]
+    fn spawn_permission_denied_becomes_zellij_unavailable() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("zelper-fake-process-noperm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("zellij");
+        std::fs::write(&shim, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let backend = ZellijCliBackend::new("s").with_program(shim);
+        let err = backend.run(&["--version".to_string()]).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::ZellijUnavailable,
+            "message: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("failed to start zellij:"),
+            "message: {}",
+            err.message()
+        );
+    }
+
+    /// test-plan §2.3・DD-3.5: --version出力がversion形式にparse不能な場合は
+    /// UnsupportedVersionで拒否される（parse結果None経路）
+    // [covers:backend-process.version-unparseable-unsupported]
+    #[test]
+    fn version_unparseable_becomes_unsupported() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let program = setup_fake_zellij(
+            "version-bad",
+            "#!/usr/bin/env bash\necho 'not-a-version'\nexit 0\n",
+        );
+        let backend = ZellijCliBackend::new("s").with_program(program);
+        let err = check_capability(&backend).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::UnsupportedVersion,
+            "message: {}",
+            err.message()
+        );
+        assert!(
+            err.message()
+                .contains("failed to parse zellij version output"),
+            "message: {}",
+            err.message()
+        );
+    }
+
+    /// DD-3.1: 1呼び出しのtimeout超過はOperationFailedへ変換される。
+    /// private field timeoutへ短時間を直接設定し、sleepするfake scriptで決定的に検証
+    // [covers:backend-process.timeout-operation-failed]
+    #[test]
+    fn timeout_exceeded_becomes_operation_failed() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let program = setup_fake_zellij("timeout", "#!/usr/bin/env bash\nsleep 5\n");
+        let mut backend = ZellijCliBackend::new("s").with_program(program);
+        backend.timeout = Duration::from_millis(300);
+        let err = backend.run(&["--version".to_string()]).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::OperationFailed,
+            "message: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("zellij call timed out after"),
+            "message: {}",
+            err.message()
+        );
+    }
+
+    /// DD-3.4・design-review §4.19 TR59-3: current-tab-info --jsonの出力が
+    /// 単一tabに定まらない（parse結果が複数件）場合はOperationFailed。
+    /// current_tabは`--session s action current-tab-info --json`のみ発行するため
+    /// script応答は引数分岐不要の固定出力とする
+    // [covers:backend-process.current-tab-unexpected-output-operation-failed]
+    #[test]
+    fn current_tab_unexpected_output_becomes_operation_failed() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let script = r#"#!/usr/bin/env bash
+printf '%s\n' '[{"position":0,"name":"Tab #1","active":true,"are_floating_panes_visible":false,"selectable_tiled_panes_count":3,"selectable_floating_panes_count":0,"tab_id":0},{"position":1,"name":"Tab #2","active":false,"are_floating_panes_visible":false,"selectable_tiled_panes_count":2,"selectable_floating_panes_count":0,"tab_id":1}]'
+exit 0
+"#;
+        let program = setup_fake_zellij("current-tab-multi", script);
+        let backend = ZellijCliBackend::new("s").with_program(program);
+        let err = backend.current_tab().unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::OperationFailed,
+            "message: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("unexpected current-tab-info output"),
+            "message: {}",
+            err.message()
+        );
     }
 }

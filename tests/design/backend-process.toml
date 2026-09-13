@@ -1,0 +1,114 @@
+# 実zellij実行backend（src/zellij/process.rs）の検証条件。出典: test-plan §2.3・§2.9・DD-1.5・DD-3.1/3.4/3.5・DD-5・DD-10.14・design-review §4.19
+# 対応test: src/zellij/process.rs内test（lib。6件。1条件=1 test fnの1:1対応）
+[meta]
+feature = "backend-process"
+source_file = "src/zellij/process.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --lib"
+source_hash = "5dff1c5d39eb1c0cbc5b6430dc175dc5b607e0b8"
+note = "TASK-59完了: backend-parser.toml移行時excluded 1件（zellijのerror出力→error class変換）をsrc/zellij/process.rs内test追加により条件化。TR59-1対応: timeout超過は移行案のexcludedから条件へ変更（5条件目backend-process.timeout-operation-failed）。TR59-3対応: current_tabの非単一tab出力分岐を条件化し、validate_exclusive伝播・parse系error伝播をexcludedへ記録。CR59-5対応: fake script生成をstaging+atomic rename公開へ変更しtest module内Mutexで直列化（ETXTBSY競合の解消。src実装本体は不変）。test fn 6件・全条件PASS・verify-conditions passまで確認済み（2026-09-13）"
+
+[[condition]]
+id = "backend-process.nonzero-exit-operation-failed"
+source_lines = "src/zellij/process.rs:412"
+target_function = "ZellijCliBackend::run（非zero exit）"
+source = "docs/testing/test-plan.md §2.3（zellijのerror出力（Failed to load layout: ...等、Phase 1失敗記録から）→ error class変換。旧本文・git 2a9c85f時点） + docs/design/detailed-design.md DD-5:265（zellij側errorをclass=OperationFailedで包む）・DD-10.14:512（class割当）"
+description = "zellijの非zero exit終了は常にOperationFailedへ変換される: messageへexit statusとtrim済みstderr本文を埋め込む。stderr内容によるclass切替は設計上存在しない（DD-5:265・DD-10.14:512）"
+given = "fake zellij test mutex下で、staging fileへwrite/chmod後にcloseしてatomic rename公開したscriptをwith_programで指向したbackendのrun()呼び出し（stderrへ Failed to load layout: ... を出力してexit 1）"
+expect_return = "Err。class=OperationFailed。messageはexit status（exit status: 1）とtrim済みstderr本文を含み、改行を含まない（全文はpinしない）"
+
+[[condition]]
+id = "backend-process.spawn-notfound-zellij-unavailable"
+source_lines = "src/zellij/process.rs:436"
+target_function = "ZellijCliBackend::run（spawn NotFound）"
+source = "docs/testing/test-plan.md §2.9（zellij不在でZellijUnavailable exit 4。cli-grammar.tomlのzellij不在excludedと同源） + docs/design/detailed-design.md DD-3.1"
+description = "programが存在しない（spawn ErrのErrorKind=NotFound）場合の起動失敗はZellijUnavailableへ分類される。CLI levelのexit 4実pathはcli-grammar.tomlのexcludedに記録のまま（本条件はrun()機構側）"
+given = "fake zellij test mutex下で、存在しないpathをwith_programで指向したbackendのrun()呼び出し"
+expect_return = "Err。class=ZellijUnavailable。messageはzellij executable not found in PATHを含む"
+
+[[condition]]
+id = "backend-process.spawn-permission-denied-zellij-unavailable"
+source_lines = "src/zellij/process.rs:462"
+target_function = "ZellijCliBackend::run（spawn失敗: NotFound以外）"
+source = "docs/design/detailed-design.md DD-5（zellij起動失敗系のerror分類）+ src/zellij/process.rs:66-70"
+description = "NotFound以外のspawn失敗（実行権限なしによるEACCES等）もZellijUnavailableへ分類され、messageへ起動error本文を埋め込む。mode 0644（x bitなし）のexecはLinuxではrootにも拒否される（CAP_DAC_OVERRIDEでもS_IXUGO必須）ため、test実行userによらず決定的"
+given = "fake zellij test mutex下で、実行権限なし（mode 0644）のfileをwith_programで指向したbackendのrun()呼び出し"
+expect_return = "Err。class=ZellijUnavailable。messageはfailed to start zellij:を含む"
+
+[[condition]]
+id = "backend-process.version-unparseable-unsupported"
+source_lines = "src/zellij/process.rs:489"
+target_function = "check_capability（version parse不能）"
+source = "docs/testing/test-plan.md §2.3（version文字列→判定。旧本文・git 2a9c85f時点） + docs/design/detailed-design.md DD-3.5"
+description = "--version出力がversion形式にparse不能な場合の拒否: UnsupportedVersion。check_capabilityの分岐のうち既存条件がcoverしない残り経路。parse_version(\"not-a-version\\n\")→None（backend-parser.version-stringsがparse関数側を検証）に依存する"
+given = "fake zellij test mutex下で、staging fileへwrite/chmod後にcloseしてatomic rename公開した--version応答がversion形式でないscriptをwith_programで指向したbackendに対するcheck_capability呼び出し"
+expect_return = "Err。class=UnsupportedVersion。messageはfailed to parse zellij version outputを含む"
+
+[[condition]]
+id = "backend-process.timeout-operation-failed"
+source_lines = "src/zellij/process.rs:515"
+target_function = "ZellijCliBackend::run（timeout超過）"
+source = "docs/design/detailed-design.md DD-3.1（1呼び出しのtimeout）"
+description = "1呼び出しのtimeout超過はOperationFailedへ変換される（DD-3.1: pipe_pluginがblockし得るためtimeout必須）。in-module testからprivate field timeoutへ短い値（数百ms）を直接設定し、長くsleepするfake zellij scriptで決定的に検証する（TR59-1対応の条件化）"
+given = "timeout fieldへ短時間（例: 数百ms）を直接設定したbackendが、fake zellij test mutex下で、staging fileへwrite/chmod後にcloseしてatomic rename公開した長くsleepするfake zellij scriptをwith_programで指向しrun()を呼ぶ"
+expect_return = "Err。class=OperationFailed。messageはzellij call timed out afterを含む（src/zellij/process.rs:97のformat文字列 \"zellij call timed out after {:?}\" に従いtimeout値のDebug表記が続く）"
+
+[[condition]]
+id = "backend-process.current-tab-unexpected-output-operation-failed"
+source_lines = "src/zellij/process.rs:540"
+target_function = "ZellijCliBackend::current_tab（非単一tab出力）"
+source = "docs/design/detailed-design.md DD-3.4（current-tab-info --jsonをTabInfoとして直接decode・単体parse） + src/zellij/process.rs:161-168 + docs/design/design-review.md §4.19 TR59-3（移行時列挙漏れ分岐の対応決定）"
+description = "current-tab-info --jsonの出力が単一tabに定まらない（parse結果が0件または複数件）場合はOperationFailed（unexpected current-tab-info output）。TR59-3対応: 移行時列挙漏れ分岐の条件化。in-module testからfake zellij scriptの応答を複数tab JSON配列へ固定して決定的に検証する"
+given = "fake zellij test mutex下で、staging fileへwrite/chmod後にcloseしてatomic rename公開した2件分のtab JSON（実出力相当）配列scriptをwith_programで指向したbackendのcurrent_tab()呼び出し"
+expect_return = "Err。class=OperationFailed。messageはunexpected current-tab-info outputを含む"
+
+[[excluded]]
+item = "check_capability最小version未満・系列超過の拒否"
+source = "docs/testing/test-plan.md §2.7(h) R46 + docs/design/detailed-design.md DD-3.5"
+reason = "covered by remap-cli.r46-below-minimum-and-future-series-exit4（実在確認: tests/design/remap-cli.toml:42。L3 fake zellij shimの--version応答差し替えで検証）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "check_capability受理（0.44.3系列内→Ok）"
+source = "docs/design/detailed-design.md DD-3.5"
+reason = "L3全正常系の前提経路で重複"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "run() try_wait失敗→OperationFailed"
+source = "docs/design/detailed-design.md DD-3.1"
+reason = "子process wait失敗をsafeなtestから決定的に引起不可"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "run()成功系（exit 0→stdout返却・stderr非混入・並行読み取り構造）"
+source = "docs/testing/test-plan.md §2.3〜2.7各正常系 + docs/design/detailed-design.md DD-3.4"
+reason = "covered by L3各条件の正常系"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "run_action/run_action_as argv組み立て"
+source = "docs/design/detailed-design.md DD-3.1"
+reason = "covered by L3各条件（shim argv分岐で検出）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "new_tab・override_layout内のvalidate_exclusive失敗分岐"
+source = "docs/design/detailed-design.md DD-1.5（layout 3source相互排他） + src/zellij/process.rs:249・:299"
+reason = "covered by add-remove.add-tab-layout-sources-conflict（実在確認: tests/design/add-remove.toml:23）。error生成はLayoutSpec::validate_exclusive（src/zellij/mod.rs:17）の単一実装でapp層経由の検証と同源。process.rs側は`?`伝播のみで独自分岐なし（TR59-3）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "parse系errorの伝播（parse_sessions・parse_tabs・parse_panes・parse_created_pane・parse_created_tabの各`?`）"
+source = "docs/design/detailed-design.md DD-3.4（構造化出力のparseはparser側） + src/zellij/process.rs:133・:138・:143・:148・:160・:235・:267"
+reason = "error生成はsrc/zellij/parser.rs側（backend-parser.toml管轄）。process.rsは`?`伝播のみで挙動に差を生まない内部処理（§8「書かない」。TR59-3）"
+decided_at = "2026-09-13"
+decided_by = "claude"

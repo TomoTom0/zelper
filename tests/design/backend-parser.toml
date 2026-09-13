@@ -8,7 +8,7 @@ verified_at = "2026-09-13"
 verified_by = "claude"
 test_command = "cargo test --test parser"
 source_hash = "31d82255da7085a56fa9a808d0d48f289603182c"
-note = ""
+note = "TASK-59: 移行時excluded 1件（zellijのerror出力→error class変換）をsrc/zellij/process.rs内test追加により条件化（backend-process.tomlへ新規起票）。src/zellij/parser.rsは不変のためsource_hash再計算不要"
 
 [[condition]]
 id = "backend-parser.version-strings"
@@ -63,10 +63,3 @@ source = "docs/testing/test-plan.md §2.3（list-tabs -a --json fixture → TabS
 description = "list-tabs -a --jsonの実出力形式をTabStateへ変換する（id・position・name・active・selectable tiled/floating count）。selectable paneを持つtabは空tabでない（CMR-5: parse全fieldと空tab判定の非空側を1条件に統合）"
 given = "実出力相当の1tab JSON（selectable_tiled_panes_count=3・selectable_floating_panes_count=1・tab_id=0）"
 expect_return_shape = "1件のTabState（TabId(0)・selectable_tiled_panes_count=3・is_empty=false）"
-
-[[excluded]]
-item = "zellijのerror出力からerror classへの変換（Failed to load layout: ... 等、Phase 1失敗記録から）"
-source = "docs/testing/test-plan.md §2.3（zellijのerror出力→error class変換）"
-reason = "未test。既存133 testにzellij stderrをerror classへ変換する経路を検証するtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
