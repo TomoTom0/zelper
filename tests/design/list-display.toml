@@ -1,0 +1,163 @@
+# list表示（src/app/list.rs）の検証条件。出典: test-plan §2.1（list系）・DD-4.1/DD-5/DD-3.4・design-review §4.9〜4.11（TASK-44〜47）
+# 対応test: tests/cli/list_read_send.rs（部分10件）+ lib src/app/list.rs（3件）。1条件=1 test fnの1:1対応（設計書§2.3/3.4）
+[meta]
+feature = "list-display"
+source_file = "src/app/list.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test cli_list_read_send && cargo test --lib"
+source_hash = "a4bfc373134eba66044b2727f190f94d76759a0a"
+note = ""
+
+[[condition]]
+id = "list-display.sessions-and-tabs-basic-output"
+source_lines = "tests/cli/list_read_send.rs:109"
+target_function = "list::run（Sessions / Tabs）"
+source = "docs/testing/test-plan.md §2.1（各verb正常系parse。list sessions/tabsの基本出力） + docs/design/detailed-design.md DD-4.1（list sessions: NAME / CREATED / CURRENT / PANES・CREATEDは相対表記・CURRENTは(current) suffixを*表示。list tabs: TAB_ID / POS / ACTIVE / NAME / PANES） + DD-5（sessionsはlist-sessions -n parse + 実行中session毎にlist-tabs発行）"
+description = "list sessionsとlist tabsの基本出力: sessions JSONはname/created/current/panes_per_tabをdata.sessionsへ、tabs humanはTAB_ID/POS/ACTIVE/NAME/PANES表（CMR-5: sessions JSON構造とtabs human表を1条件に統合。list panesはpanes-human-columns条件・layoutsはlayouts-without-session-resolution条件が各担当）"
+given = "fake zellij shim（1 session・tabs fixtureはtiled 2の1tab）に対するzelper list sessions --jsonとzelper list tabsの実行"
+expect_return_shape = "sessions JSONはdata.sessions[0]がname=fake-sess・created=1m ago・current=true・panes_per_tab=[2]。tabs humanはTAB_ID/POS/ACTIVE/NAME/PANESのheader行と0/*/Tab #1/2の行（タブ区切り・ACTIVEは*表示）"
+
+[[condition]]
+id = "list-display.sessions-live-only-with-exited-present"
+source_lines = "tests/cli/list_read_send.rs:139"
+target_function = "list::run（Sessions: exited filter）"
+source = "docs/design/detailed-design.md DD-1.2構文木注記（list sessionsはsession解決を行わない。EXITED混在・複数実行中でも表示できる） + DD-3.4（EXITED行もflag付きでparseし、実行中のみへの絞り込みは呼び出し側（list sessions表示）） + docs/design/design-review.md §4.9 TASK-44（EXITED session解決・C10文言確定）"
+description = "list sessionsは対象session解決を前提とせず一覧表示できる: EXITED行はparseされるが表示は実行中のみ。dead sessionが複数残る環境でのlist可用性"
+given = "list-sessions -n出力がEXITED 2件と実行中1件（live-a・current）のfake zellij shimに対するzelper list sessions --jsonの実行"
+expect_return_shape = "data.sessionsはlive-aのみ（1件）で、created=1m ago・panes_per_tab=[2]が取れる"
+
+[[condition]]
+id = "list-display.sessions-human-metadata-columns"
+source_lines = "tests/cli/list_read_send.rs:175"
+target_function = "list::run（Sessions human表）"
+source = "docs/design/detailed-design.md DD-4.1（list sessions: NAME / CREATED / CURRENT / PANES。CREATEDはlist-sessions -nの相対表記・CURRENTは*表示） + docs/design/design-review.md §4.10 TASK-46（sessions NAME/CREATED/CURRENT/PANES列拡張）"
+description = "list sessions human表の列構成: NAME/CREATED/CURRENT/PANES。current行は*・非current行は空欄。TASK-46で追加されたmetadata列の表示契約"
+given = "list-sessions -n出力がlive-a（current）とlive-b（suffixなし）のfake zellij shimに対するzelper list sessions（human）の実行"
+expect_return_shape = "NAME TAB CREATED TAB CURRENT TAB PANESのheaderと、live-a TAB 1m ago TAB * TAB 2 / live-b TAB 2h ago TAB（空欄）TAB 2 の行"
+
+[[condition]]
+id = "list-display.panes-human-columns-with-cwd"
+source_lines = "tests/cli/list_read_send.rs:207"
+target_function = "list::run（Panes human表）"
+source = "docs/design/detailed-design.md DD-4.1（list panes: PANE_ID / TAB / TITLE / COMMAND / CWD） + docs/design/design-review.md §4.9 TASK-45（list panes human出力CWD列追加）"
+description = "list panes human表の列構成: PANE_ID/TAB/TITLE/COMMAND/CWD。command・cwd不明（plugin pane等）は-。TASK-45で追加されたCWD列の表示契約"
+given = "fake zellij shim（terminal_2件はcommand=codex系・cwd=/work、plugin_0はcommand/cwd無し）に対するzelper list panesの実行"
+expect_return_shape = "PANE_ID TAB TAB TAB TITLE TAB COMMAND TAB CWDのheaderに続き、terminal行は各field値・plugin_0行はCOMMAND/CWDとも-の表"
+
+[[condition]]
+id = "list-display.layouts-without-session-resolution"
+source_lines = "tests/cli/list_read_send.rs:222"
+target_function = "list::run（Layouts）"
+source = "docs/design/detailed-design.md DD-3.4（layout一覧: layout_dir（ZELLIJ_LAYOUT_DIR環境変数 > ~/.config/zellij/layouts）を直接読む。dir不存在時は空リスト） + DD-1.2構文木注記（layoutsはzellijを呼ばず無条件） + DD-4.1（list layouts: NAME / SIZE / MODIFIED（bytes・相対表記。file stat由来）） + docs/design/design-review.md §4.9 C8（list layouts回帰test。TASK-44）"
+description = "list layoutsはsession解決を行わず動く: 実行中session複数環境でもlayout_dirのfile列挙として動作し、NAME/SIZE/MODIFIED列（JSONはname/size/modified_epoch）を出す。TASK-44でlayouts分岐がsession解決を行わない実装へ変わった際の回帰検出（C8。CMR-5: session解決不要性とlayouts列構成を1条件に統合）"
+given = "実行中session 2件の環境で、three.kdl・two.kdlを置いたdirをZELLIJ_LAYOUT_DIRへ指向したzelper list layouts --jsonとzelper list layouts（human）の実行"
+expect_return_shape = "JSONはdata.layouts 2件（threeはsize=15・modified_epochはu64・sort済み）。humanはNAME TAB SIZE TAB MODIFIED headerとthree TAB 15 TAB（相対表記）行"
+
+[[condition]]
+id = "list-display.sessions-summary-elides-beyond-four-tabs"
+source_lines = "tests/cli/list_read_send.rs:431"
+target_function = "list::run（Sessions PANES概要） + pane_count_label"
+source = "docs/design/detailed-design.md DD-4.1（PANESはtab毎pane数の+連結（5tab目以降は...省略）。list tabsのPANESはfloatingがあれば2+1f形式） + docs/design/design-review.md §4.10 TASK-46 C14(a)(b)（5tab超省略形式とfloating併記の要件本体test）・C15（session概要のPANES連結からfloatingを除外しlist tabsのPANES列に限定）"
+description = "PANES概要の形式: session概要はtab毎tiled pane数の+連結で5tab目以降...省略（floatingは除外）、list tabsのPANES列は2+1f形式でfloatingを併記。C15修正後の役割分担の固定（CMR-5: session概要省略とtabs floating併記を1条件に統合）"
+given = "tiled 7,7,6,2,1,3の6tab（2tab目にfloating 2）のtabs.jsonへ差し替えたfake zellij shimに対するzelper list sessionsとzelper list tabsの各実行"
+expect_return_shape = "sessions行のPANESは7+7+6+2+...（floating混入なし・5tab目以降省略）。tabs表のPANES列は7 / 7+2f / 6 / 2 / 1 / 3"
+
+[[condition]]
+id = "list-display.sessions-tabs-fetch-failure-fallback"
+source_lines = "tests/cli/list_read_send.rs:481"
+target_function = "list::run（Sessions: list_tabs_for失敗fallback）"
+source = "docs/design/detailed-design.md DD-5（sessionsはlist-sessions -n 1回 + 実行中session毎に--session NAME action list-tabsを発行。他sessionのlist-tabs失敗は該当行を-に落とし一覧は維持） + docs/design/design-review.md §4.10 C14(c)(e)（list-tabs失敗fallback・JSON current:falseの要件本体test）"
+description = "PANES概要取得（list-tabs）失敗時のfallback: 該当session行のPANESを-（JSONはnull）へ落とし一覧自体は失敗させない。session実行中に消えた等の一時失敗で一覧が全滅しない契約。suffixなしsessionのJSON current:falseも同時検証（CMR-5: human/JSON両fallbackとcurrent:falseを1条件に統合）"
+given = "list-tabsをexit 1で失敗させるfake zellij shimに対するzelper list sessions（human）と、suffixなしsession（currentなし）でのzelper list sessions --jsonの各実行"
+expect_return_shape = "humanはPANES列が-の行。JSONはcurrent=false・panes_per_tab=null"
+
+[[condition]]
+id = "list-display.panes-compact-shows-tab-and-short-cwd"
+source_lines = "tests/cli/list_read_send.rs:509"
+target_function = "list::run（Panes compact）"
+source = "docs/design/detailed-design.md DD-4.1（--compact（-c）: panesはTAB<tab>短縮cwd（HOME prefixを~置換・cwd不明時-）のみ） + docs/design/design-review.md §4.11 TASK-47 C22（compact時は非selectable plugin paneを除外）"
+description = "list panes --compactの形式: tab名と短縮cwd（HOME prefixを~へ置換）のみの行。header無し。非selectable plugin pane（tab bar等）は識別子を持たない行を避けるため除外（TASK-47）"
+given = "cwd=/home/tester/work/appのterminal 2件とplugin 1件のpanes.jsonへ差し替え、HOME=/home/testerを設定したfake zellij shimに対するzelper list panes --compactの実行"
+expect_return_shape = "Tab #1 TAB ~/work/app の2行のみ（plugin行の出現なし・headerなし）"
+
+[[condition]]
+id = "list-display.compact-names-and-json-precedence"
+source_lines = "tests/cli/list_read_send.rs:531"
+target_function = "list::run（compact: tabs/sessions + JSON優先）"
+source = "docs/design/detailed-design.md DD-4.1（--compact: sessions/tabs/layoutsは名前のみ（header無し）。--json併用時はJSONを優先しcompactは無視） + docs/design/design-review.md §4.11 TASK-47（--compact縮小表示・優先規則）"
+description = "compact表示の名前のみ縮小（tabs/sessions）と--json併用時のJSON優先（compact無視）。machine可読と人間可読の切り替え規則（CMR-5: 名前のみ縮小とJSON優先を1条件に統合）"
+given = "fake zellij shimに対するzelper list tabs --compact・zelper list sessions -c・zelper list sessions --compact --jsonの各実行"
+expect_return_shape = "tabs compactはTab #1のみの行（header無し）。sessions -cはlive-aのみの行。--compact --json併用は通常のJSON envelope（data.sessions[0].created等のfieldを含む）"
+
+[[condition]]
+id = "list-display.layouts-compact-names-only"
+source_lines = "tests/cli/list_read_send.rs:562"
+target_function = "list::run（Layouts compact）"
+source = "docs/design/detailed-design.md DD-4.1（--compact: sessions/tabs/layoutsは名前のみ） + docs/design/design-review.md §4.11 C24（list layouts --compact分岐の未カバー固定。TASK-47）"
+description = "list layouts --compactは名前のみの行（header無し）。compact分岐の4resourceのうちlayoutsの固定（C24）"
+given = "solo.kdlを置いたdirをZELLIJ_LAYOUT_DIRへ指向したzelper list layouts --compactの実行"
+expect_return_shape = "soloのみの1行（header無し）"
+
+[[condition]]
+id = "list-display.human-age-granularity-boundaries"
+source_lines = "src/app/list.rs:304"
+target_function = "human_age"
+source = "docs/design/detailed-design.md DD-4.1（list layouts: MODIFIEDは3d 5h ago相当の相対表記。file stat由来） + docs/design/design-review.md §4.10 C14(d)（human_age粒度境界の要件本体test。TASK-46。lib内#[cfg(test)]で検証）"
+description = "MODIFIED相対表記（human_age）の粒度境界: d/h/m/s各粒度の切替わり境界と未来時刻のsaturating扱い（負経過を表示しない）。private fnのためlib内testで検証"
+given = "現在時刻nowに対し、now・now-1・now-60・now-3600・now-86400・now+3600の各epoch秒"
+expect_return = "0s ago / 1s ago / 1m 0s ago / 1h 0m ago / 1d 0h ago / 0s ago"
+
+[[condition]]
+id = "list-display.panes-summary-elision-and-floating-exclusion"
+source_lines = "src/app/list.rs:321"
+target_function = "summarize_panes"
+source = "docs/design/detailed-design.md DD-4.1（PANESはtab毎pane数の+連結。5tab目以降は...省略） + docs/design/design-review.md §4.10 C14(a)(b)・C15（floating除外と省略の純粋関数test。TASK-46）"
+description = "session概要PANES連結（summarize_panes純粋関数）の規則: tiled数のみ連結（floating除外）・4tab以下は全件・5tab超は先頭4件+...。lib内testで直接検証"
+given = "tiled/floatingの組が(7,0),(7,0),(6,0) / (2,1),(2,0) / (1,0)〜(5,0)の5tabの各TabState列"
+expect_return = "7+7+6 / 2+2（floating 1が除外される） / 1+2+3+4+..."
+
+[[condition]]
+id = "list-display.home-substitution-boundaries"
+source_lines = "src/app/list.rs:349"
+target_function = "short_path_with"
+source = "docs/design/detailed-design.md DD-4.1（短縮cwd: HOME prefixを~置換） + docs/design/design-review.md §4.11 C20/C21（short_pathの境界case回帰test・HOME末尾/正規化。TASK-47）"
+description = "短縮cwd（short_path_with純粋関数）の境界: HOME配下は~置換、HOME自身は~、prefix類似dir（/home/tomox・/home/tomo2）は置換しない、HOME外・HOME未設定相当（空）はそのまま、HOME末尾/は正規化して一致。lib内testで直接検証"
+given = "pathとraw_homeの組: (/home/tomo/work, /home/tomo) / (/home/tomo, /home/tomo) / (/home/tomox, /home/tomo) / (/home/tomo2/x, /home/tomo) / (/usr/bin, /home/tomo) / (/home/tomo/work, 空) / (/home/tomo/work, /home/tomo/)"
+expect_return = "~/work / ~ / /home/tomox / /home/tomo2/x / /usr/bin / /home/tomo/work / ~/work"
+
+[[excluded]]
+item = "list-panesがerrorを返す場合の対象解決前の失敗伝播"
+source = "docs/testing/test-plan.md §2.9（list-panesがerror → 対象解決前の失敗伝播）"
+reason = "未test。既存133 testにlist-panes失敗時の伝播を検証するtest fnが存在しないため本移行では条件化できない（fake shimのlist-panesは常時成功）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "list panesの--tab TABSPEC絞り込み（tab解決後のfilter）"
+source = "docs/design/detailed-design.md DD-1.2（--tabはpanesの絞り込みに使用） + DD-5（panes→list-panes -a --json（--tab絞り込みはzelper側でtab解決後にfilter））"
+reason = "未test。既存133 testにlist panes --tab併用を検証するtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "list tabs --jsonのdata.tabs field構成（tab_id/position/name/active/selectable_*_count）"
+source = "docs/design/detailed-design.md DD-4.2（成功時envelope・dataにコマンド固有object） + DD-4.1（list tabs表のJSON対応）"
+reason = "未test。既存133 testにlist tabs --jsonを検証するtest fnが存在しないため本移行では条件化できない（tabsはhuman出力のみ検証済み。envelope一般契約はjson-contract.ok-envelope-shapeが担保）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "layoutsのstat失敗・mtime不明時の-表示（JSONはnull）"
+source = "docs/design/detailed-design.md DD-4.1（list layouts: NAME / SIZE / MODIFIED） + docs/design/design-review.md §4.10 C16（entriesをOption<u64>化。size/modified取得失敗時は-（JSONはnull）表示。TASK-46）"
+reason = "未test。既存133 testにstat失敗系列を検証するtest fnが存在しないため本移行では条件化できない（layouts-without-session-resolution条件はstat成功時のみassert）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "list系のsession不存在失敗（zellij側errorをclass=OperationFailedで包む）"
+source = "docs/design/detailed-design.md DD-5（失敗: session不存在はzellij側errorをclass=OperationFailedで包む）"
+reason = "未test。既存133 testにsession不存在時のlist失敗を検証するtest fnが存在しないため本移行では条件化できない（fake shimのsession応答は常に成功）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"

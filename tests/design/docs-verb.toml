@@ -1,0 +1,74 @@
+# docs verb（src/app/docs.rs）の検証条件。出典: TASK-24/25/26・design-review §4.4・DD-1.1
+# 対応test: tests/cli/docs.rs（7件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+[meta]
+feature = "docs-verb"
+source_file = "src/app/docs.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test cli_docs"
+source_hash = "10ecd3f179aeb1ac2bbb175716edb1c5e1f3b2a1"
+note = ""
+
+[[condition]]
+id = "docs-verb.readme-outputs-readme-md"
+source_lines = "tests/cli/docs.rs:10"
+target_function = "docs::run（DocsTarget::Readme）"
+source = "docs/design/design-review.md §4.4 TASK-24（agent配布物のdocs verb・実装と配布物の一致をCLI契約テストで検証） + docs/design/detailed-design.md DD-1.1（docs = agent向け配布物の出力。zellij sessionに触れない純粋出力の文書化された例外コマンド）"
+description = "zelper docs readmeはrepo正本README.mdをそのままstdoutへ出力する。配布物取り出し経路として出力が正本と一致すること（byte一致）の保証"
+given = "zelper docs readmeの実行"
+expect_return_shape = "exit 0かつstdoutがrepo README.mdと完全一致"
+
+[[condition]]
+id = "docs-verb.llm-usage-outputs-usage-md"
+source_lines = "tests/cli/docs.rs:21"
+target_function = "docs::run（DocsTarget::LlmUsage）"
+source = "docs/design/design-review.md §4.4 TASK-25追記（docs verbをdocs readme | llm usage|skill|snippetの2段構造化・LLM向けusage参照追加） + TASK-26追記（docs配布物正本をdocs/usage/カテゴリへ再構成） + docs/design/detailed-design.md DD-1.1（文法の2段構造）"
+description = "zelper docs llm usageはdocs/usage/llm.md（全verb文法・排他規則・JSON envelope・error class・安全gate・誤用対）をstdoutへ出力する。LLM利用者向け参照の取り出し経路"
+given = "zelper docs llm usageの実行"
+expect_return_shape = "exit 0かつstdoutがdocs/usage/llm.mdと完全一致"
+
+[[condition]]
+id = "docs-verb.llm-skill-outputs-skill-md"
+source_lines = "tests/cli/docs.rs:32"
+target_function = "docs::run（DocsTarget::LlmSkill）"
+source = "docs/design/design-review.md §4.4 TASK-24（SKILL.md配布） + TASK-25追記（2段構造化） + TASK-26追記（docs/usage/skill/SKILL.mdへの再構成）"
+description = "zelper docs llm skillはdocs/usage/skill/SKILL.md（Claude等agent向けskill定義）をstdoutへ出力する。skill配布の取り出し経路"
+given = "zelper docs llm skillの実行"
+expect_return_shape = "exit 0かつstdoutがdocs/usage/skill/SKILL.mdと完全一致"
+
+[[condition]]
+id = "docs-verb.llm-snippet-outputs-snippet-md"
+source_lines = "tests/cli/docs.rs:43"
+target_function = "docs::run（DocsTarget::LlmSnippet）"
+source = "docs/design/design-review.md §4.4 TASK-24（snippet配布） + TASK-25追記（2段構造化） + TASK-26追記（docs/usage/snippet.mdへの再構成）"
+description = "zelper docs llm snippetはdocs/usage/snippet.md（CLAUDE.md等へ貼る簡易参照）をstdoutへ出力する。snippet配布の取り出し経路"
+given = "zelper docs llm snippetの実行"
+expect_return_shape = "exit 0かつstdoutがdocs/usage/snippet.mdと完全一致"
+
+[[condition]]
+id = "docs-verb.without-subcommand-is-usage-error"
+source_lines = "tests/cli/docs.rs:54"
+target_function = "docs構文（第1階層必須）"
+source = "docs/design/design-review.md §4.4 TASK-25追記（docs readme | llm usage|skill|snippetの2段構造） + docs/design/detailed-design.md DD-1.1・DD-4.3（usage error = exit 2）"
+description = "docsは第1階層（readme/llm）必須: 指定なしはusage error。配布物出力の対象を構文で確定させる"
+given = "zelper docsの実行（subcommandなし）"
+expect_return = "exit 2（usage error）"
+
+[[condition]]
+id = "docs-verb.llm-without-resource-is-usage-error"
+source_lines = "tests/cli/docs.rs:65"
+target_function = "docs構文（第2階層必須）"
+source = "docs/design/design-review.md §4.4 TASK-25追記（llmのみ第2階層。usage|skill|snippet） + docs/design/detailed-design.md DD-1.1"
+description = "docs llmは第2階層（usage/skill/snippet）必須: 指定なしはusage error。2段構造の第2階層の必須性"
+given = "zelper docs llmの実行（resourceなし）"
+expect_return = "exit 2（usage error）"
+
+[[condition]]
+id = "docs-verb.unknown-resource-is-usage-error"
+source_lines = "tests/cli/docs.rs:76"
+target_function = "docs構文（resource値域）"
+source = "docs/design/design-review.md §4.4 TASK-25追記（2段構造の値域） + docs/design/detailed-design.md DD-1.1（文書化された例外コマンドの文法固定） + DD-4.3（usage error = exit 2）"
+description = "docs llm <resource>の値域はusage/skill/snippetに限る: 不明resourceはusage error。将来の値追加時に意図せず受理されない固定"
+given = "zelper docs llm bogusの実行（不明resource）"
+expect_return = "exit 2（usage error）"

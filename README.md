@@ -10,7 +10,7 @@ zelper remap three                      # 動いているpaneをprocess保持の
 
 ## install
 
-前提: zellij >= 0.44.1（`--layout-string`導入版。詳細は「互換性」章）
+前提: zellij >= 0.44.3（詳細は「互換性」章）
 
 ### GitHub Releases から（推奨）
 
@@ -43,11 +43,15 @@ miseはsupply-chain保護（`minimum_release_age`、default 24h）により公�
 ### 開発者向け
 
 ```bash
+rustup target add wasm32-wasip1   # companion plugin wasmのbuildに必要
 cargo install --git https://github.com/TomoTom0/zelper
 # または clone して
 cargo install --path .
+mise run install        # 同等（repoのmise.tomlに定義済み）
 cargo build --release   # target/release/zelper（buildのみ）
 ```
+
+build時にcompanion plugin（wasm）を自動buildしてbinaryへ埋め込むため、install・配布形態は従来どおり単一binary（追加assetなし）。prebuilt wasmを使う場合は `ZELPER_PLUGIN_WASM` envにpathを指定する（CI等の高速化・escape hatch）。
 
 License: MIT OR Apache-2.0（`LICENSE-MIT` / `LICENSE-APACHE` 参照）
 
@@ -72,7 +76,7 @@ zelper rename pane PANE NAME
 zelper rename tab TAB NAME
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS]
 zelper resize equalize [--tab T | PANE...] [--json]
-zelper remap LAYOUT [--tab T | --session-scope] [--overflow nest|tabs] [--embed-floating] [--dry-run] [--json]
+zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
@@ -94,29 +98,30 @@ zelper docs readme | llm usage|skill|snippet
 
 ## remapの意味論
 
-既存の動いているpaneのprocessを保持したまま、指定layoutに再配置します。
+既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置します。対象はsession全体のselectable・tiledなterminal pane（`--tab T` 指定時はそのtabのpaneに絞り込み、かつそのtabが再配置のanchorになる）。
 
-- 適用はtab単位。他tabは保護（`--apply-only-to-active-tab`相当を内部で常時使用）
-- **pane数 M ≤ slot数 N**: 全pane保存。空slotは既定shellで埋まります
-- **M > N**: 既定はerror。Zellijの制約により「保存したまま追加tabへはみ出す」ことはできません（実験確定）。明示選択:
-  - `--overflow nest`: 全pane保存。overflow分は第1tab内に入れ子配置。**layout形状は保証されない**
-  - `--overflow tabs`: layoutを追加tabで反復。overflow分のpaneはcloseされ、commandを再起動して再構成（そのpaneのみ破壊的）。dry-runで保存/再作成の別を事前確認できる
-- floating paneはremapで失われるため、存在時はerror。`--embed-floating` でtiled化（process保持）してから組入れ（dry-runでは計画に含めるだけで切替は実行しない）
-- 適用後にpane IDの生存（tabs modeでは再作成paneのcommand一致）を検証し、不一致はexit 7で報告
+- pane数 M・slot数 N から **k = max(1, ceil(M/N))** 個のlayout instanceを生成し、layoutを反復して全paneを配置します。**M > N でもerrorになりません**
+- **kill/restartする経路は存在しません**。他tabへのpane移動はcompanion plugin（zelper binaryに埋め込んだwasm）によるプロセス保存移動で行います
+- instance 0は既存tab（`--tab`指定時はそのtab、省略時はactive tab。tab名は保持）。instance 1以降は新規tabに `<layout名>-2`、`<layout名>-3` …と連番で命名（`--path`はfile stem、`--inline`は `remap-2` 等がbase）
+- 割当順はvisual order（tab position → y → x）で決定的。空slot（最終instanceにのみ発生）は既定shellで埋まります。移動によって空になったtabはzellijにより自動closeされます
+- 移動が必要な場合（k > 1、または対象paneの一部がanchor tab外）のみcompanion pluginを使用し、状態変更前に応答性確認（probe）を行います。probe不成立なら一切の状態変更を行わず中断（exit 5）。移動が不要ならcompanion pluginは一切使われません
+- floating paneはremapで移動できないため、存在時はpreflight error。`--embed-floating` でtiled化（process保持）してから組入れ
+- 適用後にpane IDの生存・割当tab所属・各tabのpane数を検証し、不一致はexit 7で報告
 - atomicityは主張しない。途中失敗時は実行済み/失敗/未実行を報告
 
 ## 互換性
 
-- 要件: zellij >= 0.44.1（`--layout-string`導入版）
-- 検証: zellij 0.44.3（実機統合テスト S1〜S10: list/read/send/rename/add/remove/resize/remap含む全verb、プロセス保存はheartbeat pid継続で実証）。0.44.1単体の実機検証は未実施
-- 利用する公開interface: `zellij action`（list-panes/list-tabs --json、override-layout、new-pane/new-tab等）、`zellij list-sessions`、`zellij setup`
+- 要件: zellij >= 0.44.3（companion plugin駆動のため）。0.44.x系列を超えるversion（0.45.0等）は未実証としてexit 4で拒否します
+- 検証: zellij 0.44.3 + zellij-tile 0.44.3（実機統合テスト S-v2-1〜6: 9 pane → 3 instanceの全pid保存、dry-runの状態不変、移動不要時のplugin不使用、floating paneのpreflight errorと `--embed-floating` 組入れ、probe不成立時の状態変更前中断を実証）
+- companion plugin: remapで移動が必要なときのみ動作。binary埋込のwasmを `$XDG_CACHE_HOME/zelper/companion/<version>/` に展開し、`$XDG_CACHE_HOME/zellij/permissions.kdl` に権限をseed（不足分のみ追記）して権限dialogを自動化します。installは単一binaryのままで追加assetなし
+- 利用する公開interface: `zellij action`（list-panes/list-tabs --json、override-layout、pipe --plugin、new-pane/new-tab等）、`zellij list-sessions`、`zellij setup`
 
 ## 既知の制限
 
-- 既存paneを別tabへprocess保持で移す手段はZellijに存在しない。remapのoverflowも保存不可（上記）
+- remapのslot割当は、group（instance/tab）所属とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証しません
+- `pane_command` に `"` `'` `\` 改行・制御文字を含むpaneは、空白分割でquotingを復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）
 - `resize`は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない（step刻みはzellij側仕様）
-- `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（session名は正確、付帯情報は簡略）
-- `--overflow tabs` の再構成commandは `pane_command` 文字列の空白分割のため、引用を含むcommandは崩れうる
+- `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する
 - tab IDはclose後に再利用されるため、zelperは取得したtab IDを即時使用のみに用いる
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。zellij本体の解決（config.kdlの`layout_dir`）と一致させること
 

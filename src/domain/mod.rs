@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-/// zellij sessionの参照（session名。ID概念はzellijに不存在）
+/// zellij sessionの参照（session名。ID概念はzellijに不存在）。
+/// created は `list-sessions -n` の `[Created X ago]` 中身（例: `1m 45s ago`）
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SessionRef {
     pub name: String,
+    pub created: Option<String>,
+    pub current: bool,
+    pub exited: bool,
 }
 
 /// zellij tab ID。**close後再利用されるため不安定キー**（取得直後に消費する運用のみ）
@@ -60,6 +64,7 @@ pub struct PaneState {
     pub is_held: bool,
     pub geometry: Geometry,
     pub command: Option<String>,
+    pub terminal_command: Option<String>,
     pub cwd: Option<String>,
     pub tab_id: TabId,
     pub tab_position: u32,
@@ -68,9 +73,15 @@ pub struct PaneState {
 }
 
 impl PaneState {
-    /// remap対象: selectable かつ tiled なterminal pane（DD-10.2）
+    /// remap対象: selectable かつ tiled なterminal pane（DD-10.2）。
+    /// exit hold中（exited / is_held）のpaneは実行runを持たずrun一致照合の対象に
+    /// ならないため対象外とし、元tabに残す（paneはkillされず生存。DD-10.5）
     pub fn is_remap_source(&self) -> bool {
-        self.is_selectable && !self.is_floating && matches!(self.id, PaneKindId::Terminal(_))
+        self.is_selectable
+            && !self.is_floating
+            && !self.exited
+            && !self.is_held
+            && matches!(self.id, PaneKindId::Terminal(_))
     }
 
     /// visual order用sort key（tab_position, y, x）

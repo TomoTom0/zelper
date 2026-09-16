@@ -5,12 +5,12 @@ description: Zellij構造化操作CLI zelperの使い方。zellij sessionのpane
 
 # zelper - Zellij構造化操作CLI
 
-zelperはzellij sessionをverb-first文法で操作するCLI。`zellij`バイナリ（>= 0.44.1）をbackendとして呼ぶ。
+zelperはzellij sessionをverb-first文法で操作するCLI。`zellij`バイナリ（>= 0.44.3）をbackendとして呼ぶ。
 
 ## 実行原則
 
 - 対象session: `--session NAME` > 環境変数 `ZELLIJ_SESSION_NAME` > 実行中sessionが1つならそれ > error（候補表示）
-- 破壊的操作（`remove`、`remap --overflow tabs`）はまず `--dry-run --json` で計画を確認する
+- 破壊的操作（`remove`）はまず `--dry-run --json` で計画を確認する。`remap` に破壊的経路はないが、多pane再配置では `--dry-run --json` で計画（M/S/k・割当・生成KDL）を確認する
 - 構造の把握は `zelper list panes --json` から始める（pane ID / title / command / 位置を一括取得）
 
 ## 対象指定（全verb共通）
@@ -23,14 +23,14 @@ zelperはzellij sessionをverb-first文法で操作するCLI。`zellij`バイナ
 ## verb一覧
 
 ```text
-zelper list sessions|tabs|panes|layouts [--tab T] [--json]
+zelper list sessions|tabs|panes|layouts [--tab T] [--json] [-c|--compact]
 zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
 zelper rename pane PANE NAME
 zelper rename tab TAB NAME
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS]
 zelper resize equalize [--tab T | PANE...] [--json]
-zelper remap LAYOUT [--tab T | --session-scope] [--overflow nest|tabs] [--embed-floating] [--dry-run] [--json]
+zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
@@ -42,6 +42,7 @@ zelper docs readme | llm usage|skill|snippet
 
 誤用しやすい点:
 
+- `list --compact`（`-c`）はhuman出力の縮小（panesはtab+短縮cwdのみ・他は名前のみ）。`--json` 併用時はJSON優先
 - `send` のtext指定は `--` 区切り必須: `zelper send --command codex -- y`（`-- y`を忘れるとusage error exit 2）
 - `rename` はnoun形式: `zelper rename pane 3 build` / `zelper rename tab agents work`
 - `resize` は方向まで指定: `zelper resize pane 3 grow right 2`
@@ -59,21 +60,20 @@ zelper docs readme | llm usage|skill|snippet
 
 ## remapの意味論（誤用注意）
 
-既存の動いているpaneのprocessを保持したまま、指定layoutに再配置する。適用はtab単位（他tabは保護）。
+既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置する。対象はsession全体のselectable・tiled terminal pane（`--tab`指定時はそのtabのpaneに絞り込み、そのtabがanchor）。
 
-- **pane数 M <= slot数 N**: 全pane保存。空slotは既定shellで埋まる
-- **M > N**: 既定はerror。overflowは明示選択:
-  - `--overflow nest`: 全pane保存。overflow分は第1tab内に入れ子配置。layout形状は保証されない
-  - `--overflow tabs`: layoutを追加tabで反復。overflow分のpaneはcloseされcommandを再起動（そのpaneのみ破壊的）
+- 反復単位はlayout全体（T tab鋳型・S = 全tabのslot数和）。pane数 M > S でもerrorにならない: k = max(1, ceil(M/S)) block × T tabを生成して全paneを配置。kill/restart経路は存在しない
+- 生成tab (0,0)はanchor tab（省略時active tab。tab名は保持）。それ以外の生成tab名は幹（名前ありtab鋳型のname / base〔layout名・file stem・`remap`〕）+ `-<b+1>` block接尾。tab名・tab focus・pane focus・`default_tab_template`由来barを`zellij --layout`起動時と同一に再現。移動で空になったtabは自動close。remap対象外の過剰tabはcloseされず報告（`leftover_tabs`）
+- 移動が必要な場合のみcompanion plugin（binary埋込wasm + permissions.kdl seed）を使用。probe不成立なら状態変更前に中断
 - floating paneが存在するとerror。`--embed-floating` でtiled化（process保持）してから組入れ
 - atomicityは主張しない。途中失敗時は実行済み/失敗/未実行を報告
 
 ## 既知の制限
 
-- 既存paneを別tabへprocess保持で移す手段はZellijに存在しない。remapのoverflowも保存不可
+- remapのslot割当はgroup（block×tab所属）とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証しない
+- `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneはquotingを復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
-- `list sessions` のJSONはzellijが提供しないためテキストparse（session名は正確、付帯情報は簡略。`--json`でも付帯情報を過信しない）
-- `--overflow tabs` の再構成commandは `pane_command` 文字列の空白分割のため、引用を含むcommandは崩れうる
+- `list sessions` のJSONはzellijが提供しないためテキストparse（name / created / current / panes_per_tab を返す。EXITED な dead session は表示・session解決から除外される）
 - tab IDはclose後に再利用されるため、取得したtab IDは即時使用のみに用いる
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。zellij本体の解決（config.kdlの`layout_dir`）と一致させること
 

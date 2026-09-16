@@ -27,6 +27,7 @@ fn pane(
             cols: 10,
         },
         command: cmd.map(|c| c.to_string()),
+        terminal_command: None,
         cwd: Some("/tmp".into()),
         tab_id: TabId(tab),
         tab_position: tab_pos,
@@ -57,6 +58,7 @@ fn fixtures() -> Vec<PaneState> {
                 cols: 200,
             },
             command: None,
+            terminal_command: None,
             cwd: None,
             tab_id: TabId(1),
             tab_position: 0,
@@ -79,6 +81,7 @@ fn fixtures() -> Vec<PaneState> {
                 cols: 20,
             },
             command: Some("htop".into()),
+            terminal_command: None,
             cwd: None,
             tab_id: TabId(2),
             tab_position: 1,
@@ -88,6 +91,7 @@ fn fixtures() -> Vec<PaneState> {
     ]
 }
 
+// [covers:selector.positional-id-resolution-and-no-target]
 #[test]
 fn positional_id_resolution_and_no_target() {
     let panes = fixtures();
@@ -107,6 +111,7 @@ fn positional_id_resolution_and_no_target() {
     assert_eq!(*err.class(), ErrorClass::NoTarget);
 }
 
+// [covers:selector.filter-name-exact-and-command-partial]
 #[test]
 fn filter_name_exact_match_and_command_partial() {
     let panes = fixtures();
@@ -123,8 +128,53 @@ fn filter_name_exact_match_and_command_partial() {
     };
     let set = resolve(&spec, &panes).unwrap();
     assert_eq!(set.panes.len(), 2);
+
+    // title完全一致の回帰検出: "agent"はagent-a/agent-b titleの部分文字列だが完全一致しない
+    let spec = TargetSpec {
+        name: Some("agent".into()),
+        ..Default::default()
+    };
+    let err = resolve(&spec, &panes).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::NoTarget);
 }
 
+// [covers:selector.filter-cwd-exact-match]
+#[test]
+fn filter_cwd_exact_match() {
+    let panes = fixtures();
+    // 正例: cwd=/tmpはterminal_0〜3の4件（floating terminal_4はcwd無し・plugin_0はnon-selectableで対象外）
+    let spec = TargetSpec {
+        cwd: Some("/tmp".into()),
+        ..Default::default()
+    };
+    let set = resolve(&spec, &panes).unwrap();
+    assert_eq!(set.panes.len(), 4);
+    assert!(set.panes.iter().all(|p| p.cwd.as_deref() == Some("/tmp")));
+
+    // pane_cwd完全一致の回帰検出: "/tm"は"/tmp"の前方一致だが完全一致はしない
+    let spec = TargetSpec {
+        cwd: Some("/tm".into()),
+        ..Default::default()
+    };
+    let err = resolve(&spec, &panes).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::NoTarget);
+}
+
+// [covers:selector.filter-zero-matches-no-target]
+#[test]
+fn filter_zero_matches_is_no_target_error() {
+    let panes = fixtures();
+    let spec = TargetSpec {
+        command: Some("no-such-command".into()),
+        ..Default::default()
+    };
+    let err = resolve(&spec, &panes).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::NoTarget);
+    // positional不在ID（"not found in the current session state"）とは別のresolve終端分岐
+    assert!(err.message().contains("no pane matched"));
+}
+
+// [covers:selector.all-selectable-terminals-include-floating]
 #[test]
 fn filter_all_selectable_terminal_includes_floating_excludes_plugin() {
     let panes = fixtures();
@@ -148,6 +198,7 @@ fn filter_all_selectable_terminal_includes_floating_excludes_plugin() {
     );
 }
 
+// [covers:selector.union-of-positional-and-filter]
 #[test]
 fn union_of_positional_and_filter() {
     let panes = fixtures();
@@ -160,6 +211,7 @@ fn union_of_positional_and_filter() {
     assert_eq!(set.panes.len(), 3);
 }
 
+// [covers:selector.visual-order-deterministic]
 #[test]
 fn visual_order_deterministic() {
     let panes = fixtures();
@@ -174,6 +226,7 @@ fn visual_order_deterministic() {
     assert_eq!(keys, sorted);
 }
 
+// [covers:selector.single-target-ambiguous-with-candidates]
 #[test]
 fn single_target_ambiguous_and_ok() {
     let panes = fixtures();
@@ -192,6 +245,7 @@ fn single_target_ambiguous_and_ok() {
     assert!(resolve_single(&spec, &panes).is_ok());
 }
 
+// [covers:selector.tab-resolution-by-id-or-unique-name]
 #[test]
 fn tab_resolution_by_id_name_ambiguous() {
     let tabs = vec![
@@ -231,6 +285,7 @@ fn tab_resolution_by_id_name_ambiguous() {
     assert_eq!(*err.class(), ErrorClass::NoTarget);
 }
 
+// [covers:selector.empty-tab-definition]
 #[test]
 fn empty_tab_definition() {
     let t = TabState {

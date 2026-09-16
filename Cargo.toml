@@ -1,3 +1,7 @@
+[workspace]
+members = ["plugin"]
+resolver = "2"
+
 [package]
 name = "zelper"
 version = "0.1.0"
@@ -34,12 +38,24 @@ name = "error_map"
 path = "tests/unit/error_map.rs"
 
 [[test]]
+name = "layout_planner"
+path = "tests/unit/layout_planner.rs"
+
+[[test]]
+name = "layout_generator"
+path = "tests/unit/layout_generator.rs"
+
+[[test]]
 name = "cli_list_read_send"
 path = "tests/cli/list_read_send.rs"
 
 [[test]]
 name = "cli_docs"
 path = "tests/cli/docs.rs"
+
+[[test]]
+name = "cli_remap"
+path = "tests/cli/remap.rs"
 
 [[test]]
 name = "fake_rename_add_remove"
@@ -53,5 +69,13 @@ path = "tests/fake_backend/resize.rs"
 name = "fake_remap"
 path = "tests/fake_backend/remap.rs"
 
+[[test]]
+name = "companion_seed"
+path = "tests/fake_backend/companion_seed.rs"
+
 [profile.release]
+# companion pluginのbuild仕様（DD-10.3: opt-level="z" + lto）。profileはworkspace
+# rootにしか置けないため、zelper本体のrelease buildにも適用される
+opt-level = "z"
+lto = true
 strip = true

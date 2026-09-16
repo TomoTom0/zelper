@@ -22,18 +22,29 @@ pub fn parse_version(out: &str) -> Option<(u32, u32, u32)> {
 }
 
 /// `list-sessions -n`テキスト（例: `zelper-p1-basic [Created 10s ago]`）→ SessionRef列
+/// 実行形式は `NAME [Created X ago]` + suffix（なし / `(current)` /
+/// `(EXITED - attach to resurrect)`）。EXITED行もparseして返す（resurrection待ちの
+/// dead session）。実行中のみへの絞り込みは呼び出し側の責務
 pub fn parse_sessions(out: &str) -> Vec<SessionRef> {
     out.lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| {
-            let name = l.split_whitespace().next()?;
-            if name.is_empty() {
-                None
-            } else {
-                Some(SessionRef {
-                    name: name.to_string(),
-                })
-            }
+            let mut words = l.split_whitespace();
+            let name = words.next()?;
+            let rest = words.collect::<Vec<_>>().join(" ");
+            // `[Created 1m 45s ago]` → `1m 45s ago`（"Created " prefixを除去）
+            let created = rest.find('[').and_then(|start| {
+                rest[start + 1..]
+                    .split(']')
+                    .next()
+                    .map(|inner| inner.strip_prefix("Created ").unwrap_or(inner).to_string())
+            });
+            Some(SessionRef {
+                name: name.to_string(),
+                created,
+                current: rest.contains("(current)"),
+                exited: rest.contains("EXITED"),
+            })
         })
         .collect()
 }
@@ -81,6 +92,8 @@ pub struct PaneInfo {
     pub tab_position: u32,
     pub tab_name: String,
     pub pane_command: Option<String>,
+    #[serde(default)]
+    pub terminal_command: Option<String>,
     pub pane_cwd: Option<String>,
 }
 
@@ -112,6 +125,7 @@ pub fn parse_panes(json: &str) -> Result<Vec<PaneState>, ZelperError> {
                 cols: i.pane_columns,
             },
             command: i.pane_command,
+            terminal_command: i.terminal_command,
             cwd: i.pane_cwd,
             tab_id: TabId(i.tab_id),
             tab_position: i.tab_position,
@@ -119,6 +133,15 @@ pub fn parse_panes(json: &str) -> Result<Vec<PaneState>, ZelperError> {
             plugin_url: i.plugin_url,
         })
         .collect())
+}
+
+/// 空のstdoutは一時的な未成立応答として扱い、非空のparse errorはfatalのまま返す。
+pub fn parse_panes_opt(json: &str) -> Result<Option<Vec<PaneState>>, ZelperError> {
+    if json.trim().is_empty() {
+        Ok(None)
+    } else {
+        parse_panes(json).map(Some)
+    }
 }
 
 /// ---- TabInfo（`list-tabs -a --json`要素・実出力field名） ----
@@ -153,4 +176,13 @@ pub fn parse_tabs(json: &str) -> Result<Vec<TabState>, ZelperError> {
             are_floating_panes_visible: i.are_floating_panes_visible,
         })
         .collect())
+}
+
+/// `parse_panes_opt`と同じ空応答契約のlist-tabs版。
+pub fn parse_tabs_opt(json: &str) -> Result<Option<Vec<TabState>>, ZelperError> {
+    if json.trim().is_empty() {
+        Ok(None)
+    } else {
+        parse_tabs(json).map(Some)
+    }
 }

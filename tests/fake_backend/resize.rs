@@ -16,6 +16,7 @@ fn pane(id: u32, title: &str, y: u32, x: u32, rows: u32, cols: u32) -> PaneState
         is_held: false,
         geometry: Geometry { x, y, rows, cols },
         command: None,
+        terminal_command: None,
         cwd: None,
         tab_id: TabId(0),
         tab_position: 0,
@@ -24,6 +25,7 @@ fn pane(id: u32, title: &str, y: u32, x: u32, rows: u32, cols: u32) -> PaneState
     }
 }
 
+// [covers:resize.grow-applies-steps-with-geometry-verification]
 #[test]
 fn grow_applies_steps_with_geometry_verification() {
     let b = FakeBackend::new(vec![pane(1, "a", 0, 0, 10, 10)], vec![]);
@@ -38,6 +40,7 @@ fn grow_applies_steps_with_geometry_verification() {
     assert_eq!(resize_calls, 3);
 }
 
+// [covers:resize.noop-stops-early-with-warning]
 #[test]
 fn noop_stops_early_with_warning() {
     let b = FakeBackend::new(vec![pane(1, "frozen-a", 0, 0, 10, 10)], vec![]);
@@ -47,6 +50,7 @@ fn noop_stops_early_with_warning() {
     assert_eq!(s.panes[0].geometry.cols, 10);
 }
 
+// [covers:resize.equalize-same-row-converges]
 #[test]
 fn equalize_same_row_converges() {
     let b = FakeBackend::new(
@@ -63,6 +67,7 @@ fn equalize_same_row_converges() {
     assert_eq!(cols.iter().sum::<u32>(), 40); // 総面積は保存
 }
 
+// [covers:resize.equalize-oscillation-terminates-no-infinite-loop]
 #[test]
 fn equalize_oscillation_terminates_no_infinite_loop() {
     // 10と15の合計25は10刻みのresizeで均等化不能（振動する）
@@ -75,6 +80,7 @@ fn equalize_oscillation_terminates_no_infinite_loop() {
     // 完了すればよい（幾何は不問。notesはstderr/出力側）
 }
 
+// [covers:resize.equalize-missing-pane-and-cross-tab-rejected]
 #[test]
 fn equalize_missing_pane_is_error_and_cross_tab_rejected() {
     // レビュー回帰: 不在IDは黙って除外しない
@@ -97,6 +103,7 @@ fn equalize_missing_pane_is_error_and_cross_tab_rejected() {
     assert_eq!(*err.class(), ErrorClass::Preflight);
 }
 
+// [covers:resize.equalize-requires-targets]
 #[test]
 fn equalize_requires_targets() {
     let b = FakeBackend::new(vec![], vec![]);
@@ -104,6 +111,7 @@ fn equalize_requires_targets() {
     assert_eq!(*err.class(), ErrorClass::Usage);
 }
 
+// [covers:resize.equalize-rejects-floating]
 #[test]
 fn equalize_rejects_floating() {
     let mut p = pane(1, "f", 0, 0, 10, 10);

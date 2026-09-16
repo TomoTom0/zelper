@@ -1,0 +1,45 @@
+# rename操作（src/app/rename.rs）の検証条件。出典: test-plan §2.5・§2.9・DD-8・requirements §2.4
+# 対応test: tests/fake_backend/rename_add_remove.rs（部分3件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+[meta]
+feature = "rename"
+source_file = "src/app/rename.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test fake_rename_add_remove"
+source_hash = "9b151626155ce57c8e9ad5f4455b0acd1ea4c5d4"
+note = ""
+
+[[condition]]
+id = "rename.pane-rename-call-and-postcondition"
+source_lines = "tests/fake_backend/rename_add_remove.rs:44"
+target_function = "rename::run_pane"
+source = "docs/testing/test-plan.md §2.5（pane/tab rename呼び出しとpostcondition検証（list-panes再取得でtitle反映）） + docs/design/detailed-design.md DD-8（plan: rename-pane -p / postcondition: list-panes/list-tabsでtitle/name反映を確認）"
+description = "pane renameの基本経路: rename-pane <id> <name>呼び出しと、postconditionとしてlist-panes再取得でtitle反映を確認する構成（fakeではstateのtitleが変わることで反映を検証）"
+given = "title=oldのterminal_1が1件のFakeBackendに対するrename::run_pane(b, 1, new-name)"
+expect_return = "Okかつ呼び出し列にrename-pane terminal_1 new-nameを含み、再取得stateのpanes[0].title=new-name"
+
+[[condition]]
+id = "rename.pane-backend-failure-is-operation-failed"
+source_lines = "tests/fake_backend/rename_add_remove.rs:57"
+target_function = "rename::run_pane（backend呼び出し失敗）"
+source = "docs/testing/test-plan.md §2.5 + docs/design/detailed-design.md DD-8（失敗: 検証失敗はclass=VerificationFailed（exit 7）） + DD-4.3（操作失敗=OperationFailed exit 5）"
+description = "rename-pane backend呼び出し自体の失敗はOperationFailedとして伝播する（title不変のpostcondition検証に到達しない失敗経路）。失敗時のclassとexit code対応の維持"
+given = "rename-paneをinject_failureで失敗させるFakeBackendに対するrename::run_pane(b, 1, new-name)"
+expect_return = "Err（ErrorClass=OperationFailed）。検証限界: title不変で呼び出しは成功する系列（サイレントno-op）のVerificationFailed検出は本条件の対象外（silent-noop条件参照）"
+
+[[condition]]
+id = "rename.pane-silent-noop-detected-by-postcondition"
+source_lines = "tests/fake_backend/rename_add_remove.rs:67"
+target_function = "rename::run_pane（postcondition構成）"
+source = "docs/testing/test-plan.md §2.5・§2.9（サイレント成功の検出: close-paneがexit 0で無操作（実zellij挙動）→ postcondition検証によるVerificationFailed検出。renameの同型経路） + docs/design/first/260821/requirements.md §2.4（rename a pane/tab のfirst-class wrapper操作要求） + docs/design/detailed-design.md DD-8（postcondition: title/name反映確認（サイレント成功対策））"
+description = "renameのサイレント成功対策の構成固定: postcondition（list-panes再取得によるtitle反映確認）を経る実行経路が無検証の成功を返さない構造であること。§2.9のclose-pane exit 0無操作検出と同型のpostcondition機構（設計書§8.3: rename側で条件化）。検証限界: FakeBackendはrename-paneで必ずtitleを反映するためtitle不変のno-op系列が注入不能。本testはstate整合（pane消失なし・実行成功）までのassertであり、title不変系列のVerificationFailed exit 7実経路はL4実zellijでの検証となる（test fileのコメントどおり）"
+given = "terminal_1が1件のFakeBackendに対するrename::run_pane(b, 1, x)の実行後のstate"
+expect_return = "Okかつstate整合（panes.len()=1。titleの書き換えとpaneの同一性はfake実装上常に成立）"
+
+[[excluded]]
+item = "rename tab（rename-tab-by-id <id> <name>呼び出し・postconditionのname反映確認）"
+source = "docs/testing/test-plan.md §2.5（pane/tab rename呼び出しとpostcondition検証） + docs/design/detailed-design.md DD-8（rename tab TABSPEC NAME・rename-tab-by-id）"
+reason = "未test。既存133 testにrename::run_tabを検証するtest fnが存在しないため本移行では条件化できない（既存3件はすべてpane側）。新規test追加時に条件化する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"

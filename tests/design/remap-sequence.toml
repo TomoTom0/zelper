@@ -1,0 +1,409 @@
+# remap v2実行sequence（src/app/remap.rs: run）の検証条件。出典: test-plan §2.7 R8・(d) R29〜R32・(e) R33〜R36・(f) R37〜R42・(i) R47/R50・DD-10 v2・design-review §4.7・TASK-74設計書（remap-v2-matching-fix-task74.md §2.3/§2.6/§4）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.4/§2.5/§3.4〜3.6・DD-10 v2.2）
+# 対応test: tests/fake_backend/remap.rs（32件予定: 既存23件 + TASK-75新規9件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1。
+# TASK-75新規9件は後段のtest更新作業で追加）
+# planner（R1〜R12）と生成KDL（R13〜R20）は L1（tests/unit/）、permissions seed（R21〜R28）は
+# tests/fake_backend/companion_seed.rs、deprecated flag・version gate・dry-run出力契約は L3（tests/cli/remap.rs）
+[meta]
+feature = "remap-sequence"
+source_file = "src/app/remap.rs"
+verified = true
+verified_at = "2026-09-16"
+verified_by = "claude"
+test_command = "cargo test --test fake_remap"
+source_hash = "275fe7ecc3f2cbd1534f3e3a98964a409016862c"
+note = "TASK-74（2026-09-15）条件書更新: 空応答retry 2条件を追加しr38のerror文面要件（cwd起因案内）を追記（当時はfail-first。その後の実装・test追従で解消済み）。TASK-74段階8コードレビューCR74-1〜8対応: template-invalid-detected-before-mutationを新規追加（CR74-1。test追従済み）し、empty系2条件へpipe以降arm注入とprobe poll 1 tick 1回呼び出しの期待を追加（CR74-2/3）、r36とpoll-deadlineのtimeout文面へF8機構注記を要求（CR74-4。いずれも実装・test追従済み）。TASK-75（2026-09-15）条件書更新: v2.2（multi-tab layout全体再現）のtest-first前段として9条件を追加し実装完了（cargo test全green・2026-09-16）。TASK-75 E2E acceptance改修（2026-09-16・55 PASS/18 FAILの2要因）: 要因A（focus対象をmapping pane idから適用後のlist-panes位置〔visual order s番目〕へ変更・occupied限定撤廃・already focused exit 2は成功扱い）へfocus-pane-id-after-override-per-tab・pane-focus-verified-via-is-focusedを更新。要因B（空groupをnew-tab --layout-string経路へ変更・step 6のoverride-layout skip）へempty-group-tab-created-via-new-tab-then-rename・new-tab-only-needs-no-companionを更新。empty-response-retry-before-verifyは精密arm法（empty_*_nth_after_override）の記述へ更新（step 6のfocus対象決定・存在確認pollが先頭N回空を全数消化するため）。根拠: remap-v3-multi-tab-task75.md §7.1（acceptance結果・実験4）・DD-10.7 step 6/5-b・DD-10.9 (d)・DD-10.2 #8注記改訂。TASK-75完了（2026-09-16）: E2E acceptance 80条件全PASS（S-v3-1〜5・container通算15回・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応（CR75-1: tab-id-resolution-lenient-before-applyへ再解決位置のlist_panes空応答retry系列を追加。red-first実証: tmp/20260916_test_task75_fix3_red.log）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新。PR#6レビュー対応（2026-09-16）: floating source setへのexited/held除外追加（embed-floating-exited-held-excluded-from-floating-set新規・test追加。source_hash更新）"
+
+[[condition]]
+id = "remap-sequence.r8-floating-pane-in-scope-blocks-or-embeds"
+source_lines = "tests/fake_backend/remap.rs:202"
+target_function = "remap::run（preflight floating検出・--embed-floating）"
+source = "docs/testing/test-plan.md §2.7 R8（floating pane存在 → Preflight error。--embed-floatingでtoggle（plan確定後の状態変更第1歩）を経てsourceに組入れ） + docs/design/detailed-design.md DD-10.5（floating pane: selectable floating terminalがあればpreflight error。--embed-floatingでtoggle-pane-embed-or-floatingによりtiled化。toggled化対象はpreflightで特定したselectable floating terminalのみ）・DD-10.2 #13 + docs/design/design-review.md §4.7 C1（toggle対象をselectable floating terminalのID集合のみに限定する回帰assert）"
+description = "floating paneの遮断と組入れ: scope（session全体）内にselectable floating terminal paneがあれば状態変更前にPreflight error（候補列出）。--embed-floating指定時はtoggle-embedでtiled化してsourceに組入れ、companion plugin pane（non-selectable）はtoggleしない・floatingのままsourceに混入しない（C1回帰）。検証限界: toggleがplan確定後であることの順序assertはなし（DD-10.7 step 4の順序は構造上の前置き）"
+given = "4 pane / 2 tab + anchor外tabのfloating pane構成で、--embed-floatingなしのrun（エラー系）と、--embed-floatingありのrun（組入れ系: 4 tiled + 1 floating = M=5 → k=2）"
+expect_return = "なし側はErr（ErrorClass=Preflight・candidatesにterminal_9）でpipe不発生。あり側はOkでtoggle-embed terminal_9が呼ばれ（plugin_系はtoggleされない）、selectable floating paneが残らず全5 paneが配置される"
+
+[[condition]]
+id = "remap-sequence.r29-probe-only-when-move-needed"
+source_lines = "tests/fake_backend/remap.rs:278"
+target_function = "remap::run（companion setup要否判定）"
+source = "docs/testing/test-plan.md §2.7 (d) R29（probeは移動が必要な場合のみ実行（k>1、またはgroup 0にanchor外tabのpaneが存在）。移動が不要ならprobeもpluginも不使用） + docs/design/detailed-design.md DD-10.7 step 3（companion setup — break系移動が必要な場合のみ〔v2.2: k>1、またはgroup (0,0)〔anchor group〕にanchor外tabのpaneが存在〕。break系を使わない（空groupのnew-tabのみ等）場合はprobeもpluginも不使用） + docs/design/remap-v3-multi-tab-task75.md §3.4（move_needed判定の一般化: k > 1 または group (0,0) にanchor外paneが存在、または新規tab（k*T - 1 > 0）が存在。probe要否は「break系を使用するか」（k > 1 または group(0,0) outbound非空）に分離）"
+description = "companion setup/probeの実行条件: 移動が不要（k=1・group (0,0)にanchor外paneなし）ならprobe pipeもcompanion setup（permissions.kdl書換）も行わない。移動が必要（k=2）ならprobe pipeが実行される。TASK-75（v2.2）: move_needed判定は「新規tab存在（k*T-1 > 0）」を含むよう一般化されるが、probe要否はbreak系pipeを使用するか（k>1 または group (0,0) outbound非空）へ分離される——空groupのnew-tabのみで新規tabを作る構成（新規tabあり・break系なし）はprobe/companion不使用（remap-sequence.new-tab-only-needs-no-companionが検証）。検証限界: k=1でgroup (0,0)にanchor外paneが存在する構成（R29判定のもう一方の条件）は未検証"
+given = "3 pane同一tab（k=1・T=1・移動不要）でのrunと、4 pane / 2 tab（k=2・移動あり）でのrun"
+expect_return = "前者はOkかつpipe呼び出し0回・permissions.kdl未作成。後者はOkかつpipe probe が呼ばれる"
+
+[[condition]]
+id = "remap-sequence.r30-probe-polled-then-state-change-proceeds"
+source_lines = "tests/fake_backend/remap.rs:310"
+target_function = "remap::run（probe polling）"
+source = "docs/testing/test-plan.md §2.7 (d) R30（probe <nonce> 送信後、list-panesで zelper-probe-<nonce> titleの出現をpollingし、確認後に状態変更へ進む） + docs/design/detailed-design.md DD-10.7 step 3・DD-10.3（probe protocol）"
+description = "probeの確認済み実行: probe pipe送信後、companion plugin paneのtitle（zelper-probe-<nonce>）出現を確認してから状態変更（break pipe）へ進む。polling間隔（250ms）自体は実装定数であり本条件では検証しない"
+given = "4 pane / 2 tab（k=2）でのrun"
+expect_return = "呼び出し列で pipe probe が pipe break- より先に現れ、companion plugin paneのtitleがzelper-probe-接頭で始まる"
+
+[[condition]]
+id = "remap-sequence.r31-probe-timeout-aborts-before-any-state-change"
+source_lines = "tests/fake_backend/remap.rs:340"
+target_function = "remap::run（probe不成立）"
+source = "docs/testing/test-plan.md §2.7 (d) R31（probe不成立（timeout）→ 一切の状態変更前に中断。OperationFailed + 権限hint（seed未反映・dialog pending・protocol非互換をここで検知）） + docs/design/detailed-design.md DD-10.7 step 3・DD-10.4（probe失敗時のerrorの権限hint）・DD-10.12 worked example #8 + docs/design/design-review.md §4.6 R3"
+description = "probe不成立の安全側中断: probe（最初のpipe）がbackend timeoutする系列では、一切の状態変更前に中断する。errorはOperationFailedで権限hint（seed未反映・dialog pending・手動grant案内）を含む。break pipe・toggle・override-layout・go-to-tabは不発生"
+given = "4 pane / 2 tab構成で最初のpipe（probe）をblockさせる失敗注入（pipe block）をしたrun"
+expect_return = "Err（ErrorClass=OperationFailed・messageにpermissionhint）。呼び出し列は pipe probe のみで pipe break-・toggle-embed・override-layout・go-to-tab 不発生"
+
+[[condition]]
+id = "remap-sequence.r32-probe-nonce-unique-per-run"
+source_lines = "tests/fake_backend/remap.rs:379"
+target_function = "remap::run（nonce生成）"
+source = "docs/testing/test-plan.md §2.7 (d) R32（nonceは実行毎に一意（前回実行のtitle残留による偽陽性を構造的に排除）） + docs/design/detailed-design.md DD-10.3（nonceは実行毎に一意とし、前回実行のtitle残留による偽陽性を防ぐ）"
+description = "nonceの一意性: 同一backendに対する連続2回のremap実行でprobe nonce（payload）が異なる。前回実行のtitle残留を偽陽性判定しない構造的保証"
+given = "4 pane / 2 tab構成でrunを2回連続実行"
+expect_return = "probe pipe呼び出しが2回で、payload（nonce）が互いに異なる"
+
+[[condition]]
+id = "remap-sequence.r33-break-id-moves-inbound-before-outbound"
+source_lines = "tests/fake_backend/remap.rs:403"
+target_function = "remap::run（移動phase 5-a）"
+source = "docs/testing/test-plan.md §2.7 (e) R33（group 0のanchor外paneを break-id <anchor_id> <ids> でanchorへ移動。group 0のinboundを後続groupのoutboundより先行（anchor一時空による自動closeを構造的に排除する不変条件）） + docs/design/detailed-design.md DD-10.7 5-a（v2.2: group (0,0)〔anchor group〕の不変条件の一般化。M>=1なら逐次充填によりgroup (0,0)は必ず1 pane以上を持ち、5-aのinboundを後続outboundより先に行うことでanchor自動closeを構造的に排除） + docs/design/design-review.md §4.6（不変条件は問題なし判定）"
+description = "移動の不変条件: group (0,0)（anchor group。T=1では旧group 0に一致）のanchor外paneをbreak-id（payloadにanchor tab idと対象paneのみ）でanchorへ移動し、後続groupのbreak-newより先行する。anchor内paneは移動対象に含まれない"
+given = "5 pane / 3 tab（group 0 = pane 1,2,3（うち3がanchor外）・group 1 = pane 4,5）でのrun"
+expect_return = "呼び出し列で pipe break-id が pipe break-new より先。break-id payloadはanchor idとterminal_3を含みterminal_1/2を含まない。break-new payloadはterminal_4/5を含む"
+
+[[condition]]
+id = "remap-sequence.r34-break-id-completion-group0-all-on-anchor"
+source_lines = "tests/fake_backend/remap.rs:439"
+target_function = "remap::run（break-id完了polling）"
+source = "docs/testing/test-plan.md §2.7 (e) R34（break-idの完了条件 = group 0の全paneのtab_id == anchor（polling）） + docs/design/detailed-design.md DD-10.7 5-a"
+description = "break-idの完了条件: group (0,0)の全paneがanchor tabに所属したことをpollingで確認してから次phaseへ進む（polling済みでないと後続groupの移動・layout適用が走らない）"
+given = "5 pane / 3 tab（group (0,0) = pane 1,2,3・T=1）でのrun完了後の状態"
+expect_return = "pane 1・2・3のtab_idがすべてanchor（tab 0）"
+
+[[condition]]
+id = "remap-sequence.r35-break-new-membership-then-rename-tab"
+source_lines = "tests/fake_backend/remap.rs:459"
+target_function = "remap::run（移動phase 5-b）"
+source = "docs/testing/test-plan.md §2.7 (e) R35（group j>=1は break-new <ids> で新規tabへ。完了条件 = pane id基準のmembership一致でtarget_jを特定し、直後に rename-tab-by-id <target_j> <base>-<j+1> で命名） + docs/design/detailed-design.md DD-10.7 5-b（tab id再利用に耐える特定方法）・DD-10.6 v2.2（tab名: 幹 = T>=2 かつ鋳型tがname属性を持つなら鋳型名、そうでなければbase。b>=1なら幹に-<b+1>接尾） + docs/design/remap-v3-multi-tab-task75.md §2.3"
+description = "新規tabへの移動と命名: 割当paneを持つgroup (b,t)≠(0,0)はbreak-newで新規tabへ移動し、pane id基準のmembership一致（tabのselectable tiled terminal pane集合 == group）でtarget tabを特定して直後に命名規則どおりの名へ命名する（T=1では<base>-<b+1>。--inline時base=remap。multi-tabでの鋳型名幹はlayout-planner.tab-names-from-templates-and-block-suffix）"
+given = "4 pane / 2 tab（group (1,0) = pane 4・T=1）でのrun"
+expect_return = "呼び出し列に terminal_4 を含む pipe break-new と rename-tab 2 remap-2（新tab id 2）が現れ、最終状態のtab名にremap-2が存在"
+
+[[condition]]
+id = "remap-sequence.r36-polling-timeout-reports-groups-and-latency-note"
+source_lines = "tests/fake_backend/remap.rs:491"
+target_function = "remap::run（移動phase polling timeout）"
+source = "docs/testing/test-plan.md §2.7 (e) R36（polling timeout → OperationFailed + 権限hint + 「pipeはCLI失敗後もserver側で遅延実行されうる」注意 + 移動済み/未移動groupの報告） + docs/design/detailed-design.md DD-10.7 5（polling timeoutの報告）・DD-10.11・DD-10.7 空応答のlenient取得・fatal条件(a)（空応答のdeadline超過は当該phaseのpolling timeout errorへ合流。文面にscreen繁忙の1s timeout機構への言及を含める） + TASK-74段階8コードレビューCR74-4（move側timeout文面にF8機構注記が欠けていた。snapshot_lenientのtimeout文面のみ注記あり）"
+description = "移動phaseのpolling timeout: pipe送信後に効果が現れない系列ではOperationFailedで中断し、権限hint・遅延実行の注意・移動済み/未移動groupの報告に加え、timeoutがscreen繁忙（layout適用中等のscreen応答1s timeoutによる一時的な空list応答）でも起こりうる旨のF8機構の注記を文面に含む（CR74-4: 空応答とpipe不履行・権限問題を区別する情報。この注記なしでは空応答由来のtimeoutが権限問題と誤診されうる）。fail-first: レビュー時点の実装のmove側timeout文面は権限hint・遅延実行注意・group報告のみでscreen繁忙の注記を欠く。未移動paneは元tabに留まり、layout適用phaseには入らない"
+given = "4 pane / 2 tab構成でbreak-newの効果を現さない失敗注入（pipe効果不出現）をしたrun"
+expect_return = "Err（ErrorClass=OperationFailed・messageにpermission・遅延実行の注意（delay/late/遅）・group・screen繁忙の1s list応答timeout機構の注記（screen/busy/1s/empty等の語）を含む）。pane 4は元tab 1に留まり、override-layout不発生"
+
+[[condition]]
+id = "remap-sequence.r37-all-source-panes-survive-on-assigned-tabs"
+source_lines = "tests/fake_backend/remap.rs:536"
+target_function = "remap::run（postcondition (a)）"
+source = "docs/testing/test-plan.md §2.7 (f) R37（全source pane idが生存し、割当instanceのtabに所属（pane id基準）） + docs/design/detailed-design.md DD-10.9 (a)（v2.2: 割当group（block×tab）のtab所属・pane id基準。tab id基準の照合はid再利用回避のため補助にしか使わない）"
+description = "postcondition (a): 全source paneが生存（killなし・プロセス保存のL2代理検証）し、group (0,0)はanchorへ・group (1,0)は同一新tabへ所属（T=1表記。group参照はv2.2でblock×tabへ一般化）。空になったsource tabは自動closeされる（DD-10.1 E6事実1）"
+given = "5 pane / 3 tab（group (0,0) = 1,2,3・group (1,0) = 4,5・T=1）でのrun完了後の状態"
+expect_return_shape = "pane 1〜5すべて生存し、1・2・3はanchor（tab 0）所属、4と5は同一tab（anchor以外）所属。tab一覧に元tab 1・2は存在しない（自動close）"
+
+[[condition]]
+id = "remap-sequence.r38-instance-tab-pane-count-mismatch-fails-verification"
+source_lines = "tests/fake_backend/remap.rs:577"
+target_function = "remap::run（postcondition (b)）"
+source = "docs/testing/test-plan.md §2.7 (f) R38（各instance tabのselectable tiled terminal pane数 == N（command照合missによる重複spawn・未照合paneの入れ子残留を検出）） + docs/design/detailed-design.md DD-10.9 (b)（v2.2: 各生成tab (b,t)のselectable tiled terminal pane数 == N_t。T=1ではN_t=N）・DD-10.13（TASK-74: (b)系検証失敗のerror文面は起動時cwd明示paneに起因する照合外れの可能性を案内する） + docs/design/remap-v2-matching-fix-task74.md §2.6"
+description = "postcondition (b): 生成tabのpane数がN_tと不一致（layout適用後に重複paneが湧く系列）ならVerificationFailed。期待/実測の差分を報告する（T=1ではN_t=Nで現行検証と同一。multi-tabでのN_t毎検証・anchor (0,0)含む全生成tab対象はremap-sequence.verify-per-tab-pane-countが管轄）。TASK-74追記: (b)系検証失敗のerror文面は、起動時cwd明示pane（invoked_withのcwd=Some）に起因する照合外れ・複製spawnの可能性を案内する文を含む（CLI表面にinvoked_withのcwdを区別するdataが存在しないためpreflight検出不可・事後検知のみ〔DD-10.13〕）"
+given = "4 pane / 2 tab構成でgroup 0適用後に重複paneが1つ湧く失敗注入（spawn_extra_on_override）をしたrun"
+expect_return = "Err（ErrorClass=VerificationFailed・messageに期待/実測差分（expected）と起動cwd起因の可能性案内を含む）"
+
+[[condition]]
+id = "remap-sequence.r39-new-tab-names-and-anchor-survives"
+source_lines = "tests/fake_backend/remap.rs:694"
+target_function = "remap::run（postcondition (c)）"
+source = "docs/testing/test-plan.md §2.7 (f) R39（新規tab名が <base>-<j+1> どおり・tab一覧にanchorが残存） + docs/design/detailed-design.md DD-10.9 (c)（v2.2: 生成tab名が10.6命名規則どおり。(0,0)=anchorは名前検証から除外——anchor tab名保持の唯一の例外・10.2 #6注記） + docs/design/remap-v3-multi-tab-task75.md §2.1/§2.3（D1: 生成tab (0,0)はanchorを再利用し名前を保持してrenameしない）"
+description = "postcondition (c): 新規tab名が命名規則どおり（T=1では<base>-<b+1>。k=3でremap-2・remap-3）で、tab一覧にanchor tabが残存する。v2.2: anchor (0,0)は名前検証から除外（anchor名保持例外・D1。multi-tabでの鋳型名幹の検証はlayout-planner.tab-names-from-templates-and-block-suffix）。T=1後方互換により本条件の期待値は不変"
+given = "7 pane / 3 tab（k=3・T=1）でのrun完了後の状態"
+expect_return = "tab名一覧がremap-2とremap-3を含み、anchor（tab 0）が残存"
+
+[[condition]]
+id = "remap-sequence.r40-empty-slots-filled-with-default-shell"
+source_lines = "tests/fake_backend/remap.rs:714"
+target_function = "remap::run（空slot充填）"
+source = "docs/testing/test-plan.md §2.7 (f) R40（空slotは既定shellで埋まる（L2ではpane数==Nとして検証。L4ではshell paneの実在を確認）） + docs/design/detailed-design.md DD-10.2 #9・DD-10.6"
+description = "空slotの既定shell充填: 最終blockの空slotも含め各生成tab (b,t)のselectable tiled terminal pane数がN_tになる（7 pane / 3-slotで第3 blockは1 pane + 2空slot。T=1ではN_t=N）。L2ではpane数==N_tによる代理検証（shell paneの実在確認はL4。excluded参照）"
+given = "7 pane / 3 tab（k=3・第3 blockに空2 slot・T=1）でのrun完了後の状態"
+expect_return = "全生成tab（anchor・remap-2・remap-3）のselectable tiled terminal pane数が3"
+
+[[condition]]
+id = "remap-sequence.r41-verification-failure-reports-diff-and-progress"
+source_lines = "tests/fake_backend/remap.rs:735"
+target_function = "remap::run（検証失敗報告・--json）"
+source = "docs/testing/test-plan.md §2.7 (f) R41（検証失敗 → VerificationFailed exit 7 + 期待/実測差分 + 実行済み/失敗/未実行の区分。--json時は成功envelopeを出さずmapping/missingをerror.dataに載せた単一error envelope） + docs/design/detailed-design.md DD-10.9 失敗時（v2.2: 失敗時のerror.dataは m / n（=S）/ k / t（T）/ n_slots（N_t列）+ mapping〔pane → block/tab/slot/TabId〕） + docs/design/remap-v3-multi-tab-task75.md §3.6"
+description = "検証失敗の報告構造: source paneがlayout適用で消える系列ではVerificationFailedとなり、--json時のerror.dataにmapping/missingを載せる（runはErrを返す。stdoutの単一envelope契約はL3）。TASK-75（v2.2・fail-first: 現行実装のerror.dataにn=S・t・n_slotsは未実装）: error.dataにはm・n（=S）・k・t（T）・n_slots（N_t列）とmapping（pane → block/tab/slot/TabId。v2.2でblock/tab key追加）が載る"
+given = "4 pane同一tab構成（k=2・T=1）でgroup (0,0)のpaneがlayout適用で消える失敗注入（drop_on_next_override）をした、--json付きのrun"
+expect_return = "Err（ErrorClass=VerificationFailed）。error.dataのmapping・missingがいずれも空でない配列"
+
+[[condition]]
+id = "remap-sequence.r42-focus-restore-failure-is-not-operation-failure"
+source_lines = "tests/fake_backend/remap.rs:770"
+target_function = "remap::run（focus復帰）"
+source = "docs/testing/test-plan.md §2.7 (f) R42（focus復帰失敗は操作失敗に含めない（best-effort）） + docs/design/detailed-design.md DD-10.7 step 7・DD-10.9（focus復帰失敗は操作失敗に加えない）"
+description = "focus復帰のbest-effort: 検証後の復帰go-to-tabのみが失敗する系列でもrun自体は成功する（適用phaseのgo-to-tabは成功している）"
+given = "4 pane同一tab構成でoverride 2回完了後の最初のgo-to-tab（= 復帰）を失敗させる失敗注入をしたrun"
+expect_return = "Ok（override-layoutは実行済み）"
+
+[[condition]]
+id = "remap-sequence.r47-dry-run-never-mutates-even-when-move-needed"
+source_lines = "tests/fake_backend/remap.rs:786"
+target_function = "remap::run（dry-run）"
+source = "docs/testing/test-plan.md §2.7 (i) R47（状態変更なし（tab切替・pipe・wasm extract・permissions.kdl書換・backend mutating呼び出しすべて発生しない）） + docs/design/detailed-design.md DD-10.10（状態変更は一切なし: tab切替・pipe・wasm extract・permissions.kdl書換・focus-pane-idを行わない。v2.2でfocus-pane-idを追加）・DD-12"
+description = "dry-runの非破壊: k=2（移動が必要）でもdry-run自体は成功し、go-to-tab・pipe・toggle-embed・override-layout・new-tab・rename-tab・close-pane・focus-pane-id・permissions.kdl書込・wasm extractがすべて不発生（snapshot系の読み取りは許容。TASK-75: v2.2のfocus-pane-idもdry-runでは実行しない）"
+given = "4 pane同一tab（k=2）構成での--dry-run付きrun"
+expect_return = "Ok。呼び出し列に全mutating操作が不存在で、隔離XDG_CACHE_HOME配下にzellij/・zelper/が未作成"
+
+[[condition]]
+id = "remap-sequence.r50-dry-run-includes-floating-pane-in-plan-without-toggle"
+source_lines = "tests/fake_backend/remap.rs:823"
+target_function = "remap::run（dry-run floating計画一致）"
+source = "docs/testing/test-plan.md §2.7 (i) R50（floating paneはtoggle前snapshotから仮想的に計画へ含め、dry-runと実行の計画一致を保証） + docs/design/detailed-design.md DD-10.5（tiled化はplan確定後の状態変更第1歩とし、dry-runでは実行しない。計画はtoggle前snapshotから仮想的にfloating paneを含める）"
+description = "dry-runと実行の計画一致（floating）: --embed-floating + dry-runではtoggleせずfloatingのまま、3 tiled + 1 floating = M=4 → k=2として計画する。同一snapshotから実行すると同一計画（M=4, k=2）で全4 paneが配置される。検証限界: dry-run側はrun成功・toggle不発生・floating維持のみassertであり、dry-run出力の計画内容（M=4・k=2・floating込みのsource）自体は未assert（計画数値はL3のremap-cli.r48が固定fixtureで検証）"
+given = "3 pane同一tab + floating pane 1の構成で、--embed-floating + --dry-run のrunと、同一構成への実run"
+expect_return = "dry-runはOkかつtoggle-embed不発生・floating paneはfloatingのまま。実runはOkで全4 pane（1,2,3,9）が配置される"
+
+[[condition]]
+id = "remap-sequence.poll-deadline-not-extended-by-slow-backend-call"
+source_lines = "tests/fake_backend/remap.rs:876"
+target_function = "remap::run（poll deadline）"
+source = "docs/design/design-review.md §4.7 C3（TASK-39レビュー: polling deadlineがcond()（list_panes等）の所要時間を考慮しない。deadline超過後の条件成立を成功扱いしうる → pollをbackend呼出ごとにdeadline再検査する形に修正。10.3s遅延したlist_panesがprobe title成立を返す系列では中断する回帰テスト） + docs/design/detailed-design.md DD-10.7（polling定数: 250ms間隔・10s deadline）・DD-10.7 空応答のlenient取得・fatal条件(a)（polling timeout文面にscreen繁忙の1s timeout機構への言及を含める） + TASK-74段階8コードレビューCR74-4（probe側timeout文面にF8機構注記が欠けていた。この文面は権限問題と誤診されうる）"
+description = "polling deadlineの厳密性（C3回帰）: deadlineはbackend呼出（poll内のlist-panes取得〔lenient〕）の所要時間を含めて保証し、deadline超過後に条件が成立していても成功扱いにしない。遅延実行を成功扱いしないため状態変更へ進まない。probe poll timeoutの文面は権限hintとともに、timeoutがscreen繁忙（screen応答1s timeoutによる一時的な空list応答）でも起こりうる旨のF8機構の注記を含む（CR74-4: 空応答を権限問題と誤診させない。fail-first: レビュー時点の実装のprobe側timeout文面は権限hintのみでscreen繁忙の注記を欠く）"
+given = "4 pane / 2 tab構成で最初のpipe（probe）後のpoll内list-panes取得（lenient）を10.3s遅延させ、probe titleが現れている状態でdeadlineを越える失敗注入をしたrun"
+expect_return = "Err（ErrorClass=OperationFailed・messageにprobeとscreen繁忙の1s list応答timeout機構の注記（screen/busy/1s/empty等の語）を含む）。pipe break-・override-layoutは不発生"
+
+[[condition]]
+id = "remap-sequence.new-tab-name-verified-by-target-tab-id"
+source_lines = "tests/fake_backend/remap.rs:915"
+target_function = "remap::run（postcondition (c) の検証方法）"
+source = "docs/design/design-review.md §4.7 C5（TASK-39レビュー: 新規tab名postconditionが「同名tabの存在」のみで、target_j自身のIDと名前の対応を検証していない → tabs_afterからid == targetのtabを取得して名前比較する形式に変更。既存同名tabがあっても誤通過しない回帰テスト） + docs/design/detailed-design.md DD-10.9 (c)"
+description = "新規tab名検証の特定方法（C5回帰）: 同名tabが既に存在しても、target tab自身のIDと名前の対応で検証する。renameが不生效なら検証失敗とし、期待/実測差分にtarget tab自身の名前が載る"
+given = "既存の空tabがたまたま remap-2 という名を持つ構成（4 pane同一tab・anchor外の空tab追加）で、break-new後のrename-tabが成功扱いだが名を変えない失敗注入（mute_rename_tab）をしたrun"
+expect_return = "Err（ErrorClass=VerificationFailed・messageに期待名（expected remap-2）と実測名（named）を含む）"
+
+[[condition]]
+id = "remap-sequence.exited-held-panes-excluded-from-source-and-survive"
+source_lines = "tests/fake_backend/remap.rs:942"
+target_function = "remap::run（source定義）"
+source = "docs/design/detailed-design.md DD-10.5（exit hold中（exited / is_held）のpaneは実行runを持たずrun一致照合の対象にならないためsource外とし、元tabに残す（paneはkillされず生存）。TASK-39コードレビュー観点2補足で確定） + docs/testing/test-plan.md §2.7 (a)（source pane列 = selectable・tiled terminal）"
+description = "sourceの定義境界: exited / is_held のpaneはsource外（Mに数えない。M=3ならk=1で移動不要）で、killも移動もされず元tabに生存する"
+given = "3 pane同一tab + exited & is_held pane 1 + heldのみpane 1 の構成でのrun"
+expect_return = "Ok（M=3・k=1）。元3 paneはanchor所属のまま、exited/held paneは生存し、close-pane・pipe・toggle-embedは不発生"
+
+[[condition]]
+id = "remap-sequence.embed-floating-exited-held-excluded-from-floating-set"
+source_lines = "tests/fake_backend/remap.rs:986"
+target_function = "remap::run（floating source set定義）"
+source = "docs/design/detailed-design.md DD-10.5（exit hold中のpaneはrun一致照合の対象にならず元tabに残す。is_remap_source()と同じ基準） + PR#6レビュー指摘（floating集合のfilterにexited/held除外が無く、--embed-floating時にsource混入→toggle後membership検証不通過でtimeout・anchor検証失敗・extra held paneが発生しうる）"
+description = "floating source setの定義境界: --embed-floating時のfloating集合（toggle対象・source混入予定の両方）はexited / is_heldを除外する。run一致照合の対象にならずtoggle後のmembership検証にも落るため、floatingのまま元位置に残す（Mに数えない）"
+given = "3 pane同一tab + exited & is_held floating pane 1 + heldのみ floating pane 1 の構成でのrun（--embed-floating付き）"
+expect_return = "Ok（M=3・k=1）。元3 paneはtiledとして配置され、exited/held floating paneはfloatingのまま生存し、toggle-embed・close-pane・pipeは不発生"
+
+[[condition]]
+id = "remap-sequence.empty-list-panes-retry-in-polls"
+source_lines = "tests/fake_backend/remap.rs:599"
+target_function = "remap::run（poll closureのlenient化: probe poll・移動phase 5-a/5-b完了poll）"
+source = "docs/design/remap-v2-matching-fix-task74.md §2.3（poll空応答のretry化。TR74-5: 副因Cの必須合格条件はfake backend test） + docs/design/detailed-design.md DD-10.7 空応答のlenient取得（poll対象では条件未成立としてpollingを継続。deadline 10s・C3規則は不変） + TASK-74段階8コードレビューCR74-2（probe pollのtitle判定をlenient呼び出しの戻り値で直接行い1回化。gate呼び出し+strict list_panes再取得の2重呼び出しでない）・CR74-3（空応答注入はrun冒頭snapshotで消費されないようpipe以降にarmする機構で行い、pollが実際に空を跨ぐ系列で検証）"
+description = "poll中の空list-panes応答はretry（TASK-74副因C修正の核。CR74-2/3対応）: probe poll・移動phase 5-a/5-b完了poll内でlist-panes取得が空応答（exit 0・stdout空 → list_panes_lenientのOk(None)）を返えてもparse errorとして中断せず、条件未成立としてpollingを継続する。probe pollのtitle判定（zelper-probe-<nonce>出現）はlenient呼び出しの戻り値で直接行い、1 tickあたりbackend呼び出しは1回とする（lenientをgateのみに使い実際の判定をstrict list_panesで再取得するとtick毎2回spawnし、gate直後のstrict呼び出しが空応答を返した時点でfatalになる窓が残るため——CR74-2）。空応答の注入は、run冒頭のsnapshot取得（snapshot_lenient）で計数が消費されないよう最初のpipe以降にarmする機構（empty_panes_after_pipe等）で行い、probe poll・5-a/5-b完了pollが実際に空応答を跨ぐ系列で検証する（CR74-3: レビュー時点のfakeはempty_panes_before計数がrun冒頭snapshot_lenientで消費され切り、pollに空が届いていなかった。poll経路をstrictへ戻しても現testはpassするため未実証だった）。N回の空応答を跨いで成立したrunは移動・検証まで完了して成功する。fail-first: 現行実装（レビュー時点）はprobe pollのtitle判定がstrict list_panesのまま（空応答でfatal）。空応答がdeadline（10s）を超えて継続する場合は当該phaseのpolling timeout error（OperationFailed・文面にscreen繁忙の1s timeout機構への言及を含む）としてfatal"
+given = "4 pane / 2 tab（k=2・移動あり）構成で、最初のpipe（probe）以降のlist_panes_lenient応答に先頭N回の空応答を注入（run冒頭snapshotは空を跨がないarm法）したrun"
+expect_return = "Ok（全pane配置・検証pass。空応答を跨いでも中断していない）。probe pollは1 tickあたりlist-panes系backend呼び出し1回で、poll windowにstrict list_panes呼び出しを含まない"
+
+[[condition]]
+id = "remap-sequence.empty-response-retry-before-verify"
+source_lines = "tests/fake_backend/remap.rs:639"
+target_function = "remap::run（verify冒頭・snapshot取得のlenient化）"
+source = "docs/design/remap-v2-matching-fix-task74.md §2.3（verify冒頭・run冒頭snapshot取得のlenient化。TR74-5） + docs/design/detailed-design.md DD-10.7 空応答のlenient取得（10.9検証冒頭の再取得・step 1 snapshotは取得できるまでdeadline内で再試行。fatal条件: 空応答のdeadline超過継続は当該phaseのpolling timeout errorへ合流） + TASK-74段階8コードレビューCR74-3（空応答注入はrun冒頭snapshotで消費されないようpipe以降にarmする機構で行い、検証冒頭が実際に空を跨ぐ系列で検証）"
+description = "検証冒頭・snapshot取得の空応答retry: layout適用phase完了後の検証冒頭（10.9）のlist-panes/list-tabs再取得、step 6のfocus対象決定（E2E要因A改訂で追加された適用後のlist-panes取得）、およびrun冒頭のsnapshot取得（panes_now/tabs_now）は、空応答（Ok(None)）でも取得できるまでdeadline 10s内で再試行する。TASK-75（2026-09-16・E2E改修）: v2.2の呼び出し順では先頭N回空のarm法だとstep 6のfocus対象決定・存在確認pollが空を全数消化して検証冒頭に届かなくなるため、精密arm（empty_*_nth_after_override: 指定番目の呼び出しのみ空）で特定位置へ空を届ける——panes 1回目 = (0,0)のfocus対象決定・tabs 2回目 = 検証冒頭再取得、のそれぞれで空を跨いだ再試行を実証する。空がdeadlineを超えて継続する場合は、focus対象決定のpoll timeoutがwarning skip（best-effort）となったのち検証冒頭snapshotのtimeoutとしてOperationFailed（従来のpolling timeout errorへ合流）"
+given = "4 pane / 2 tab（k=2）構成で、layout適用phase以降のlist-panes/list-tabs応答の指定番目（精密arm）に空応答を注入したrun（成立系: focus対象決定と検証冒頭のそれぞれで空を跨ぐ）と、空応答がdeadline超過まで継続する注入（fatal系）"
+expect_return = "成立系はOk（検証pass）。fatal系はErr（ErrorClass=OperationFailed）"
+
+[[condition]]
+id = "remap-sequence.template-invalid-detected-before-mutation"
+source_lines = "tests/fake_backend/remap.rs:1049"
+target_function = "remap::run（状態変更前のinstance_kdls計算・template系LayoutInvalid検証）"
+source = "TASK-74段階8コードレビューCR74-1（template系LayoutInvalid検証〔children marker不在・leaf数不一致〕がexecute step 6でしか走らず状態変更後に発火。partial_phase報告も省略される。DD-10.7前提・設計§2.2違反） + docs/design/detailed-design.md DD-10.7 前提（全preflight〔layout解決・plan・floating検出・companion setup〕を状態変更前に完了させる順序）・DD-10.8（children node不在・置換後terminal leaf数不一致はLayoutInvalid）・DD-10.6 v2.2（N_t=0鋳型はLayoutInvalid・正規形化〔layout解決〕時点で判定） + docs/design/remap-v2-matching-fix-task74.md §2.2（preflight追加検証: …LayoutInvalidで事前中断） + docs/design/remap-v3-multi-tab-task75.md §3.4（空groupのみの実行のpreflight depth: layout解決・N_t=0検証・正規形化children置換検証・plan・生成KDL計算を状態変更前に完了）"
+description = "template系・N_t=0系LayoutInvalidの事前検証（CR74-1修正の核。TASK-75で対象拡大）: 生成KDL計算がLayoutInvalid（children marker不在・children block不在・置換後leaf数不一致）または鋳型N_t=0となるlayoutでは、run()の状態変更前（v2.2ではnormalize_tab_templates（layout解決）・plan・生成KDL計算の時点）で中断する。probe pipe・toggle-embed・break/move・rename・go-to-tab・override-layout・focus-pane-id・new-tab・companion setup（wasm extract・permissions.kdl書換）のいずれも発生しないことをfake backendの呼び出し記録とfilesystem状態で検証する。fail-first: レビュー時点の実装はinstance_kdlsをexecute step 6（probe・toggle・break/move・rename後）に計算するため、invalid templateで状態変更実行後にLayoutInvalidとなり、DD-10.7前提（全preflightを状態変更前に完了）と設計§2.2「事前中断」に違反し、移動phase途中失敗のpartial_phase報告もされない。LayoutInvalidの判定自体（children marker不在・leaf数不一致・N_t=0）はlayout-generator.template-children-substitution・layout-planner.zero-slot-tab-template-invalidが管轄し、本条件は検証の発火時点が状態変更前であることを管轄する"
+given = "4 pane / 2 tab（k=2・移動あり）構成で、children block内に `children` nodeを持たないdefault_tab_template付きlayout（children以外にterminal paneを持つleaf数不一致・N_t=0鋳型を含むmulti-tab layoutも同一経路）を与えた実run（dry-runなし）"
+expect_return = "Err（ErrorClass=LayoutInvalid・messageにdefault_tab_template）。呼び出し記録に pipe・toggle-embed・rename-tab・go-to-tab・override-layout・focus-pane-id・new-tab がすべて0件で、companion setupも不発生（隔離XDG_CACHE_HOME配下にzelper/未作成）"
+
+[[condition]]
+id = "remap-sequence.move-phase-generalized-block-tab-order"
+source_lines = "tests/fake_backend/remap.rs:1127"
+target_function = "remap::run（移動phase 5-a/5-bのblock×tab一般化）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.4（5-a: group (0,0)のanchor外paneをbreak-id。group (0,0)のinboundを後続outboundより先に行いanchor自動closeを構造的に排除〔M>=1なら逐次充填により(0,0)は必ず1 pane以上〕。5-b: block b昇順・tab t昇順で(0,0)以外の各groupを処理——割当pane 1件以上のgroupは break-new <ids>（fire-and-forget）→ membership poll〔tabのselectable tiled terminal pane集合 == group・pane id基準・tab id再利用耐性〕→ rename-tab-by-id <target> <生成tab名>） + docs/design/detailed-design.md DD-10.7 5-a/5-b v2.2 + requirements.md §2.6"
+description = "移動系列のblock×tab一般化: 5-aはgroup (0,0)（anchor group）のanchor外paneをbreak-idで先行移動（不変条件の一般化）し、5-bはblock昇順・tab昇順で(0,0)以外の割当ありgroupを break-new → membership poll完了 → rename の順で処理する（renameは命名規則どおり）。空group（割当0件）はnew-tab経路（empty-group-tab-created-via-new-tab-then-rename）。fail-first: 現行実装はinstance（単一鋳型反復）系列のためmulti-tab構成で(0,1)以降のgroupを処理しない"
+given = "T=2（N_t=3,2・S=5）multi-tab layoutにM=7（k=2: (0,0)=3・(0,1)=2・(1,0)=2・(1,1)=0）で、group (0,0)にanchor外paneを含む構成でのrun"
+expect_return = "Ok。呼び出し列は pipe break-id（group (0,0)分）が最初のbreak-newより先、以降はgroup (0,1)→(1,0)の順で各々 pipe break-new → 完了poll → rename-tab が現れ、rename名は命名規則どおり（(0,1)は鋳型名/base・(1,0)は-2接尾）。(1,1)はbreak-newでなくnew-tabで具体化"
+
+[[condition]]
+id = "remap-sequence.empty-group-tab-created-via-new-tab-then-rename"
+source_lines = "tests/fake_backend/remap.rs:1211"
+target_function = "remap::run（5-b空groupのnew-tab --layout-string経路）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.4（E2E要因B改訂・2026-09-16・実験4: 割当pane 0件のgroup〔空group〕は new-tab --layout-string <生成KDL> でtab作成時点で生成KDLを適用 → stdoutのtab id parse → rename-tab-by-id。旧経路〔layout引数なし→go-to→override-layoutで既定paneを正規化〕は既定pane〔bare shell〕がoverride-layoutのbare slotに照合されず残存しN_t+1 paneで検証(b)がfailするため不採用〔U75-10解決: bare slotはtab作成経路でのみ具体化され、override-layoutは既存paneとrun一致しない限り常に新規spawn〕。対抗案〔new-tab後にclose-pane〕は最終pane closeでtab自体が自動closeされるため不成立。step 6で当該groupはoverride-layoutをskip〔作成時点で適用済み〕）・§7.1（acceptance結果と実験4） + docs/design/detailed-design.md DD-10.7 5-b v2.2・DD-10.2 #8注記・DD-3.4（new-tab stdout parse・DD-3.2/11実績経路）"
+description = "空groupのnew-tab --layout-string経路（TR75-5昇格のfake必須条件・E2E要因B改訂）: 割当0件のgroupはbreak-new（空list）ではなく new-tab --layout-string <生成KDL>（tab作成時点で生成KDL適用）でtabを作成し、stdoutのtab idをparseして（parse不能・非zero exitはOperationFailedで中断）直後にrename-tab-by-idで命名する（new-tab由来idはこのrenameで取得直後に消費）。step 6では当該tabへのoverride-layoutをskipし（作成時点で適用済み）、pane数==N_tが成立する（検証(b)で確認）"
+given = "T=2（N_t=2,1・S=3）multi-tab layoutにM=2（k=1: (0,0)=2・(0,1)=0〔空group〕）でのrun（成立系）と、new-tab stdoutをparse不能出力にする失敗注入（fatal系）"
+expect_return = "成立系はOk: new-tab --layout-string <生成KDL>呼出 → parse済みidでのrename-tab → step 6でgo-toするがoverride-layoutは不発生（作成時点で適用済み）・検証(b)でpane数==1（N_t）・生成tab名どおり。fatal系はErr（ErrorClass=OperationFailed）。pipe break-newの空list呼出は不発生"
+
+[[condition]]
+id = "remap-sequence.focus-pane-id-after-override-per-tab"
+source_lines = "tests/fake_backend/remap.rs:1281"
+target_function = "remap::run（layout適用phase step 6のfocus-pane-id）"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.4（pane focus〔D5〕E2E要因A改訂・2026-09-16: 各生成tab訪問時にgo-to-tab → override-layoutの直後（空groupはoverride-layout skip直後）に focus-pane-id を実行。対象pane idはmappingでなく適用後のlist-panes〔lenient〕で当該tabのterminal paneをvisual order〔geometry y,x昇順〕に並べたs番目〔s = 鋳型pane_focus_slot、無ければslot 0〕から決定する——bare pane群のrun一致配置が割当順と一致しないためmapping基準だと実幾何とずれる〔acceptance b系列実測〕。空slot〔spawn pane〕も位置から特定可能なため全生成tabで実行〔occupied限定撤廃〕。呼出失敗はwarning・「already focused」のexit 2はfocus状態が実際に成立しているため成功扱い・反映は検証(d)で検知）・§3.5（責務分担TR75-10: backendはargv組み立てとResultを返す薄い実装のみ。Errのwarning化・実行継続はexecute側の責務） + docs/design/detailed-design.md DD-10.7 step 6 v2.2・DD-10.1 事実6 + requirements.md §2.6（per-tab pane focus再現）"
+description = "focus-pane-id per tab（E2E要因A改訂: 対象の位置ベース決定）: layout適用phaseで各生成tab (b,t)の処理は go-to-tab → override-layout（空groupはskip）→ list-panes（lenient・空応答はpoll再試行）→ focus-pane-id terminal_<対象pane id> の順で行われる。対象pane idは当該tabのterminal paneをvisual order（geometry y,x昇順）に並べたs番目（s = 鋳型pane_focus_slot、無ければslot 0）から決定し、mappingのpane idは用いない。空slot（spawn pane）も位置から特定可能なため全生成tabで実行する（occupied限定撤廃）。呼出失敗（backend Err）はwarningとして継続し、focus未反映は検証(d)（pane-focus-verified-via-is-focused）がVerificationFailedとして検知する。「already focused」のexit 2はfocus状態が実際に成立しているため成功扱い（warningを出さない）。T=1でも新たに実行される（T=1後方互換の保証範囲外——TR75-3）。argv形式はbackend-process.focus-pane-id-argvが管轄"
+given = "pane focus=true（slot 1）を持つT=2 multi-tab layoutでのrun（各tabのfocus対象slot 1/slot 0の割当pane）、focus-pane-id呼出をErrにしfocusが未反映のままになる失敗注入run、focus対象slotが最終blockで空slot（spawn pane）になる構成、およびfocus_paneが「already focused」のexit 2相当を返す注入run"
+expect_return = "正常系はOkで呼び出し列に各tabのgo-to→override-layout→focus-pane-id terminal_<適用後の位置から決定したpane id>がこの順で現れ、空slot対象tab（spawn pane・new-tab --layout-string生成pane）でもfocus-pane-idが実行される。失敗注入はOperationFailedではなく検証(d)によるVerificationFailedとして検知（呼出失敗はwarningで継続するため）。already focused注入はrun成功（focus状態が成立しているのと同義）"
+
+[[condition]]
+id = "remap-sequence.final-go-to-honors-template-focus"
+source_lines = "tests/fake_backend/remap.rs:1425"
+target_function = "remap::run（step 7最終go-to先の決定則）"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.4（tab focus: layoutにfocus=trueの鋳型があれば文書順最初のfocus=true鋳型t*についてblock 0のtab (0,t*)を最終go-to先とする。無ければanchor復帰〔現行〕。focus復帰はbest-effort維持〔復帰失敗は操作失敗にしない〕）・§5.2 (v)系列a/b/c（tab focus決定則matrix・TR75-7） + docs/design/detailed-design.md DD-10.7 step 7 v2.2"
+description = "最終go-to先の決定則: layoutのfocus=true鋳型の文書順最初t*についてblock 0のtab (0,t*)へ最終go-toする。focus=true鋳型なし（またはT=1）はanchor復帰（現行挙動と同一）。複数tabのfocus=trueは文書順最初を採用する（E2E系列bでは複数focus検出のwarning出力を含む）。best-effort維持で復帰失敗は操作失敗にしない（r42と同一規則）。fail-first: 現行実装は常にanchor復帰のためfocus=true鋳型を含む構成でfail-first"
+given = "T=3 multi-tab layoutでfocus=trueを鋳型1のみに付与したrun（系列a相当: 最終go-to先は新規tab側）、tab 0とtab 2の両方にfocus=trueを付与したrun（系列b相当: 文書順最初のtab 0）、focus=trueなしのrun（系列c相当: anchor復帰）"
+expect_return = "系列aは最終go-toの呼出対象が (0,1) のtab id（anchorでない）。系列bは文書順最初の (0,0)（=anchor）。系列cはanchor。いずれもrunはOk（最終go-toは検証後・best-effort）"
+
+[[condition]]
+id = "remap-sequence.verify-per-tab-pane-count"
+source_lines = "tests/fake_backend/remap.rs:1494"
+target_function = "remap::run（postcondition (b)のper-tab化）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.6（(b) 各生成tab (b,t)のselectable tiled terminal pane数 == N_t〔anchor (0,0)を含む全生成tabが対象。anchor例外は名前・位置のみであり形状・slot数の例外ではない〕）・§5.2 (ii)（TR75-6: anchor例外は名前・位置のみ） + docs/design/detailed-design.md DD-10.9 (b) v2.2 + requirements.md §2.6（the anchor's shape and slot count are reproduced and verified like every other generated tab）"
+description = "検証(b)のper-tab化: 検証は各生成tab (b,t)毎のpane数 == N_tで行われ、anchor (0,0)を含む全生成tabが対象（multi-tab構成でanchor tabのslot数不一致・重複spawnも検出）。T=1ではN_t=Nで現行検証と一致（r38がT=1側の不一致検出を検証）。fail-first: 現行実装はinstance単位（単一鋳型）の検証のためmulti-tab構成で鋳型1以降のN_tを検証しない"
+given = "T=3（N_t=9,1,2）multi-tab layoutでのrun完了後の状態（成立系）と、鋳型1のtab（N_t=1）適用後に重複paneが湧く失敗注入（fatal系）"
+expect_return = "成立系はOk（各tabのpane数==N_t・anchor tabも9）。fatal系はErr（ErrorClass=VerificationFailed・期待/実測差分に当該tabのN_tが載る）"
+
+[[condition]]
+id = "remap-sequence.pane-focus-verified-via-is-focused"
+source_lines = "tests/fake_backend/remap.rs:1557"
+target_function = "remap::run（postcondition (d) pane focus）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.6（(d) pane focus〔E2E要因A改訂: 位置ベース〕: 各生成tab (b,t)で当該tabのterminal paneをvisual order〔geometry y,x昇順〕に並べたs番目〔s = pane_focus_slot.unwrap_or(0)〕のpaneのis_focused == true〔list-panes経由。非active tabもis_focusedを持つ〔実測・R75-3〕〕。step 6のfocus対象決定と同一の位置基準で全生成tabが対象〔空slot tab除外は撤廃〕） + docs/design/detailed-design.md DD-10.9 (d) v2.2・DD-10.1 事実6（R75-3: list-panesのis_focusedは全tabでlayout指定どおり各1 paneがfocused）"
+description = "検証(d) pane focus（E2E要因A改訂: 位置ベース）: 検証はlist-panesのis_focusedで行い、各生成tab (b,t)の期待focus対象（当該tabのterminal paneをvisual order〔geometry y,x昇順〕に並べたs番目。s = pane_focus_slot or slot 0。step 6のfocus対象決定と同一基準）のpaneがis_focused == trueであることを確認する。非active tabも検証対象（R75-3: 全tabで各1 paneがfocused）。全生成tabが対象（空slot tab除外は撤廃）。focus未反映（focus-pane-id呼出失敗のwarning経路を含む）はVerificationFailedとして検知される"
+given = "pane focusを含むmulti-tab layoutでのrun完了後の状態（成立系: 各tab期待位置のpaneがfocused）と、あるtabの期待focus paneのis_focusedがfalseのままの失敗注入（fatal系）"
+expect_return = "成立系はOk。fatal系はErr（ErrorClass=VerificationFailed・期待/実測差分に当該tabのfocus slotと実測paneが載る）"
+
+[[condition]]
+id = "remap-sequence.leftover-tabs-reported-not-closed"
+source_lines = "tests/fake_backend/remap.rs:1613"
+target_function = "remap::run（leftover_tabs報告）"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.5（過剰tab〔D6〕: 明示的なcloseは行わない。remap後もtargetsに含まれないtab〔source外paneのみのtab・companion plugin host tab等〕は放置し、human出力のwarning行とJSONのleftover_tabs〔id/name/position/selectable pane数〕で情報報告する。閉じる場合はremove verb〔DD-11〕を明示的に使う）・§3.6（leftover_tabs報告: 失敗条件にはしない） + docs/design/detailed-design.md DD-10.9 leftover_tabs報告 v2.2 + requirements.md §2.6（leftovers SHALL NOT be closed implicitly; SHALL be reported）"
+description = "過剰tabの報告と非close: remap後もtargetsに含まれないtab（source外paneのみのtab等）はcloseせず放置し、leftover_tabs（id/name/position/selectable tiled/floating pane数）として報告する（humanはwarning行・--jsonはdata field）。leftoverの存在は失敗条件にしない（run成功）。close-pane等のclose系呼出は不発生。fail-first: 現行実装はleftover_tabs報告を持たない"
+given = "source外paneのみを持つtab（source pane 3件とは別の、pane 1件のtab）が存在するsessionでのrun（T=1・M=3・N=3）"
+expect_return = "Ok。当該tabは生存（tab一覧に残存）しclose系呼出なし。結果のleftover_tabs報告に当該tabのid/name/position/selectable pane数が載る"
+
+[[condition]]
+id = "remap-sequence.new-tab-only-needs-no-companion"
+source_lines = "tests/fake_backend/remap.rs:1660"
+target_function = "remap::run（空groupのみの実行・preflight depth）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.4（空groupのみの実行〔M=0・またはsource全てanchor内で新規tabが空groupのみ〕のpreflight depth〔TR75-5〕: companion plugin・probe不使用〔break系pipe 0件〕。preflightは他caseと同一depth——layout解決・N_t=0検証〔LayoutInvalid〕・正規形化children置換検証〔LayoutInvalid〕・plan・生成KDL計算——を状態変更前に完了し、new-tab実行時点に未知の検証を残さない。new-tabの失敗〔非zero exit・stdout parse不能〕はOperationFailedで中断〔部分状態報告〕）・§3.4 move_needed判定（probe要否は「break系を使用するか」〔k > 1 または group(0,0) outbound非空〕に分離）・§3.4 E2E要因B改訂（空groupはnew-tab --layout-stringで作成時点で生成KDL適用・step 6のoverride-layoutはskip）・§2.4 E2E要因A改訂（focus-pane-idは全生成tabで実行） + docs/design/detailed-design.md DD-10.7 空groupのみの実行 v2.2・DD-10.6（M=0: k=1・全tab全slot空）"
+description = "空groupのみの実行（TR75-5）: M=0（またはsource全てanchor内・新規tabが空groupのみ）のmulti-tab remapはbreak系pipe 0件で完了し、companion plugin・probe・permissions.kdl書換を一切行わない（move_neededとprobe要否の分離。r29参照）。preflightは状態変更前に他caseと同一depthで完了する（LayoutInvalid系はtemplate-invalid-detected-before-mutation）。anchor以外の生成tabはnew-tab --layout-string（生成KDL適用済みtab作成・E2E要因B改訂）→ rename → step 6（go-to → focus-pane-idのみ。override-layoutはskip）で具体化され、focus-pane-idは全生成tabで実行される（E2E要因A改訂: 位置ベース決定のためspawn paneも特定できる）"
+given = "M=0（source空）でのT=3 multi-tab layout（N_t=9,1,2）のrun"
+expect_return = "Ok。k=1・生成tab 3（(0,0)=anchor）。呼び出し記録にpipe・probeなし・permissions.kdl未作成（隔離XDG_CACHE_HOME配下にzellij/・zelper/未作成）で、new-tab --layout-string 2回・rename 2回・go-to 4回（step 6の3 tab分+最終go-to）・override-layout 1回（anchor (0,0)のみ。空groupは作成時点適用のためskip）・focus-pane-id 3回（全生成tab・位置ベース）"
+
+[[condition]]
+id = "remap-sequence.tab-id-resolution-lenient-before-apply"
+source_lines = "tests/fake_backend/remap.rs:1721"
+target_function = "remap::run（targets配列のdata flow・step 6直前のtab id存在確認・再解決）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.4（targets配列のdata flow〔TR75-4〕: targets: Vec<TabId>〔長さk*T・targets[b*T+t]・block昇順tab昇順〕をexecute単一実行scope内で保持。DD-2「長寿命のtab id参照を持たない」原則の適用範囲は実行を超えた保持の禁止であり単一実行scope内の逐次参照は許容——この解釈をDD-10.7末尾へ明記。tab id再利用への実行内防御としてstep 6の各group処理直前にlist-tabs〔lenient〕でtargets[j]の存在確認を行い、不在なら再解決——割当ありgroupはpane所属基準〔5-b membership特定と同一〕・空groupはrename済み生成tab名基準〔list-tabsのname一致〕。go-to-tab-nameコマンドは同名tab曖昧性のため補助にしか使わない〔U75-7〕。new-tab由来idはstdout parse直後のrenameで「取得直後に消費」。再解決不能はOperationFailed〔中断時報告〕） + docs/design/detailed-design.md DD-10.7末尾 v2.2"
+description = "tab idの実行内保持と再解決: targets[b*T+t]配列をexecute scope内で保持し、step 6の各group処理直前にlist-tabs（lenient・空応答は未成立として扱う）で存在確認する。tab idが再利用・消失等で不在の場合は再解決する（割当ありgroup: group全paneの所属tab特定〔selectable tiled terminal pane集合 == group〕・空group: rename済み生成tab名の一致）。再解決不能はOperationFailedで中断（部分状態報告）。CR75-1対応（2026-09-16コードレビュー）: 再解決時のlist_panes取得もlenient poll（一時的空stdoutで即時失敗しない。DD-10.7/10.9の空応答設計と同一規則。旧実装はstrict 1回呼び出しだった）"
+given = "T=2 multi-tab layoutでのrun途中に、step 6開始前のある生成tabのidがlist-tabs上で別idに入れ替わる失敗注入をしたrun（再解決成立系: 同pane群が別idのtabに所属・空groupは生成tab名で特定）、入れ替わり＋再解決位置のlist_panes空応答注入（精密arm・CR75-1: retryで再解決成立）をしたrun、tab自体が消失し再解決不能になる失敗注入（fatal系）"
+expect_return = "成立系はOkでgo-to-tab/override-layoutは再解決後のtab idへ向けられる。再解決時空応答系もOkで、再解決のlist-panes取得は空→retryの連続2回（strict 1回呼び出しでない）。fatal系はErr（ErrorClass=OperationFailed・中断時報告）"
+
+[[excluded]]
+item = "実zellijでのremapプロセス保存実証（heartbeat pid継続・pane ID同一・cross-tab移動・companion setup・probe込みのE2E）"
+source = "docs/testing/test-plan.md §3・§2.8（S7・S-v2-1〜6として実施済み）"
+reason = "実zellij依存のL4統合testでのみ検証可能。repo管理外podman harnessで実施済みでありL1〜L3の自動test対象外（test-structure skill §6の階層対応。要件はtest-plan L4節に集約）"
+decided_at = "2026-09-13"
+decided_by = "human"
+
+[[excluded]]
+item = "空slotの既定shell paneの実機での実在確認（R40のL4側強化）"
+source = "docs/testing/test-plan.md §2.7 (f) R40"
+reason = "L2ではpane数==Nとして代理検証（remap-sequence.r40-empty-slots-filled-with-default-shell）。shell paneの実在確認はL4でのみ可能（S-v2-1で実施済み）"
+decided_at = "2026-09-13"
+decided_by = "human"
+
+[[excluded]]
+item = "fake backendの失敗注入能力一式（pipe block・pipe効果不出現・permissions.kdl書換競合・不正layout）"
+source = "docs/testing/test-plan.md §2.7 (j)"
+reason = "test支援資産（tests/fake_backend/fake.rs）の能力であり製品の検証条件ではない。各注入の効果は個別条件（companion-seed.r28系・remap-sequence.r31系等）で検証済み"
+decided_at = "2026-09-13"
+decided_by = "human"
+
+[[excluded]]
+item = "remapの--tab TABSPEC指定（対象tabのみへのsource絞り込み・anchorの対象tab切替・解決不能時NoTarget・--tab時のlayout適用はlayout最初のtab鋳型〔鋳型0〕による単tab適用〔S=N_0のT=1経路。D10・v2.2〕）"
+source = "docs/design/detailed-design.md DD-10.5（scope: --tab TABSPEC指定時 = そのtabのpaneのみをsourceとし、anchorもそのtabとする。--tab時のlayout適用はlayout最初のtab鋳型による単tab適用〔正規形TabTemplate列の鋳型0のみ・T=1経路。multi-tab layoutを指定しても2番目以降のtabは適用しない。v2.2〕）・DD-10.6（anchor: --tab時 = 解決済み対象tab）・DD-10.14（--tab解決不能はNoTarget） + docs/design/remap-v3-multi-tab-task75.md §2.8（D10） + docs/testing/test-plan.md §2.7 (a)（anchor = 既定でactive tab（--tab時は対象tab））"
+reason = "未test。既存testはすべて--tabなし（scope = session全体）であり、--tab絞り込み・anchor切替・NoTarget経路・鋳型0単tab適用を検証するtest fnが存在しないため本移行では条件化できない（移行は新規testを作らない）。新規test追加時に条件化する（移行実施時にtm起票。TASK-69）"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "layout適用phase失敗（instance 2のoverride-layout失敗等）の報告: paneは全て生存し正しいtabに所属（形状のみ未適用）である旨の報告・rollbackなし・再実行での完成"
+source = "docs/design/detailed-design.md DD-10.11（失敗位置の種別と報告: layout適用phase失敗）・DD-10.12 worked example #7 + docs/testing/test-plan.md §2.7 (f) R41は検証失敗（postcondition不一致）のみを条件化"
+reason = "未test。既存20 testにoverride-layout失敗を注入するtest fnが存在しないため本移行では条件化できない（移行は新規testを作らない。fakeの失敗注入にもoverride-layout失敗が未実装）。新規test追加時に条件化する（移行実施時にtm起票）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "companion setup失敗（wasm extract・permissions seedの失敗）による状態変更前の即中断（remap実行sequence経路）"
+source = "docs/design/detailed-design.md DD-10.11（失敗位置の種別と報告: companion setup失敗: 状態変更前（tiled化を除く）に即中断）・DD-10.7 step 3・DD-12（preflight: remapはcompanion setupが続き、失敗は状態変更前に停止）"
+reason = "未test。component単位の失敗（seed書込不可・parse不可・競合・wasm extract書込失敗）はcompanion-seed側（r25/r28/C4系）で検証済みだが、remap::run経由でcompanion setup失敗が状態変更前の即中断として扱われる実行sequenceは未検証（fake経路でseed/extract失敗を注入するtest fnなし）。TASK-70でlayout適用phase失敗と併せて条件化する"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "TASK-74 E2E acceptance (ii)単tab適用・(iii)k=3 smokeの必須合格条件（実機: exit 0・ok:true・terminal pane数9/27のまま・a_before幾何一致・compact-barのy=59生存・dump-layout形状が入れ子3x3+bar）"
+source = "docs/design/remap-v2-matching-fix-task74.md §4（E2E acceptance手順。podman sandbox・tmp/task74/acceptance/）"
+reason = "実zellij 0.44.3依存のL4統合testでのみ検証可能（repo管理外podman harness。test-structure §6の階層対応・test-plan §3）。主因A/B修正のL1〜L3側条件（layout-planner.run-derives-from-invoked-with・layout-generator.template-children-substitution）と検証(b)系条件（r38）が安全網を担う"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "E2E観察条件: j>=1新規tabでのbar（compact-bar）新規spawnの有無・実行中の空list-panes応答の発生と非中断完了"
+source = "docs/design/remap-v2-matching-fix-task74.md §4 (iii)観察条件（合格判定外。結果の記録のみ）・TR74-5（空応答の発生は非決定的なためE2Eの合格判定から除外）"
+reason = "発生が非決定的（screen繁忙タイミング依存）かつ実zellij依存のためL1〜L3の決定的testで検証不可。空応答retryはremap-sequence.empty-list-panes-retry-in-polls / empty-response-retry-before-verifyが決定的注入で担保。bar新規spawnはTASK-75（multi-tab全体再現）の前置観察でありspawnされなくても失敗扱いにしない"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "起動時cwd明示pane（layout cwd= / zellij run --cwd）のrun一致照合外れの実機確認（相対cwd・layout継承cwd・--cwd正規化差異はTR74-7未検証）"
+source = "docs/design/detailed-design.md DD-10.13（起動時cwd明示paneのrun一致不可）・DD-10.1 事実5（F4: Run::Command等価比較はcwdを含む全field一致。絶対path cwd明示のみspike Sで実証済み） + docs/design/remap-v2-matching-fix-task74.md §2.6"
+reason = "zellij内部のRun::Command等価比較に依存する実機確認（L4）。相対・継承・正規化差異は追加実験なしの設計上の受容（同照合外れ経路と推定）。zelper側の検知経路（(b)検証でのVerificationFailed・error文面のcwd起因案内）はremap-sequence.r38が条件化"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "hold_on_start/hold_on_close付き起動pane・zellij edit pane（Run::EditFile）の照合外れの実機確認"
+source = "docs/design/detailed-design.md DD-10.13（hold flag・EditFile pane。EditFileはterminal_commandに現れないためbare slotと照合せず複製spawn+挿入となる） + docs/design/remap-v2-matching-fix-task74.md §2.6"
+reason = "zellij側のrun一致挙動に依存する実機確認（L4）。cwd明示paneと同様に照合外れ→複製spawn→(b)検証でのVerificationFailedとして検知される経路（r38）であり設計上の受容"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "TASK-75 E2E acceptance (i)〜(v)必須合格条件（実機: reference採取・multi-tab適用〔3 tab生成・tab名〔anchor名保持〕・tab focus・pane focus・per-tab幾何〔anchor含む全tab〕・bar全tab〕・k>=2 smoke〔空groupのnew-tab経路実証〕・T=1回帰〔focus-pane-id 1回増の確認〕・tab focus決定則matrix〔文書順最初・複数focus・無指定〕）"
+source = "docs/design/remap-v3-multi-tab-task75.md §5.2（E2E acceptance手順。podman sandbox・tmp/task75/acceptance/・TASK-74のtmp/task74/acceptance/と同一harness構成）"
+reason = "実zellij 0.44.3依存のL4統合testでのみ検証可能（repo管理外podman harness。test-structure §6の階層対応・TASK-74先例どおり設計書§5.2管理）。L1〜L3側は本更新のplanner/generator/sequence/cli各条件が安全網を担う"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "TASK-75 E2E観察条件（U75-5: break-new新規tabへのdefault_tab_template bar自動適用の有無・dump-layoutのnew_tab_template残存〔R75-1〕）とdump-layout完全一致比較（TR75-8: 比較対象はtab毎slot数・幾何・bar存在・検証可能focus〔is_focused・active tab〕に限定）"
+source = "docs/design/remap-v3-multi-tab-task75.md §5.2 (ii)(iii)観察条件（合格判定外・記録のみ）・§4.3（E2E dump比較の除外項目対応表） + docs/design/detailed-design.md DD-10.9 検証の観測経路とdump-layoutの扱い（dump-layoutとの完全一致は保証・検証対象外。v2.2・TR75-8）"
+reason = "観察条件は合格判定外の記録であり検証する合格基準が存在しない。dump完全一致は正規化表現（size=\"33%\"等）・noise（hide_floating_panes・zellij:link pane・active tabへ常に付くfocus=true等）を含むため保証・検証対象外（TR75-8）。bar全tab・幾何・focusはlayout-generator.per-tab-kdl-from-normalized-templates・verify系条件（verify-per-tab-pane-count・pane-focus-verified-via-is-focused）がL1〜L2で担保"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "pane nodeのname属性→pane titleの再現（観察のみ・D11）とanchor tab位置のlayout最初のtab位置との一致（非保証）"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.8（pane name属性→pane titleは保証外・観察のみ）・§8（tab位置〔position〕の並替再現。anchorの位置はlayout最初のtab位置と一致する保証はない〔anchor再利用・D1の帰結〕） + docs/design/detailed-design.md DD-10.13 multi-tab再現の対象外 (1)(4) + requirements.md §2.6例外(a)(c)"
+reason = "いずれも保証外項目でありremap側に再現する挙動が存在しない（remapはtitleを設定せずrun一致照合とも無関係・anchor位置はanchor再利用の帰結）。anchor名は例外として条件化済み（layout-planner.tab-names-from-templates-and-block-suffix・r39名前検証除外）で、形状・slot数は例外ではなくremap-sequence.verify-per-tab-pane-countが検証する"
+decided_at = "2026-09-15"
+decided_by = "claude"
+
+[[excluded]]
+item = "swap layout自動切替・floating pane配置の再現・new_tab_templateのremap後新規tabへの適用（v2.2も対象外維持）"
+source = "docs/design/remap-v3-multi-tab-task75.md §8（スコープ外: swap layout自動切替・floating pane配置の再現〔SKIP_NODES・対象外維持〕・new_tab_templateのremap後新規tabへの適用〔zellij予約領域・対象外〕） + docs/design/detailed-design.md DD-10.13（swap layout / template: SKIP_NODES規則でslot数から除外。new_tab_templateは対象外のまま〔TASK-75〕）"
+reason = "v2.1から対象外維持の項目であり再現要求自体が設計に存在しない。SKIP_NODESによるslot数除外機構はlayout-planner.r12-slot-count-uses-first-tab-subtree-excluding-plugin-leavesが検証済み"
+decided_at = "2026-09-15"
+decided_by = "claude"

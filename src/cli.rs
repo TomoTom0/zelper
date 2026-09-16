@@ -34,6 +34,9 @@ pub enum Verb {
         /// 機械可読JSON出力
         #[arg(long)]
         json: bool,
+        /// 縮小表示（human時のみ有効。panesはtab+短縮cwdのみ、他resourceは名前のみ）
+        #[arg(short = 'c', long)]
+        compact: bool,
     },
     /// paneの画面出力の読み取り
     Read {
@@ -77,7 +80,7 @@ pub enum Verb {
         #[command(subcommand)]
         target: ResizeTarget,
     },
-    /// 既存paneをlayoutに再配置（process保持）
+    /// 既存paneをlayoutに再配置（process保持・全pane対象）
     Remap {
         /// layout名（layout_dir解決。--path/--inlineと排他）
         layout: Option<String>,
@@ -85,15 +88,9 @@ pub enum Verb {
         path: Option<std::path::PathBuf>,
         #[arg(long, conflicts_with_all = ["layout", "path"])]
         inline: Option<String>,
-        /// 対象tab（--session-scopeと排他）
-        #[arg(long, conflicts_with = "session_scope")]
+        /// sourceをこのtabに絞り込む（anchor tabもこのtab。省略時はsession全体）
+        #[arg(long)]
         tab: Option<String>,
-        /// 全tabに独立適用（--tabと排他）
-        #[arg(long, conflicts_with = "tab")]
-        session_scope: bool,
-        /// M>N時のoverflow戦略（既定はerror）
-        #[arg(long, value_enum)]
-        overflow: Option<OverflowMode>,
         /// floating paneをtiled化して組入れる（既定はpreflight error）
         #[arg(long)]
         embed_floating: bool,
@@ -119,14 +116,6 @@ pub enum Verb {
         #[command(subcommand)]
         target: DocsTarget,
     },
-}
-
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OverflowMode {
-    /// 全pane保存・第1tab内入れ子・layout形状は保証しない
-    Nest,
-    /// layoutを追加tabで反復。overflow paneはcommand再起動（破壊的）
-    Tabs,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]

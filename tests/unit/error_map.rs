@@ -6,6 +6,7 @@ fn exit_of(class: ErrorClass) -> i32 {
     ZelperError::new(class, "m").exit_code()
 }
 
+// [covers:json-contract.class-exit-mapping-full-table]
 #[test]
 fn class_exit_mapping_full_table() {
     assert_eq!(exit_of(ErrorClass::Usage), 2);
@@ -21,6 +22,7 @@ fn class_exit_mapping_full_table() {
     assert_eq!(exit_of(ErrorClass::VerificationFailed), 7);
 }
 
+// [covers:json-contract.error-envelope-shape]
 #[test]
 fn json_error_envelope_shape() {
     let e = ZelperError::with_candidates(
@@ -36,6 +38,7 @@ fn json_error_envelope_shape() {
     assert_eq!(v["error"]["candidates"].as_array().unwrap().len(), 2);
 }
 
+// [covers:json-contract.ok-envelope-shape]
 #[test]
 fn json_ok_envelope_shape() {
     let out = json::ok(serde_json::json!({ "sessions": ["a"] }));
@@ -45,6 +48,7 @@ fn json_ok_envelope_shape() {
     assert_eq!(v["data"]["sessions"][0], "a");
 }
 
+// [covers:json-contract.targeted-result-stable-fields]
 #[test]
 fn targeted_result_stable_fields() {
     let r = json::TargetedResult {

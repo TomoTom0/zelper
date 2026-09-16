@@ -1,0 +1,101 @@
+# target resolver（src/selector.rs）の検証条件。出典: test-plan §2.2・DD-1.3/1.4/2・requirements §2.8・DD-11
+# 対応test: tests/unit/selector.rs（10件。1条件=1 test fnの1:1対応。設計書§3.4）
+[meta]
+feature = "selector"
+source_file = "src/selector.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test selector"
+source_hash = "4616e8124f66c0064e3420f79b5f314aee30515e"
+note = "TASK-61: 移行時excluded 2件（--cwd一致filter・filter 0件→NoTarget）をtest追加により条件化し、--name完全一致の検証限界（CMR3-3）を解除。src/selector.rsは不変のためsource_hash再計算不要"
+
+[[condition]]
+id = "selector.positional-id-resolution-and-no-target"
+source_lines = "tests/unit/selector.rs:94"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（positional ID解決: 存在確認・存在しないID） + docs/design/detailed-design.md DD-1.4（選択規則: 対象0件はno target matched error） + DD-2（TargetSet）"
+description = "positional PANESPEC（pane ID指定）の解決基盤: 存在するpane IDは当該paneのみを選択し、positional指定したpane IDが不在ならNoTarget error（filter結果0件の失敗とは別code path。filter 0件はselector.filter-zero-matches-no-targetが検証）。全verb共通の対象解決の最初の分岐"
+given = "tab混在・floating混在・non-selectable pluginを含むPaneState列に、Terminal(1)のpositional指定と、存在しないTerminal(99)のpositional指定を与える"
+expect_return = "存在するID指定は当該1件のTargetSet。存在しないID指定はErrorClass=NoTarget"
+
+[[condition]]
+id = "selector.filter-name-exact-and-command-partial"
+source_lines = "tests/unit/selector.rs:114"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（filter option: --name完全一致・--command部分一致） + docs/design/detailed-design.md DD-1.4（--nameはtitle完全一致・--commandはpane_command部分一致）"
+description = "filter optionの一致規則: --nameはtitle完全一致のみ、--commandはpane_command部分一致で複数paneにhitする。send --command等の集合選択の基礎"
+given = "title=agent-a（command=codex exec）とtitle=agent-b（command=codex exec）を含むPaneState列に、--name agent-a指定・--command codex指定・--name agent指定（両titleの部分文字列）をそれぞれ与える"
+expect_return = "--name agent-aは1件、--command codexは2件、--name agentは完全一致せず0件でNoTarget（完全一致→部分一致への回帰を検出）"
+
+[[condition]]
+id = "selector.filter-cwd-exact-match"
+source_lines = "tests/unit/selector.rs:141"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（filter option: --cwd一致） + docs/design/detailed-design.md DD-1.4（--cwd DIR = pane_cwd一致）"
+description = "--cwd filterの一致規則: pane_cwdとの完全一致で対象を選択し、前方一致は採らない。cwd Noneのpane（floating等）は対象外。作業dir基準の対象選択の基礎"
+given = "cwd=/tmpのterminal pane 4件・cwd Noneのselectable floating pane・non-selectable pluginを含むPaneState列に、--cwd /tmp指定と--cwd /tm指定（既存cwdの前方一致）を与える"
+expect_return = "--cwd /tmpはcwd=/tmpの4件のみ。--cwd /tmは完全一致せず0件でNoTarget（前方一致でhitする回帰を検出）"
+
+[[condition]]
+id = "selector.filter-zero-matches-no-target"
+source_lines = "tests/unit/selector.rs:163"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（0件（NoTarget）） + docs/design/detailed-design.md DD-1.4（対象0件 → no target matched error）"
+description = "filter option指定の結果0件はno pane matched error（NoTarget）。positional不在IDのpane not found分岐（selector.positional-id-resolution-and-no-target）とは別のresolve終端分岐"
+given = "どのpaneのcommandにも部分一致しない--command指定を与える"
+expect_return = "ErrorClass=NoTarget・messageが'no pane matched'を含む（positional不在IDの 'not found in the current session state' とは別message）"
+
+[[condition]]
+id = "selector.all-selectable-terminals-include-floating"
+source_lines = "tests/unit/selector.rs:177"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（filter option: --all） + docs/design/detailed-design.md DD-1.4（--all = 対象sessionの全selectable terminal pane）"
+description = "--allの対象集合の定義: selectable terminal paneの全体。selectableなfloating paneは対象に含み、tab-bar等のnon-selectable plugin paneは除外する"
+given = "selectable tiled pane・selectable floating pane（terminal_4）・non-selectable plugin pane（tab-bar）が混在するPaneState列に--all指定を与える"
+expect_return_shape = "結果の全要素がis_selectable=trueでPlugin paneを含まず、floating pane（terminal_4）を含む"
+
+[[condition]]
+id = "selector.union-of-positional-and-filter"
+source_lines = "tests/unit/selector.rs:201"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（positional + filter の和集合） + docs/design/detailed-design.md DD-1.4（positionalとfilter optionは併用可・和集合）"
+description = "positional PANESPEC群とfilter optionの併用は和集合となる。対象指定の組合せ規則（read 1 2 3 --name x 等が破綻しない根拠）"
+given = "Terminal(3)のpositional指定と、agent-a・agent-bにhitする--command codex指定を同時に与える"
+expect_return = "和集合3件（terminal_1・terminal_2・terminal_3）のTargetSet"
+
+[[condition]]
+id = "selector.visual-order-deterministic"
+source_lines = "tests/unit/selector.rs:214"
+target_function = "resolve"
+source = "docs/testing/test-plan.md §2.2（順序の決定性: (tab_position, pane_y, pane_x) 昇順が固定されること）"
+description = "解決結果の順序はvisual_key（tab_position, pane_y, pane_x）昇順で決定的。send broadcast等の実行順序がpane列挙順に依らない保証"
+given = "visual_key (tab_position, y, x) が (0,30,0)・(0,0,0)・(0,0,100)・(1,0,0) を取るPaneState列に--all指定を与える。terminal_3とfloating terminal_4は同一visual_key (1,0,0) を共有し、等値pair間の順序は本条件では未検証"
+expect_return_shape = "結果のvisual_key列が昇順に整列済み（cloneしてsortした列と一致）"
+
+[[condition]]
+id = "selector.single-target-ambiguous-with-candidates"
+source_lines = "tests/unit/selector.rs:229"
+target_function = "resolve_single"
+source = "docs/testing/test-plan.md §2.2（単一対象要求（rename）で複数ヒット: AmbiguousTarget + 候補列出） + docs/design/detailed-design.md DD-1.4（単一対象を要求するverbで複数ヒット→ambiguous target error（候補一覧を出力））"
+description = "単一対象を要求する経路（rename等）の解決: 複数ヒットはAmbiguousTarget errorで候補を列出し、単一ヒットは成功。誤操作防止の境界条件"
+given = "--command codex指定（2 paneにhit）と、Terminal(3)の単数positional指定をそれぞれresolve_singleに与える"
+expect_return = "複数ヒット時はErrorClass=AmbiguousTargetで候補2件。単数時はOk"
+
+[[condition]]
+id = "selector.tab-resolution-by-id-or-unique-name"
+source_lines = "tests/unit/selector.rs:248"
+target_function = "resolve_tab"
+source = "docs/testing/test-plan.md §2.2（filter option: --tab（ID/一意名）） + docs/design/detailed-design.md DD-1.3（TABSPEC = tab ID（整数）または一意なtab名。一意ならIDへ解決、曖昧なら候補列出のerror）"
+description = "TABSPEC（全verbの--tab optionとrename tab/remove tab positionalで共通）の解決: 数値はtab ID、一意な名前は該当tab IDへ解決、同名複数tabはAmbiguousTarget、存在しない指定はNoTarget。検証限界: AmbiguousTarget時の候補列出はclass assertのみで候補中身は未assert（pane側の候補assertはsingle-target条件が検証）"
+given = "同名agents 2tab（ID 1・2）と一意名build（ID 5）のTabState列に、ID指定・一意名指定・曖昧名指定・不在ID指定を与える"
+expect_return = "ID指定と一意名buildはTabId(5)。曖昧名agentsはErrorClass=AmbiguousTarget。不在IDはErrorClass=NoTarget"
+
+[[condition]]
+id = "selector.empty-tab-definition"
+source_lines = "tests/unit/selector.rs:288"
+target_function = "TabState::is_empty"
+source = "docs/design/first/260821/requirements.md §2.8（空tab削除の要求） + docs/design/detailed-design.md DD-11（空tabの定義: --empty: 空tab = selectable な pane（tiled+floating両方）が0個のtab）"
+description = "remove tab --emptyの対象判定となる空tabの定義: selectable pane（tiled+floating両方）が0個のtab。non-selectable pluginのみのtabは空、floating 1個でも空ではない"
+given = "selectable tiled/floating countが0のTabStateと、selectable_floating_panes_count=1のTabState"
+expect_return = "前者はis_emptyがtrue、後者はfalse"

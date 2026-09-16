@@ -1,0 +1,79 @@
+# JSON出力契約（src/output/json.rs）の検証条件。出典: test-plan §2.10・§2.9（部分）・DD-4.2/4.3・design-review §4 MR-17
+# 対応test: tests/unit/error_map.rs（4件）+ tests/cli/list_read_send.rs（JSON envelope系2件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+[meta]
+feature = "json-contract"
+source_file = "src/output/json.rs"
+verified = true
+verified_at = "2026-09-13"
+verified_by = "claude"
+test_command = "cargo test --test error_map --test cli_list_read_send"
+source_hash = "30979a1ce1a1429a557edd207080b367f1426ee1"
+note = "src/error.rs（ErrorClass・exit code対応）も検証対象。TASK-75（2026-09-15）: remap v2.2のdry-run/成功JSON data内部構成拡張はenvelope契約不変のまま行われるため本条件書への新規条件なし（excludedへ決定を記録。詳細はremap-cli.toml管轄）。verified = trueはenvelope契約6条件に対する検証記録のまま"
+
+[[condition]]
+id = "json-contract.class-exit-mapping-full-table"
+source_lines = "tests/unit/error_map.rs:9"
+target_function = "ZelperError::exit_code"
+source = "docs/testing/test-plan.md §2.10（各error class: exit code対応（DD-4.3表の全行）・error.class値） + docs/design/detailed-design.md DD-4.3（error.classとexit statusの対応表）"
+description = "error.classとexit codeの対応表の全行（11 class）。scripting利用者向けの失敗時契約であり、class追加時に対応表から漏れるのを全行assertで防ぐ"
+given = "ErrorClass 11種（Usage/NoTarget/AmbiguousTarget/ZellijUnavailable/UnsupportedVersion/OperationFailed/PartialFailure/Preflight/LayoutNotFound/LayoutInvalid/VerificationFailed）の各ZelperError"
+expect_return = "Usage=2・NoTarget=3・AmbiguousTarget=3・ZellijUnavailable=4・UnsupportedVersion=4・OperationFailed=5・PartialFailure=6・Preflight=7・LayoutNotFound=7・LayoutInvalid=7・VerificationFailed=7"
+
+[[condition]]
+id = "json-contract.error-envelope-shape"
+source_lines = "tests/unit/error_map.rs:25"
+target_function = "output::json::err"
+source = "docs/testing/test-plan.md §2.10 + docs/design/detailed-design.md DD-4.2（失敗時envelope: schema_version/ok:false/error.class・error.candidates）"
+description = "失敗時JSON envelopeの形状: schema_version=1・ok=false・error.classにclass名・AmbiguousTargetでは候補列出。stable fields（schema_version/ok/error.class）の保証"
+given = "AmbiguousTargetのZelperError（messageと候補terminal_3・terminal_5付き）"
+expect_return_shape = "schema_version=1・ok=false・error.classがAmbiguousTarget・error.candidatesが2要素のJSON object"
+
+[[condition]]
+id = "json-contract.ok-envelope-shape"
+source_lines = "tests/unit/error_map.rs:41"
+target_function = "output::json::ok"
+source = "docs/testing/test-plan.md §2.10（各成功コマンド: schema_version:1・ok:true・stable fields存在） + docs/design/detailed-design.md DD-4.2（成功時envelope: schema_version/ok/data。MR-6でdata追記）"
+description = "成功時JSON envelopeの形状: schema_version=1・ok=true・コマンド固有objectがdataへ格納される。全verbの--json成功出力の共通契約"
+given = "任意のdata object（sessions: [a]）をjson::okへ渡す"
+expect_return_shape = "schema_version=1・ok=true・data.sessions[0]がa のJSON object"
+
+[[condition]]
+id = "json-contract.targeted-result-stable-fields"
+source_lines = "tests/unit/error_map.rs:51"
+target_function = "output::json::TargetedResult"
+source = "docs/testing/test-plan.md §2.10 + docs/testing/test-plan.md §2.9（部分失敗のJSON: results[]のok/target構造） + docs/design/detailed-design.md DD-4.2（multi-target操作はresults[]にTargetedResult（target/ok/detail|error）を格納・stable fieldsはresults[].target/results[].ok）"
+description = "multi-target操作のresults[]要素のstable fields: targetとokは常に存在し、detailはNone時にfield自体を省略する。部分失敗を隠さない契約の直下の構造単位"
+given = "target=terminal_3・ok=false・detail=None・error=dump-screen failed のTargetedResult"
+expect_return_shape = "JSON化してtarget/ok/errorが存在し、detail fieldは出現しない"
+
+[[condition]]
+id = "json-contract.list-panes-json-success-envelope"
+source_lines = "tests/cli/list_read_send.rs:89"
+target_function = "list panes --json のCLI出力経路"
+source = "docs/testing/test-plan.md §2.10 + docs/design/detailed-design.md DD-4.2（成功時envelope・dataにコマンド固有object）"
+description = "list panes --jsonのCLI level契約: 成功時stdoutが単一のJSON envelope（schema_version=1・ok=true）で、data.panes配列のpane_idがterminal_N形式。L3実行経路でのenvelope履行"
+given = "fake zellij shim（list-panes応答3件）に対するzelper list panes --json実行"
+expect_return_shape = "stdoutがschema_version=1・ok=true・data.panes 3件・panes[0].pane_idがterminal_1のJSON"
+
+[[condition]]
+id = "json-contract.cli-error-envelope-on-failure"
+source_lines = "tests/cli/list_read_send.rs:298"
+target_function = "--json指定時のerror出力経路（main）"
+source = "docs/testing/test-plan.md §2.10 + docs/design/design-review.md §4.2 MR-17（--json指定時の失敗にerror envelopeが出ない不履行の回帰） + docs/design/detailed-design.md DD-4.2（失敗時はerror envelope）"
+description = "--json指定時の失敗はstdoutへerror envelopeを出す（exit codeはerror class対応のまま）。MR-17回帰: --json利用者がstdoutだけで失敗を構造的に把握できる契約"
+given = "存在しないpane（999）へのzelper read 999 --json実行"
+expect_return_shape = "exit 3（NoTarget）かつstdoutがschema_version=1・ok=false・error.class=NoTargetのJSON"
+
+[[excluded]]
+item = "stable fieldsの将来互換をsnapshot testで無変更強制する機構"
+source = "docs/testing/test-plan.md §2.10（stable fieldsの将来互換: snapshot testで無変更を強制）"
+reason = "未test（機構不在）。stable fields（schema_version/ok/data/error.class/results[].target/results[].ok）の存在は本条件書の各envelope条件のfield assertで検証済みだが、snapshot fileによる無変更強制の機構は未導入。DD-4.2はstable外fieldの追加を許容するため、snapshot導入はstable外追加の検出抑制との整合判断を要する（tm起票済み）"
+decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "remap v2.2のdry-run/成功JSON data内部構成拡張（n fieldへS格納・新規t/s/n_slots/tabs〔鋳型name/focus〕・mapping系keyへのblock/tab_index追加〔instance維持〕・leftover_tabs）の詳細検証"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.7（DD-4.2のstable fields〔schema_version/ok/data/error.class等〕は不変であり、data内部のfield構成変更は契約変更にならない） + docs/design/detailed-design.md DD-10.10 v2.2・DD-10.9（成功時data・leftover_tabs）"
+reason = "envelope契約（stable fields）は不変であり本条件書の各envelope条件の対象外。remap固有data fieldの詳細はremap-cli.toml管轄（json-n-field-holds-total-slots・dry-run-reports-s-and-per-tab-slots・r48/r49、error系はremap-sequence.r41。data生成はsrc/app/remap.rsでsrc/output/json.rsは不変）"
+decided_at = "2026-09-15"
+decided_by = "claude"

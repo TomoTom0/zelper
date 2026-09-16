@@ -22,7 +22,11 @@ pub fn resolve_session(
     if let Ok(name) = std::env::var("ZELLIJ_SESSION_NAME") {
         return Ok(name);
     }
-    let sessions = backend.list_sessions()?;
+    let sessions = backend
+        .list_sessions()?
+        .into_iter()
+        .filter(|s| !s.exited)
+        .collect::<Vec<_>>();
     match sessions.len() {
         1 => Ok(sessions[0].name.clone()),
         0 => Err(ZelperError::new(

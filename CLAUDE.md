@@ -12,6 +12,7 @@
 ## 実験・テスト環境
 
 - ユーザー実環境のツール（zellij等）を用いる実験・テストは、podman等のsandboxで実行する。命名規則・運用規律のみの隔離で実環境に直接あたるテストはしない
+- zelper自身のbug再現・動作確認（dry-run含む）もsandboxで実行する。「dry-runは非破壊」を理由に実sessionで実行しない（dry-runの先にある本実行の系列まで見て判断する）
 - zellij実験のsandbox手順: podman + debian:12-slim + ホストのzellijバイナリをread-only mount、イメージ取得時のみnetwork（実行時は --network=none）、コンテナ内で `script -qec` によりPTY駆動、スクリプトとログは `tmp/` 配下に保存
 
 ## 参照

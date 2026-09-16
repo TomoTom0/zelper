@@ -7,6 +7,7 @@ fn manifest_docs(rel: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap()
 }
 
+// [covers:docs-verb.readme-outputs-readme-md]
 #[test]
 fn docs_readme_outputs_readme_md() {
     Command::cargo_bin("zelper")
@@ -17,6 +18,7 @@ fn docs_readme_outputs_readme_md() {
         .stdout(manifest_docs("README.md"));
 }
 
+// [covers:docs-verb.llm-usage-outputs-usage-md]
 #[test]
 fn docs_llm_usage_outputs_usage_md() {
     Command::cargo_bin("zelper")
@@ -27,6 +29,7 @@ fn docs_llm_usage_outputs_usage_md() {
         .stdout(manifest_docs("docs/usage/llm.md"));
 }
 
+// [covers:docs-verb.llm-skill-outputs-skill-md]
 #[test]
 fn docs_llm_skill_outputs_skill_md() {
     Command::cargo_bin("zelper")
@@ -37,6 +40,7 @@ fn docs_llm_skill_outputs_skill_md() {
         .stdout(manifest_docs("docs/usage/skill/SKILL.md"));
 }
 
+// [covers:docs-verb.llm-snippet-outputs-snippet-md]
 #[test]
 fn docs_llm_snippet_outputs_snippet_md() {
     Command::cargo_bin("zelper")
@@ -47,6 +51,7 @@ fn docs_llm_snippet_outputs_snippet_md() {
         .stdout(manifest_docs("docs/usage/snippet.md"));
 }
 
+// [covers:docs-verb.without-subcommand-is-usage-error]
 #[test]
 fn docs_without_subcommand_is_usage_error() {
     Command::cargo_bin("zelper")
@@ -57,6 +62,7 @@ fn docs_without_subcommand_is_usage_error() {
         .code(2);
 }
 
+// [covers:docs-verb.llm-without-resource-is-usage-error]
 #[test]
 fn docs_llm_without_resource_is_usage_error() {
     Command::cargo_bin("zelper")
@@ -67,6 +73,7 @@ fn docs_llm_without_resource_is_usage_error() {
         .code(2);
 }
 
+// [covers:docs-verb.unknown-resource-is-usage-error]
 #[test]
 fn docs_unknown_resource_is_usage_error() {
     Command::cargo_bin("zelper")

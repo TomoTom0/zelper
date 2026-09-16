@@ -1,9 +1,11 @@
 // L1: backend parser fixtures（test-plan §2.3。実出力に基づく）
 use zelper::domain::{PaneKindId, TabId};
 use zelper::zellij::parser::{
-    parse_created_pane, parse_created_tab, parse_panes, parse_sessions, parse_tabs, parse_version,
+    parse_created_pane, parse_created_tab, parse_panes, parse_panes_opt, parse_sessions,
+    parse_tabs, parse_tabs_opt, parse_version,
 };
 
+// [covers:backend-parser.version-strings]
 #[test]
 fn version_strings() {
     assert_eq!(parse_version("zellij 0.44.3\n"), Some((0, 44, 3)));
@@ -13,15 +15,44 @@ fn version_strings() {
     assert_eq!(parse_version("garbage"), None);
 }
 
+// [covers:backend-parser.sessions-text-basic-form]
 #[test]
 fn sessions_text_parse() {
     let out = "zelper-p1-basic [Created 10s ago]\nzelper-p1-ops [Created 2m ago]\n";
     let s = parse_sessions(out);
     assert_eq!(s.len(), 2);
     assert_eq!(s[0].name, "zelper-p1-basic");
+    assert_eq!(s[0].created.as_deref(), Some("10s ago"));
+    assert!(!s[0].current);
+    assert!(!s[0].exited);
     assert_eq!(s[1].name, "zelper-p1-ops");
 }
 
+// [covers:backend-parser.sessions-parse-flags-current-and-exited]
+#[test]
+fn sessions_parse_flags_current_and_exited() {
+    // 実出力形式: suffixなし / (current) / (EXITED - attach to resurrect)。
+    // parseは全行を返し、current/exited flagを付ける（絞り込みは呼び出し側）
+    let out = "dead-one [Created 2h ago] (EXITED - attach to resurrect)\n\
+               live-one [Created 1m ago] (current)\n\
+               live-two [Created 3d ago]\n";
+    let s = parse_sessions(out);
+    assert_eq!(s.len(), 3);
+    assert_eq!(s[0].name, "dead-one");
+    assert!(s[0].exited);
+    assert!(!s[0].current);
+    assert_eq!(s[1].name, "live-one");
+    assert!(!s[1].exited);
+    assert!(s[1].current);
+    assert_eq!(s[2].name, "live-two");
+    assert!(!s[2].exited);
+    assert!(!s[2].current);
+    // 実行中のみへの絞り込み（resolve_session・list sessionsが行うfilter）
+    let live: Vec<_> = s.into_iter().filter(|x| !x.exited).collect();
+    assert_eq!(live.len(), 2);
+}
+
+// [covers:backend-parser.created-ids-from-stdout]
 #[test]
 fn created_ids_parse() {
     assert_eq!(
@@ -33,6 +64,7 @@ fn created_ids_parse() {
     assert!(parse_created_tab("abc").is_err());
 }
 
+// [covers:backend-parser.panes-json-full-fields-from-real-output]
 #[test]
 fn panes_json_parse_from_real_output_shape() {
     // Phase 1実出力（out/02-panes-multi.json）の一部を簡略化したfield構成
@@ -64,12 +96,45 @@ fn panes_json_parse_from_real_output_shape() {
     assert_eq!(panes.len(), 2);
     assert_eq!(panes[0].id, PaneKindId::Terminal(1));
     assert_eq!(panes[0].command.as_deref(), Some("bash /work/hb.sh p1"));
+    assert_eq!(panes[0].terminal_command, None);
     assert_eq!(panes[0].geometry.cols, 100);
     assert!(panes[0].is_remap_source());
     assert_eq!(panes[1].id, PaneKindId::Plugin(2));
     assert!(!panes[1].is_remap_source());
 }
 
+// [covers:backend-parser.terminal-command-field-parsed]
+#[test]
+fn terminal_command_field_is_parsed_independently_from_pane_command() {
+    let json = r#"[
+      {"id":1,"is_plugin":false,"is_focused":true,"is_floating":false,"title":"shell","exited":false,"is_held":false,"pane_x":0,"pane_y":0,"pane_rows":10,"pane_columns":10,"is_selectable":true,"plugin_url":null,"tab_id":0,"tab_position":0,"tab_name":"t","terminal_command":null,"pane_command":"vim src/main.rs","pane_cwd":"/work"},
+      {"id":2,"is_plugin":false,"is_focused":false,"is_floating":false,"title":"cmd","exited":false,"is_held":false,"pane_x":10,"pane_y":0,"pane_rows":10,"pane_columns":10,"is_selectable":true,"plugin_url":null,"tab_id":0,"tab_position":0,"tab_name":"t","terminal_command":"claude --model x","pane_command":null,"pane_cwd":"/work"}
+    ]"#;
+    let panes = parse_panes(json).unwrap();
+    assert_eq!(panes[0].terminal_command, None);
+    assert_eq!(panes[0].command.as_deref(), Some("vim src/main.rs"));
+    assert_eq!(
+        panes[1].terminal_command.as_deref(),
+        Some("claude --model x")
+    );
+    assert_eq!(panes[1].command, None);
+
+    let legacy = json.replace(",\"terminal_command\":null", "");
+    assert_eq!(parse_panes(&legacy).unwrap()[0].terminal_command, None);
+}
+
+// [covers:backend-parser.empty-output-parses-to-none-not-error]
+#[test]
+fn empty_output_is_optional_but_garbage_is_error() {
+    assert!(parse_panes_opt("").unwrap().is_none());
+    assert!(parse_tabs_opt("\n").unwrap().is_none());
+    assert!(parse_panes_opt("garbage").is_err());
+    assert!(parse_tabs_opt("garbage").is_err());
+    assert!(parse_panes_opt("[]").unwrap().is_some());
+    assert!(parse_tabs_opt("[]").unwrap().is_some());
+}
+
+// [covers:backend-parser.tabs-json-from-real-output]
 #[test]
 fn tabs_json_parse_from_real_output_shape() {
     let json = r#"[
