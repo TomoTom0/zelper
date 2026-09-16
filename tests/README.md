@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書16file・172条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・進捗・範囲明示）
+- `design/` — テスト設計条件書16file・174条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・進捗・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -12,7 +12,7 @@
   - `layout_planner.rs` — layout-planner.toml（remap v2 planner grouping。24条件。TASK-75分8条件〔正規形TabTemplate列・累積slot配分・k=S基準・tab名規則・N_t=0無効・pane_focus_slot・空group・T=1後方互換〕込み・test作成済み）
   - `layout_generator.rs` — layout-generator.toml（remap v2 生成KDL。11条件。boolean属性quoteなし要求・CR74-7分children block不在LayoutInvalid要求は実装・test追従済み。TASK-75分per-tab-kdl-from-normalized-templates込み）
 - `cli/` — L3 CLI契約（assert_cmd + fake zellij shim。shimはtest実行時に生成: argv記録・fixture応答・FAKE_* envで応答差し替え。shim公開はstaging+atomic rename・binary内直列化でETXTBSY対策: CR59-5/TASK-73。fail-first期のfail testによるmutex毒化にもlock取得側で回復）
-  - `list_read_send.rs` — cli-grammar（6）+ read-send（5）+ list-display（10）+ json-contract（2）の23条件
+  - `list_read_send.rs` — cli-grammar（6）+ read-send（7。TASK-62分 --tail/--full加工2件・shimのFAKE_DUMP_SCREEN応答差し替え込み）+ list-display（10）+ json-contract（2）の25条件
   - `remap.rs` — remap-cli.toml（11条件。TASK-75新規2件〔dry-run multi-tab拡張・JSON n=S互換〕+ E2E vb改修1件〔preflight warning伝達経路: preflight-warning-paths-stderr-and-json〕。r50へfocus-pane-id種別追加）
   - `docs.rs` — docs-verb.toml（7条件。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
 - `fake_backend/` — L2 決定的fake backend
@@ -32,8 +32,8 @@ lib内test 10件（`src/app/list.rs` 3件・`src/zellij/process.rs` 7件）はli
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（172テスト。TASK-75実装完了 + PR#6レビュー対応により全green。内訳は下記TASK-75・PR#6記録）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。172条件・172tag・46excludedでexit 0）
+cargo test          # L1〜L3（174テスト。TASK-75実装完了 + PR#6レビュー対応 + TASK-62 read --tail/--full test追加により全green。内訳は下記記録）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。174条件・174tag・46excludedでexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）
@@ -46,6 +46,8 @@ TASK-75（2026-09-15）: test追従（update-tests skill後段・TASK-75第2段�
 TASK-75（2026-09-16）実装・E2E・レビュー完了: 条件書先行（149→170条件）→ test追従（fake_remap 9・cli_remap 2追加。fail-first 12件）→ v2.2実装とB系統10 test fn作成（layout_planner 8・layout_generator 1・lib〔focus-pane-id-argv〕1）によるfail-first解消 → E2E acceptance（1巡目55 PASS/18 FAILから要因A〔focus対象位置ベース化〕・要因B〔空groupのnew-tab --layout-string経路〕改修を経て80条件全PASS。実施記録S-v3-1〜5・container通算15回・tmp/task75/acceptance/・設計書§5.2/§7.1）→ vb系列退化改修（複数tab focus鋳型検出warning。cli_remapへdry_run_multiple_focus_warning_paths追加でtest総数170→171・remap-cli.tomlへpreflight-warning-paths-stderr-and-json新規で170→171条件）→ 段階8コードレビューCR75-1〜3対応（CR75-1: resolve_target lenient poll統一+tab-id-resolution-lenient-before-applyへ再解決位置空応答retry系列追加。CR75-2: TASK-69/70起票済み。CR75-3: 設計書§4.4性能特性新設。design-review §4.24）まで完了。最終形: cargo test 171/171 green・verify-conditions exit 0（16file・171条件・171tag・46excluded）。条件書meta 5file（layout-planner・layout-generator・remap-sequence・remap-cli・backend-process）のverified=true化とsource_hash更新済み（tests/design/README.md進捗記録参照）
 
 PR#6レビュー対応（2026-09-16・TASK-76/77）: 指摘2件へ即時対応。TASK-76（remap floating source setへのexited/held除外追加）はremap-sequence.tomlへembed-floating-exited-held-excluded-from-floating-setを新規（171→172条件）しfake_remapへtest追加。TASK-77（SeedLockのDropでのlock file削除廃止。flock+unlink競合で相互排除が崩れるため）はcompanion-seed.tomlのconcurrent-seeds条件のlock file期待を残留へ反転・stale-lock条件をtolerated-and-retainedへ改称し、r26/c4へ恒久lock file許容を追記、test 4件追従（test fn数不変）。最終形: cargo test 172/172 green・verify-conditions exit 0（16file・172条件・172tag・46excluded）。source_hash 2file更新
+
+TASK-62（2026-09-17）: readの--tail/--full加工test追加。read-send.tomlのexcluded該当行を条件化（read-full-passes-dump-screen-f・read-tail-applies-to-last-n-linesの2条件。172→174条件）しcli_list_read_sendへtest 2件追加・shimへFAKE_DUMP_SCREEN応答差し替えを追加。excludedは1件解消・「--tail 0の値域」（出典規定なし）を新設（46件不変）。実装変更なし（apply_tailは実装済み）。最終形: cargo test 174/174 green・verify-conditions exit 0（174条件・174tag・46excluded）
 
 ## 規則
 

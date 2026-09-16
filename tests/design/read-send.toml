@@ -1,27 +1,27 @@
 # read / send 操作（src/app/read.rs）の検証条件。出典: test-plan §2.4・DD-6/DD-7/DD-4.1・design-review §4.2
-# 対応test: tests/cli/list_read_send.rs（部分5件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# 対応test: tests/cli/list_read_send.rs（7件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
 [meta]
 feature = "read-send"
 source_file = "src/app/read.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-09-17"
 verified_by = "claude"
 test_command = "cargo test --test cli_list_read_send"
 source_hash = "572a7681d912de0027f9438e084b63c4674b57b2"
-note = "src/app/send.rs も検証対象"
+note = "src/app/send.rs も検証対象。TASK-62（2026-09-17）: --tail/--full加工の条件化としてread-full-passes-dump-screen-f・read-tail-applies-to-last-n-linesの2条件を追加し、excluded該当行（--tail N / --full加工）を解消（--tail 0は出典に値域規定がなく実装由来のため除外行へ記録）。test追従済み（test fn 2件・shimへFAKE_DUMP_SCREEN応答差し替え追加。cargo test --test cli_list_read_send 25/25 green・verify-conditions exit 0）。source_hashは実装不変のため従来値のまま"
 
 [[condition]]
 id = "read-send.read-single-and-multi-results"
-source_lines = "tests/cli/list_read_send.rs:267"
+source_lines = "tests/cli/list_read_send.rs:273"
 target_function = "read::run"
 source = "docs/testing/test-plan.md §2.4（read: 対象順のdump-screen呼び出し列） + docs/design/detailed-design.md DD-6（plan: 対象pane毎にdump-screen -p。順序はTargetSet順 / JSON: results[]: { target, title, tab, content | error }） + DD-1.3（PANESPEC = bare 3（=terminal_3）正規化）"
 description = "readの対象解決と結果取得の基盤: 単数PANESPECはbare数値（1）をterminal_1へ正規化して解決し、JSONのresults[]にtargetとcontent（dump-screen結果）を格納する。複数PANESPEC指定も同経路で受理（§2.1のPANESPEC正規形要求のうちbare正規化を本条件が担う。CMR-5: bare正規化とresults構造を1条件に統合）"
 given = "fake zellij shim（list-panes 3 pane・dump-screenはSCREEN[pane]を返す）に対するzelper read 1 --jsonとzelper read 1 2 --jsonの実行"
-expect_return_shape = "単数時はexit 0かつresults[0].target=terminal_1・results[0].detail=SCREEN[terminal_1]改行。複数時はexit 0。検証限界: 複数時のresults順序とdump-screen呼び出し列の順序は未assert（successのみ）。--tail/--full加工は未検証（excluded参照）"
+expect_return_shape = "単数時はexit 0かつresults[0].target=terminal_1・results[0].detail=SCREEN[terminal_1]改行。複数時はexit 0。検証限界: 複数時のresults順序とdump-screen呼び出し列の順序は未assert（successのみ）。--tail/--full加工はread-full-passes-dump-screen-f / read-tail-applies-to-last-n-lines参照"
 
 [[condition]]
 id = "read-send.read-nonexistent-pane-is-no-target-exit3"
-source_lines = "tests/cli/list_read_send.rs:287"
+source_lines = "tests/cli/list_read_send.rs:293"
 target_function = "read::run（positional照合）"
 source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-6（解決: positional PANESPECはlist-panes結果と照合（存在確認 + 読み取り対象確定）） + DD-1.4（対象0件 → no target matched error） + DD-4.3（NoTarget = exit 3）"
 description = "readのpositional照合の負荷側: 存在しないpane ID指定はNoTarget（exit 3）で失敗する。positional PANESPECの存在確認が効いていることの検証"
@@ -30,7 +30,7 @@ expect_return = "exit 3（NoTarget）"
 
 [[condition]]
 id = "read-send.human-output-pane-headers"
-source_lines = "tests/cli/list_read_send.rs:416"
+source_lines = "tests/cli/list_read_send.rs:422"
 target_function = "read human出力"
 source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-4.1（read複数pane: pane毎にヘッダ行 === terminal_3 (HB1, tab:2 agents) === + 内容）"
 description = "readのhuman出力形式: pane毎の識別ヘッダ行（=== pane_id (title, tab:POS NAME) ===）。複数pane読み取り時にどのpaneの出力かを判別可能にする表示契約"
@@ -38,8 +38,26 @@ given = "fake zellij shimに対するzelper read 1（human出力）の実行"
 expect_return_shape = "stdoutに === terminal_1 (agent-a, tab:0 Tab #1) === のヘッダ行を含む"
 
 [[condition]]
+id = "read-send.read-full-passes-dump-screen-f"
+source_lines = "tests/cli/list_read_send.rs:437"
+target_function = "read::run → ZellijBackend::dump_screen（-f転送）"
+source = "docs/testing/test-plan.md §2.4（read: --fullの加工） + docs/design/detailed-design.md DD-6（request: --full（scrollback） / plan: 対象pane毎にdump-screen -p（full指定時-f）） + docs/design/design-review.md §4.2 MR-30（--tail系test不在指摘・test追加はP1）"
+description = "--full指定時のbackend転送: readのdump-screen呼び出しに-fが付くこと。scrollback込み取得はzellij側機能のためzelperは加工せず-f引数の転送のみ行う（非--full時と対象解決・results構造は同一経路）"
+given = "fake zellij shim（dump-screenは-pのpaneにSCREEN[pane]を返し、-f検出時はFULL接尾付き。全argvはlogへ記録）に対するzelper read 1 --full --jsonの実行"
+expect_return = "exit 0かつshim logにdump-screen -p terminal_1 -fが記録され、results[0].detailは-f応答（SCREEN[terminal_1]FULL）に変わる"
+
+[[condition]]
+id = "read-send.read-tail-applies-to-last-n-lines"
+source_lines = "tests/cli/list_read_send.rs:465"
+target_function = "read::run（apply_tail）"
+source = "docs/testing/test-plan.md §2.4（read: --tail Nの加工） + docs/design/detailed-design.md DD-6（request: --tail N（行末N行、zelper側加工。--tailは取得済み内容——viewport、--full指定時はscrollback込み——の末尾N行に適用） + JSON: results[]: { target, title, tab, content | error }。--tailはcontentに適用） + docs/design/design-review.md §4.2 MR-30（apply_tail経路は実装済み・tail testはP1）"
+description = "--tail Nのzelper側加工: 取得済みcontentを末尾N行へ切り詰め、JSON resultsのcontent（detail）へ格納する。適用対象は取得形態の末尾N行（viewport / --full併用時はscrollback込み）で、両形式を1条件で検証（CMR-5: --tail単体と--full併用の2形式を統合。DD-6 request節が1文で両者を規定）。Nが行数以上の場合は切り詰められず全行保持の境界を含む。加工は出力前のapply_tail単一経路のためhuman出力にも同一の加工済み内容が現れる（検証はJSONで実施）"
+given = "fake zellij shimのdump-screen応答を環境変数で複数行内容（例: 識別可能な5行）へ差し替えられるようにした上で、zelper read 1 --tail 2 --json・zelper read 1 --full --tail 2 --json・zelper read 1 --tail 99 --json（N >= 行数）の各実行"
+expect_return_shape = "各実行ともexit 0し、detailは--tail 2では末尾2行のみ（先頭側の行は含まれない）、--full --tail 2では-f付き取得内容（FULL接尾・scrollback込み相当）の末尾2行、--tail 99では全行保持（切り詰め無し）"
+
+[[condition]]
 id = "read-send.send-broadcast-visual-order-calls"
-source_lines = "tests/cli/list_read_send.rs:318"
+source_lines = "tests/cli/list_read_send.rs:324"
 target_function = "send::run"
 source = "docs/testing/test-plan.md §2.4（send: text→write-chars呼び出し。fake shim: 呼び出しargv列の記録と期待比較（L3）） + docs/design/detailed-design.md DD-7（実行: text → write-chars -p。順序: TargetSet順に順次） + DD-6（順序はTargetSet順（tab position → y → x））"
 description = "sendのtext送信がwrite-charsへmapされ、対象がvisual order（tab position → y → x昇順）で順次呼び出されること。broadcast系操作の実行順序の決定性（pane列挙順に依らない）をshimのargv記録で検証"
@@ -48,7 +66,7 @@ expect_return = "exit 0かつwrite-chars呼び出しが2件で、順序はtermin
 
 [[condition]]
 id = "read-send.send-enter-appends-cr-and-keys-use-send-keys"
-source_lines = "tests/cli/list_read_send.rs:335"
+source_lines = "tests/cli/list_read_send.rs:341"
 target_function = "send::run（--enter / --keys）"
 source = "docs/testing/test-plan.md §2.4（--enterで追加のwrite 13・--keys→send-keys argv分割） + docs/design/detailed-design.md DD-7（--enter → write -p 13。keys → send-keys -p（key毎に独立argv要素））"
 description = "sendの送信形式map: textはwrite-chars、--enter併用時はtext送信後にCR（write 13）を追加、--keysはkey毎に独立argv要素を持つsend-keysへ。入力送信のbackend呼び出し契約（CMR-5: --enterのCR追加と--keysのargv分割を1条件に統合）"
@@ -56,10 +74,10 @@ given = "fake zellij shimに対するzelper send 1 --enter -- helloとzelper sen
 expect_return = "前者はwrite-chars -p terminal_1 helloとwrite -p terminal_1 13の両方が呼ばれexit 0。後者はsend-keys -p terminal_1 Ctrl a（key毎の独立要素）が呼ばれexit 0"
 
 [[excluded]]
-item = "readの--tail N / --full加工（--tailは取得済み内容の末尾N行へ適用・--full時はdump-screen -f）"
-source = "docs/testing/test-plan.md §2.4（read: --tail/--fullの加工） + docs/design/detailed-design.md DD-6（--full（scrollback）・--tail N（zelper側加工））"
-reason = "未test。既存133 testに--tail/--fullを引数に持つtest fnが存在しないため本移行では条件化できない（read_single_and_multi_with_tailもfn名に反し--tailを渡していない）。apply_tail経路は実装済み（design-review §4.2 MR-30でtail testはP1と明示）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
+item = "readの--tail 0の値域（N=0指定時の挙動）"
+source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-6（--tail N（行末N行）はN>=1の挙動のみ規定しN=0の値域を規定しない）"
+reason = "出典にN=0の挙動規定がなく実装由来の値域（apply_tailはSome(0)で空文字を返す）のため出典起点の条件化対象外。末尾N行の規定はread-tail-applies-to-last-n-linesが検証する"
+decided_at = "2026-09-16"
 decided_by = "claude"
 
 [[excluded]]

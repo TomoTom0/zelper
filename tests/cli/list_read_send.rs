@@ -44,7 +44,13 @@ if [[ "$3" == "action" ]]; then
           *) shift;;
         esac
       done
-      echo "SCREEN[$pane]$full"; exit 0;;
+      # FAKE_DUMP_SCREEN設定時は応答を差し替え（末尾行へFULL接尾）。未設定時は現状通り
+      if [[ -n "$FAKE_DUMP_SCREEN" ]]; then
+        printf '%s%s\n' "$FAKE_DUMP_SCREEN" "$full"
+      else
+        echo "SCREEN[$pane]$full"
+      fi
+      exit 0;;
     *) echo "ok"; exit 0;;
   esac
 fi
@@ -424,6 +430,82 @@ fn human_read_output_has_pane_headers() {
         .stdout(predicates::str::contains(
             "=== terminal_1 (agent-a, tab:0 Tab #1) ===",
         ));
+}
+
+/// --full指定時はbackendのdump-screen呼び出しに-fが渡り、detailは-f応答
+/// （FULL接尾）になる。scrollback込み取得はzellij側機能のため-f転送のみ検証
+// [covers:read-send.read-full-passes-dump-screen-f]
+#[test]
+fn read_full_passes_dump_screen_f() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("read-full");
+    let out = cmd
+        .args(["read", "1", "--full", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let cs = calls(&log);
+    assert!(
+        cs.iter()
+            .any(|c| c.contains("dump-screen -p terminal_1 -f")),
+        "calls: {cs:?}"
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        v["data"]["results"][0]["detail"],
+        "SCREEN[terminal_1]FULL\n"
+    );
+}
+
+/// --tail Nは取得済みcontentの末尾N行へ切り詰める（--full併用時は-f付き
+/// 取得内容に適用。N >= 行数なら全行保持）。応答はFAKE_DUMP_SCREENで
+/// 識別可能な5行へ差し替える
+// [covers:read-send.read-tail-applies-to-last-n-lines]
+#[test]
+fn read_tail_applies_to_last_n_lines() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let screen = "L1\nL2\nL3\nL4\nL5";
+
+    let (mut cmd, _) = zelper("read-tail2");
+    let out = cmd
+        .env("FAKE_DUMP_SCREEN", screen)
+        .args(["read", "1", "--tail", "2", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    // 末尾2行のみ（先頭側L1-L3は含まれない）
+    assert_eq!(v["data"]["results"][0]["detail"], "L4\nL5");
+
+    // --full併用: -f付き取得内容（末尾行へFULL接尾）の末尾2行
+    let (mut cmd, _) = zelper("read-full-tail2");
+    let out = cmd
+        .env("FAKE_DUMP_SCREEN", screen)
+        .args(["read", "1", "--full", "--tail", "2", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["data"]["results"][0]["detail"], "L4\nL5FULL");
+
+    // N >= 行数: 切り詰め無し（全行保持）
+    let (mut cmd, _) = zelper("read-tail99");
+    let out = cmd
+        .env("FAKE_DUMP_SCREEN", screen)
+        .args(["read", "1", "--tail", "99", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["data"]["results"][0]["detail"], "L1\nL2\nL3\nL4\nL5");
 }
 
 /// PANES概要: 5tab超は先頭4つ+`...`で省略。floatingは連結に含めない

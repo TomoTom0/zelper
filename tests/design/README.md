@@ -13,7 +13,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（第4段で切替。検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（16 file・172条件。§2.2確定構成133条件 + TASK-61でselectorへ2条件追加 + TASK-59でbackend-processへ6条件追加 + TASK-74で5fileへ6条件追加 + TASK-74 E2E再現回帰でlayout-generatorへ1条件追加 + TASK-74段階8コードレビューCR74対応でremap-sequenceへ1条件追加・既存条件更新 + TASK-75で5fileへ21条件追加・既存条件更新 + TASK-75 E2E vb改修でremap-cliへ1条件追加 + PR#6レビュー対応でremap-sequenceへ1条件追加・companion-seedへ既存条件更新）
+## 条件書一覧（16 file・174条件。§2.2確定構成133条件 + TASK-61でselectorへ2条件追加 + TASK-59でbackend-processへ6条件追加 + TASK-74で5fileへ6条件追加 + TASK-74 E2E再現回帰でlayout-generatorへ1条件追加 + TASK-74段階8コードレビューCR74対応でremap-sequenceへ1条件追加・既存条件更新 + TASK-75で5fileへ21条件追加・既存条件更新 + TASK-75 E2E vb改修でremap-cliへ1条件追加 + PR#6レビュー対応でremap-sequenceへ1条件追加・companion-seedへ既存条件更新 + TASK-62でread-sendへ2条件追加・excluded 1件解消/1件新設）
 
 設計書§2.2の確定構成（133条件）に、移行後の未test項目条件化（TASK-61: selector +2・TASK-59: backend-process +6）とTASK-74の条件書更新（remap照合key変更。6条件追加・9条件更新・excluded 4件追加）とTASK-75の条件書更新（multi-tab layout全体再現〔DD-10 v2.2〕。21条件追加・既存条件更新・excluded 5件追加〔remap-sequence 4・json-contract 1〕）とTASK-75のE2E vb改修（複数tab focus鋳型検出warningの伝達経路。remap-cliへ1条件追加）を加えた現行構成。verified列はmeta検証記録（verified = true）の実績値（TASK-75更新5fileは2026-09-16に実装・test 171/171 green・E2E acceptance 80条件PASS・CR75-1〜3対応完了を受けてtrueへ更新。TASK-74更新のbackend-parserのみsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
 
@@ -23,7 +23,7 @@ mise run verify-conditions
 | 2 | selector | src/selector.rs | selector（10件） | 10 | true（2026-09-13） |
 | 3 | backend-parser | src/zellij/parser.rs | parser（8件） | 8 | false（TASK-74更新・再検証待ち） |
 | 4 | json-contract | src/output/json.rs | error_map（4件）+ cli_list_read_send（部分2件） | 6 | true（2026-09-13） |
-| 5 | read-send | src/app/read.rs | cli_list_read_send（部分5件） | 5 | true（2026-09-13） |
+| 5 | read-send | src/app/read.rs | cli_list_read_send（部分7件） | 7 | true（2026-09-17） |
 | 6 | list-display | src/app/list.rs | cli_list_read_send（部分10件）+ lib src/app/list.rs（3件） | 13 | true（2026-09-13） |
 | 7 | rename | src/app/rename.rs | fake_rename_add_remove（部分3件） | 3 | true（2026-09-13） |
 | 8 | add-remove | src/app/remove.rs | fake_rename_add_remove（部分7件） | 7 | true（2026-09-13） |
@@ -45,7 +45,7 @@ source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
 test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）:
 
-- `tests/cli/list_read_send.rs` 23件 = cli-grammar 6 / read-send 5 / list-display 10 / json-contract 2
+- `tests/cli/list_read_send.rs` 25件 = cli-grammar 6 / read-send 7 / list-display 10 / json-contract 2
 - `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
 - lib内test 9件（src/app/list.rs 3件・src/zellij/process.rs 6件）= list-display・backend-processへ帰属
 
@@ -148,6 +148,8 @@ design-review §4.7 C6（R20拡張）= layout-planner.quoting-warning-covers-sin
 移行後の条件更新: TASK-75実装・E2E・レビュー完了（2026-09-16）: v2.2実装（正規形TabTemplate列・blocks×groups配分・focus-pane-id・空groupのnew-tab --layout-string・targets再解決・leftover_tabs報告・error.data/JSONのS/N_t拡張）とB系統10条件のtest作成（layout_planner 8・layout_generator 1・lib 1）によりfail-first解消（cargo test 171/171 green・verify-conditions exit 0〔171条件・171tag・46excluded〕）。E2E acceptance（設計書§5.2・実施記録S-v3-1〜5・container通算15回・tmp/task75/acceptance/）は1巡目55 PASS/18 FAILから要因A・Bの改修を経て80条件全PASS。E2E要因A/B改修（2026-09-16・設計書§7.1）による5条件の文面改訂: focus-pane-id-after-override-per-tab・pane-focus-verified-via-is-focused（focus対象をmapping pane idから適用後のlist-panes位置〔visual order s番目〕ベースへ。occupied限定撤廃・already focused exit 2は成功扱い）・empty-group-tab-created-via-new-tab-then-rename・new-tab-only-needs-no-companion（空groupをnew-tab --layout-string経路へ。step 6のoverride-layout skip）・empty-response-retry-before-verify（精密arm法empty_*_nth_after_overrideの記述へ。step 6のfocus対象決定・存在確認pollが先頭N回空を消化するため）。vb系列退化（複数tab focus鋳型検出warningが未実装）の改修によりremap-cli.preflight-warning-paths-stderr-and-jsonを新規追加（170→171条件。stderr warning行とJSON data.warningsの伝達経路）。段階8コードレビューCR75-1〜3対応: CR75-1（P2）はtab-id-resolution-lenient-before-applyへ再解決位置のlist_panes空応答retry系列を追加（resolve_targetのlenient poll統一・red-first実証: tmp/20260916_test_task75_fix3_red.log）・CR75-2（P3）はTASK-69/70起票済みのため対応不要・CR75-3（P3）は設計書§4.4性能特性の新設（指摘の詳細はdesign-review §4.24）。あわせてmeta 5file（layout-planner・layout-generator・remap-sequence・remap-cli・backend-process）のverified=true化・verified_at/source_hashをTASK-75実装に対する値へ更新。
 
 移行後の条件更新: PR#6レビュー対応（2026-09-16・TASK-76/77）: PR#6レビュー指摘2件への即時対応。TASK-76（floating source setのexited/held除外欠落）はremap-sequence.tomlへembed-floating-exited-held-excluded-from-floating-setを新規起票（171→172条件）しfake_remapへtest fn追加（exited & held・heldのみのfloating pane構成で--embed-floating実行し、toggle-embed・close-pane不発生・floatingのまま生存を検証）。TASK-77（SeedLockのDropでのlock file削除がflock+unlink競合で相互排除を崩す）はsrc/companion.rsのDropからremove_fileを廃止し、companion-seed.tomlを更新: concurrent-seeds条件のlock file期待を「削除」から「残留」へ反転、stale-lock-file-tolerated-and-removedをstale-lock-file-tolerated-and-retainedへ改称（条件数不変）、r26/c4（atomic書込・write失敗残留）へ恒久lock file .zelper-seed.lockの許容を追記。test追従4件（concurrent-seeds・stale-lockの期待反転、r26・c4の期待値へlock file追加）。最終形: cargo test 172/172 green・verify-conditions exit 0（16file・172条件・172tag・46excluded）。companion-seed・remap-sequenceのverified_at/source_hashを更新。
+
+移行後の条件追加: TASK-62（2026-09-17）: read-send.toml移行時excluded 1件（readの--tail N / --full加工）を条件化。新規2条件: read-full-passes-dump-screen-f（--full指定時のdump-screen -f転送・shim log検証）・read-tail-applies-to-last-n-lines（apply_tailの末尾N行加工。--full併用・N≧行数の境界を含む。CMR-5統合慣行）+ test fn 2件（cli_list_read_send）とshimへFAKE_DUMP_SCREEN応答差し替え（未設定時は従来応答のまま）を追加。excludedは該当1件を解消し「--tail 0の値域」（DD-6に出典規定なし・実装由来）を新設（46件で不変）。read-single-and-multi-resultsの検証限界記載（--tail/--full未検証）を参照へ書き換え。実装変更なし（apply_tail経路は実装済み・MR-30）のため新testは初回pass。条件172→174・excluded 46件（不変）。cargo test 174/174 green・verify-conditions exit 0（174条件・174tag・46excluded）。read-sendのverified_atを更新（source_hashは実装不変のため不変）。残るread/send系excluded 3件（per-pane失敗exit 6/5・send部分失敗継続・複数行text単呼び）はTASK-63が管轄。
 
 移行限定資産の役割終了: 付け漏れ検出対照表（`tmp/20260913_bootstrap_conditions_task54/`）は使い捨てであり、`--complete`（検査(f)）有効化により用途を終えた（対照表diff運用は移行中のみ。設計書§5.5）。残置のみとし削除しない。
 
