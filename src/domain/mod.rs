@@ -64,6 +64,7 @@ pub struct PaneState {
     pub is_held: bool,
     pub geometry: Geometry,
     pub command: Option<String>,
+    pub terminal_command: Option<String>,
     pub cwd: Option<String>,
     pub tab_id: TabId,
     pub tab_position: u32,

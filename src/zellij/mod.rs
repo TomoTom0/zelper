@@ -92,10 +92,12 @@ pub trait ZellijBackend {
     fn version(&self) -> Result<String, ZelperError>;
     fn list_sessions(&self) -> Result<Vec<SessionRef>, ZelperError>;
     fn list_tabs(&self) -> Result<Vec<TabState>, ZelperError>;
+    fn list_tabs_lenient(&self) -> Result<Option<Vec<TabState>>, ZelperError>;
     /// 指定session名でlist-tabs（list sessionsのPANES概要用。対象session解決に
     /// 依らず任意の実行中sessionのtab構成を取る）
     fn list_tabs_for(&self, session: &str) -> Result<Vec<TabState>, ZelperError>;
     fn list_panes(&self) -> Result<Vec<PaneState>, ZelperError>;
+    fn list_panes_lenient(&self) -> Result<Option<Vec<PaneState>>, ZelperError>;
     fn current_tab(&self) -> Result<TabState, ZelperError>;
     fn dump_screen(&self, pane: &PaneKindId, full: bool) -> Result<String, ZelperError>;
     fn write_chars(&self, pane: &PaneKindId, text: &str) -> Result<(), ZelperError>;
@@ -110,6 +112,10 @@ pub trait ZellijBackend {
     fn resize(&self, pane: Option<&PaneKindId>, op: ResizeOp) -> Result<(), ZelperError>;
     fn override_layout(&self, spec: &OverrideSpec) -> Result<(), ZelperError>;
     fn go_to_tab(&self, tab: TabId) -> Result<(), ZelperError>;
+    /// action focus-pane-id <PANE_ID>（DD-10.7 step 6 v2.2。PANE_ID形式は
+    /// PaneKindId::as_spec()のterminal_N / plugin_N系列分離。backendはargv組み立て
+    /// とResultを返す薄い実装のみで、Errのwarning化はexecute側の責務〔TR75-10〕）
+    fn focus_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
     fn dump_layout(&self) -> Result<String, ZelperError>;
     fn toggle_embed_floating(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
     fn pipe_plugin(

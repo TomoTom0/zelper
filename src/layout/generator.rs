@@ -8,16 +8,18 @@ use kdl::{KdlDocument, KdlNode};
 use super::{SKIP_NODES, is_content_node, leaf_is_plugin};
 
 /// slot i への注入run（DD-10.8）。
-/// - `Some(argv)`: occupied slot。pane_command空白分割（`command`=argv[0]・`args`=残り）。
-///   pane_commandがSomeなら単語1つのshell起動paneでもSomeを渡す（run一致照合は
+/// - `Some(argv)`: occupied slot。terminal_command空白分割（`command`=argv[0]・`args`=残り）。
+///   terminal_commandがSomeなら単語1つの起動paneでもSomeを渡す（run一致照合は
 ///   Run（argv）等価であり、`command="bash"`起動paneはbare slot（run=None）と
 ///   照合しないため。旧shell_aware_argvの「shell名のみはbare扱い」は再作成用途の
 ///   規則で、照合用途では誤り——v2で廃止）
-/// - `None`: shell pane（pane_command=None）または空slot。いずれもbare pane slotのまま
+/// - `None`: shell pane（terminal_command=None）または空slot。いずれもbare pane slotのまま
 pub type SlotRun = Option<Vec<String>>;
 
-/// 1 instance分の生成KDL文字列を生成する（DD-10.8）。
-/// base: 対象layoutの最初のtab subtree（`layout::base_subtree`）。
+/// 1 instance分の生成KDL文字列を生成する（DD-10.8 v2.2）。
+/// base: 当該tab鋳型の正規形subtree（`layout::normalize_tab_templates`出力。
+/// default_tab_templateのchildren置換済み・tab属性除去済み。generatorは
+/// template引数を持たない——置換・slot数一致検証はlayout解決へ一元化〔D8〕）。
 /// runs: slot index → run（文書順 = slot順。plugin leafはslotを消費しない）。
 /// 未割当slot・空slotはlayout宣言のcommand/cwd/argsを除去してbare paneに正規化する
 /// （「空slotは既定shellで埋まる」仕様。再作成paneが存在しないためcwd注入は全廃）。

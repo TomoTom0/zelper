@@ -1,127 +1,129 @@
-# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・design-review §4.2/§4.7
-# 対応test: tests/unit/layout_planner.rs（15件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
-# plannerは純粋関数（fake backendなしで検証。DD-10.6）
+# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・design-review §4.2/§4.7・TASK-74設計書（remap-v2-matching-fix-task74.md）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.1〜2.3・DD-10 v2.2）
+# 対応test: tests/unit/layout_planner.rs（24件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1）
+# plannerは純粋関数（fake backendなしで検証。DD-10.6）。v2.2（TASK-75）: plan_v2は正規形TabTemplate列
+# （layout::normalize_tab_templates出力）を引数に取り、blocks × groups（group = (block b, tab t)）構造の計画を返す。
+# r1〜r10の期待値はT=1後方互換（式レベル一致・設計§2.7）により不変（回帰固定）。
 [meta]
 feature = "layout-planner"
 source_file = "src/app/remap.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-09-16"
 verified_by = "claude"
 test_command = "cargo test --test layout_planner"
-source_hash = "588b2fb3bc89f175275abf4d25f37f47329174d4"
-note = ""
+source_hash = "5aa7140ffbc1079871a56411f611ee48ee36e363"
+note = "TASK-74（2026-09-15）条件書更新: run-derives-from-invoked-withを追加しr20系2条件（quoting warning）の対象をterminal_commandへ更新——（当時記録。その後の実装・test追従で解消済み・cargo test --test layout_planner は全pass。CR74-8補正）。TASK-75（2026-09-15）条件書更新: v2.2（multi-tab layout全体再現）のtest-first前段として8条件を追加（normalize-tab-templates-doc-order-and-tab-attributes・multi-tab-allocation-cumulative-slots・k-uses-total-slots・tab-names-from-templates-and-block-suffix・zero-slot-tab-template-invalid・pane-focus-slot-first-focused-leaf・empty-group-planned-for-all-blocks-tabs・t1-formula-level-backward-compat）。r12-multi-tab-layout-counts-first-tab-shape-onlyはv2.2で期待値を反転（先頭tab形状N基準からlayout全体S=sum(N_t)基準へ。stable id維持・R12対応表の安定参照）。r1〜r11は正規形TabTemplate列入力とblocks/groups用語へ読み替え（T=1後方互換により期待値不変）。新条件は当時未実装のためfail-first状態（テストコード・実装は後段の追従待ち）——（当時記録。TASK-75実装・test追従・E2E acceptance 80条件PASS（S-v3-1〜5・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応まで完了〔2026-09-16〕。cargo test --test layout_planner は全pass）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新"
 
 [[condition]]
 id = "layout-planner.r1-one-pane-into-three-slots-k1-empty-two"
-source_lines = "tests/unit/layout_planner.rs:63"
+source_lines = "tests/unit/layout_planner.rs:94"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R1 + docs/design/detailed-design.md DD-10.6（割当: i → j=floor(i/N)・slot=i%N、空slot: 最終instanceにのみ発生）"
-description = "M<N最小例のplan形状: 1 pane / 3-slot layoutはk=1で全paneをgroup 0 slot 0へ割当て、残り2 slotは空（既定shell。KDL側のbare正規化はlayout-generator.r16、実行側のshell pane埋めはremap-sequence.r40）"
-given = "1 pane（command=cmd0）とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=1・m=1・n_slots=3・instances長1・割当1件（pane terminal_0・slot 0）・empty_slots=2"
+description = "M<N最小例のplan形状: 1 pane / 3-slot layoutはk=1で全paneをgroup (0,0) slot 0へ割当て、残り2 slotは空（既定shell。KDL側のbare正規化はlayout-generator.r16、実行側のshell pane埋めはremap-sequence.r40）。v2.2: T=1後方互換により期待値不変（回帰固定）"
+given = "1 pane（terminal_command=cmd0）と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・m=1・s_slots=3・blocks長1・groups長1・割当1件（pane terminal_0・group (0,0) slot 0）・empty_slots=2"
 
 [[condition]]
 id = "layout-planner.r2-three-into-three-no-move-no-plugin"
-source_lines = "tests/unit/layout_planner.rs:78"
+source_lines = "tests/unit/layout_planner.rs:113"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R2 + docs/design/detailed-design.md DD-10.6（instance 0 = anchor既定・移動の必要がない構成）"
-description = "M=N同一tab構成のplan: k=1で割当はvisual順3件・空slotなし。group 0にanchor外tabのpaneが存在しないためcompanion plugin不使用となる計画上の前提（実行側の「移動不要ならprobeもpluginも不使用」はremap-sequence.r29が検証）"
-given = "3 pane（同一tab 0・visual順）とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=1・instances長1・割当はterminal_0/1/2の3件・empty_slots=0"
+description = "M=N同一tab構成のplan: k=1で割当はvisual順3件・空slotなし。group (0,0)にanchor外tabのpaneが存在しないためcompanion plugin不使用となる計画上の前提（実行側の「移動不要ならprobeもpluginも不使用」はremap-sequence.r29が検証）。v2.2: T=1後方互換により期待値不変"
+given = "3 pane（同一tab 0・visual順）と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・blocks長1・group (0,0)の割当はterminal_0/1/2の3件・empty_slots=0"
 
 [[condition]]
 id = "layout-planner.r3-four-panes-into-three-slots-k2"
-source_lines = "tests/unit/layout_planner.rs:97"
+source_lines = "tests/unit/layout_planner.rs:132"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R3 + 同§2.7冒頭（v2はM>N既定error廃止） + docs/design/detailed-design.md DD-10.6（k = max(1, ceil(M/N))）"
-description = "M>Nのinstance反復: 4 pane / 3-slotはk=2・group 0=visual順先頭3・group 1=残1（M>Nでもerrorにならない。旧仕様のM>N既定error廃止の置換例）"
-given = "4 pane（同一tab・visual順）とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=2・instances長2・group 0の割当3件・group 1の割当はterminal_3のslot 0のみ・empty_slotsはgroup 0=0・group 1=2"
+description = "M>Nのblock反復: 4 pane / 3-slotはk=2・group (0,0)=visual順先頭3・group (1,0)=残1（M>Nでもerrorにならない。旧仕様のM>N既定error廃止の置換例）。v2.2: T=1後方互換（b=floor(i/N)は現行instance j式と一致）により期待値不変"
+given = "4 pane（同一tab・visual順）と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=2・blocks長2・group (0,0)の割当3件・group (1,0)の割当はterminal_3のslot 0のみ・empty_slotsは(0,0)=0・(1,0)=2"
 
 [[condition]]
 id = "layout-planner.r4-six-into-three-two-full-instances"
-source_lines = "tests/unit/layout_planner.rs:116"
+source_lines = "tests/unit/layout_planner.rs:151"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R4 + docs/design/detailed-design.md DD-10.6"
-description = "M=2Nの均等分割: 6 pane / 3-slotはk=2で各instanceちょうど3 pane（端数slotなし）"
-given = "6 pane（同一tab・visual順）とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=2・両instanceの割当各3件・instance 1のempty_slots=0"
+description = "M=2Nの均等分割: 6 pane / 3-slotはk=2で各blockちょうど3 pane（端数slotなし）。v2.2: T=1後方互換により期待値不変"
+given = "6 pane（同一tab・visual順）と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=2・両blockのgroup割当各3件・block 1のgroup (1,0)のempty_slots=0"
 
 [[condition]]
 id = "layout-planner.r5-seven-into-three-third-instance-partial"
-source_lines = "tests/unit/layout_planner.rs:126"
+source_lines = "tests/unit/layout_planner.rs:161"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R5 + docs/design/detailed-design.md DD-10.6"
-description = "M>Nかつ最終instanceが部分埋め: 7 pane / 3-slotはk=3で第3 instanceは1 pane + 2空slot（空slotは既定shell）"
-given = "7 pane（同一tab・visual順）とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=3・instances長3・instance 2の割当1件・empty_slots=2"
+description = "M>Nかつ最終blockが部分埋め: 7 pane / 3-slotはk=3で第3 blockは1 pane + 2空slot（空slotは既定shell）。v2.2: T=1後方互換により期待値不変"
+given = "7 pane（同一tab・visual順）と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=3・blocks長3・block 2のgroup (2,0)の割当1件・empty_slots=2"
 
 [[condition]]
 id = "layout-planner.r6-cross-tab-groups-follow-visual-order"
-source_lines = "tests/unit/layout_planner.rs:137"
+source_lines = "tests/unit/layout_planner.rs:172"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R6 + docs/design/detailed-design.md DD-10.6（scope = session全体・割当はvisual order）"
-description = "tab分散sessionの一括plan: 5 pane / 3 tabはk=2でgroup 0 = visual順先頭3 pane（tab跨ぎ。anchorへの集中は実行側）・group 1 = 残2。session全体を1度のplanで扱う例（worked example #6）"
-given = "5 paneが3 tabに分散（tab 0に2・tab 1に2・tab 2に1）するvisual順のsource列とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=2・group 0の割当 = terminal_1/2/3（tab 0の2 pane + tab 1の1 pane）・group 1の割当 = terminal_4/5。検証限界: 空になったsource tabの自動closeは実行側の挙動でありplan上は未検証（remap-sequence.r37/r39が検証）"
+description = "tab分散sessionの一括plan: 5 pane / 3 tabはk=2でgroup (0,0) = visual順先頭3 pane（tab跨ぎ。anchorへの集中は実行側）・group (1,0) = 残2。session全体を1度のplanで扱う例（worked example #6）。v2.2: T=1後方互換により期待値不変"
+given = "5 paneが3 tabに分散（tab 0に2・tab 1に2・tab 2に1）するvisual順のsource列と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=2・group (0,0)の割当 = terminal_1/2/3（tab 0の2 pane + tab 1の1 pane）・group (1,0)の割当 = terminal_4/5。検証限界: 空になったsource tabの自動closeは実行側の挙動でありplan上は未検証（remap-sequence.r37/r39が検証）"
 
 [[condition]]
 id = "layout-planner.r7-empty-session-all-slots-empty"
-source_lines = "tests/unit/layout_planner.rs:168"
+source_lines = "tests/unit/layout_planner.rs:203"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R7 + docs/design/detailed-design.md DD-10.6（M=0: k=1、全slot空（既定shellで埋まる））"
-description = "空sessionのplan: M=0でもk=1のinstanceを1つ作り全slotを空slotとする（remap自体は成立し、layout適用で全slotが既定shellになる）"
-given = "空のpane列とN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=1・m=0・instances長1・割当0件・empty_slots=3"
+description = "空sessionのplan: M=0でもk=1のblockを作り全slotを空slotとする（remap自体は成立し、layout適用で全slotが既定shellになる。multi-tabでのM=0はempty-group-planned-for-all-blocks-tabsが管轄）。v2.2: T=1後方互換により期待値不変"
+given = "空のpane列と正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・m=0・blocks長1・groups長1・割当0件・empty_slots=3"
 
 [[condition]]
 id = "layout-planner.r9-fewer-panes-than-slots-keeps-k1"
-source_lines = "tests/unit/layout_planner.rs:182"
+source_lines = "tests/unit/layout_planner.rs:218"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R9（planner側: k=1維持） + docs/design/detailed-design.md DD-10.6。空slotのbare pane正規化（layout宣言commandは起動しない）はKDL側のlayout-generator.r9-fewer-panes-normalizes-declared-commandsが検証"
-description = "M<N・layoutにcommand付きslotの場合のplanner側の条件: k=1を維持し不足slot分をempty_slotsとして計上する（M<Nを理由にinstanceを増やさない・errorにしない）"
-given = "2 paneとN=3・anchor tab 0をplan_v2へ与える"
-expect_return = "k=1・instance 0のempty_slots=1"
+description = "M<N・layoutにcommand付きslotの場合のplanner側の条件: k=1を維持し不足slot分をempty_slotsとして計上する（M<Nを理由にblockを増やさない・errorにしない）。v2.2: T=1後方互換により期待値不変"
+given = "2 paneと正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・group (0,0)のempty_slots=1"
 
 [[condition]]
 id = "layout-planner.r10-assignment-follows-visual-order-regardless-of-input-order"
-source_lines = "tests/unit/layout_planner.rs:192"
+source_lines = "tests/unit/layout_planner.rs:228"
 target_function = "plan_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R10 + docs/design/detailed-design.md DD-10.5（順序: list-panesの (tab_position, pane_y, pane_x) 昇順（visual order）。文書化されtestで固定）"
-description = "割当順の決定性: 割当は (tab_position, pane_y, pane_x) 昇順で固定され、入力列の並び順に依存しない。slot番号はvisual order順に0..N-1"
-given = "visual orderでない並び（reverse済み）の4 pane（tab 0の2 pane（y=1,5）とtab 1の2 pane（x=0,100））とN=4をplan_v2へ与える"
-expect_return = "instance 0の割当は (tab0,y1)(tab0,y5)(tab1,x0)(tab1,x100) の順でslot 0..3"
+description = "割当順の決定性: 割当は (tab_position, pane_y, pane_x) 昇順で固定され、入力列の並び順に依存しない。slot番号はvisual order順に0..N-1（multi-tab拡張の累積slot式もvisual order逐次充填で同一規則。multi-tab-allocation-cumulative-slots）"
+given = "visual orderでない並び（reverse済み）の4 pane（tab 0の2 pane（y=1,5）とtab 1の2 pane（x=0,100））と正規形TabTemplate列（T=1・N_0=4）をplan_v2へ与える"
+expect_return = "group (0,0)の割当は (tab0,y1)(tab0,y5)(tab1,x0)(tab1,x100) の順でslot 0..3"
 
 [[condition]]
 id = "layout-planner.r11-zero-slot-layout-invalid-and-missing-layout-not-found"
-source_lines = "tests/unit/layout_planner.rs:218"
+source_lines = "tests/unit/layout_planner.rs:262"
 target_function = "plan_v2 / layout::load_kdl"
 source = "docs/testing/test-plan.md §2.7 (a) R11（layout解決不能 / slot数 N=0 → LayoutNotFound / LayoutInvalid（exit 7）） + docs/design/detailed-design.md DD-10.6（N=0はLayoutInvalid）・DD-10.14"
-description = "layoutがplanに使えない2経路の拒否: slot数N=0はLayoutInvalid、layout解決不能（存在しないlayout名）はLayoutNotFound。いずれもexit 7系のpreflight失敗（CMR-5統合: R11の2失敗経路を1条件に統合）"
-given = "1 paneとN=0をplan_v2へ与える場合と、LayoutRef::Name(\"no-such-layout-xyz\")をlayout::load_kdlへ与える場合"
+description = "layoutがplanに使えない2経路の拒否: slot数N=0（T=1全体でN_0=0）はLayoutInvalid、layout解決不能（存在しないlayout名）はLayoutNotFound。いずれもexit 7系のpreflight失敗（CMR-5統合: R11の2失敗経路を1条件に統合）。multi-tab layout内のN_t=0鋳型（部分的な零slot鋳型）はzero-slot-tab-template-invalidが管轄"
+given = "1 paneと正規形TabTemplate列（T=1・N_0=0）をplan_v2へ与える場合と、LayoutRef::Name(\"no-such-layout-xyz\")をlayout::load_kdlへ与える場合"
 expect_return = "前者はErr（ErrorClass=LayoutInvalid）・後者はErr（ErrorClass=LayoutNotFound）"
 
 [[condition]]
 id = "layout-planner.r12-slot-count-uses-first-tab-subtree-excluding-plugin-leaves"
-source_lines = "tests/unit/layout_planner.rs:231"
-target_function = "layout::count_terminal_slots / base_subtree"
-source = "docs/testing/test-plan.md §2.7 (a) R12（slot数 N の算出: layout最初のtab subtreeの末端terminal slot数。plugin leaf除外（config子node持ち・bare両方=MR-32回帰。plugin配下は再帰しない）） + docs/design/design-review.md §4.2 MR-32 + docs/design/detailed-design.md DD-10.6"
-description = "N算出規則の本体: N = 最初のtab subtreeの末端terminal slot数。plugin leaf（pane wrapper内・bare・config子node持ちの全形式）はslotを消費せず、plugin配下は再帰しない。container・floating_panes・templateはSKIP_NODES規則で対象外（MR-32回帰）"
-given = "3-slot bare layout・pane wrapper内plugin leaf入りlayout（bare pane 2つ）・bare plugin node（config子node持ち）入りlayout（bare pane 1つ）・pane_template/floating_panes/container混在layoutの4種をparseしてbase_subtreeのcount_terminal_slots"
+source_lines = "tests/unit/layout_planner.rs:282"
+target_function = "layout::count_terminal_slots / normalize_tab_templates"
+source = "docs/testing/test-plan.md §2.7 (a) R12（slot数 N の算出: layout最初のtab subtreeの末端terminal slot数。plugin leaf除外（config子node持ち・bare両方=MR-32回帰。plugin配下は再帰しない）） + docs/design/design-review.md §4.2 MR-32 + docs/design/detailed-design.md DD-10.6 v2.2（n_slots: subtreeの末端terminal pane slot数〔plugin leaf除外・SKIP_NODES規則・従来通り〕）"
+description = "slot数算出規則の本体: n_slots = 鋳型subtreeの末端terminal slot数（v2.2で鋳型毎のn_slotsへ一般化。T=1 layoutでは鋳型0のn_slotsが従来のNに相当）。plugin leaf（pane wrapper内・bare・config子node持ちの全形式）はslotを消費せず、plugin配下は再帰しない。container・floating_panes・templateはSKIP_NODES規則で対象外（MR-32回帰）。TASK-75更新: base_subtree廃止に伴い正規形TabTemplate列（normalize_tab_templates）経由の数え上げへ読み替え（数え上げ規則は不変）"
+given = "3-slot bare layout・pane wrapper内plugin leaf入りlayout（bare pane 2つ）・bare plugin node（config子node持ち）入りlayout（bare pane 1つ）・pane_template/floating_panes/container混在layoutの4種をparseして正規形鋳型subtreeのcount_terminal_slots"
 expect_return = "それぞれ3・2・1・2"
 
 [[condition]]
 id = "layout-planner.r12-multi-tab-layout-counts-first-tab-shape-only"
-source_lines = "tests/unit/layout_planner.rs:260"
+source_lines = "tests/unit/layout_planner.rs:306"
 target_function = "layout::count_terminal_slots / plan_v2"
-source = "docs/testing/test-plan.md §2.7 (a) R12（multi-tab layoutは先頭tab形状） + docs/design/detailed-design.md DD-10.6（multi-tab layoutは最初のtab形状を反復単位とする）"
-description = "multi-tab layoutのN算出: 2-tab layout（各3 slot）のNは先頭tab形状の3（全tab合計ではない）。N=3として4 paneはk=2（M>N error廃止の再確認込み）"
-given = "各3 slotの2-tab layoutをparseしてcount_terminal_slots、および4 paneとN=3をplan_v2へ与える"
-expect_return = "N=3・plan_v2のk=2"
+source = "docs/testing/test-plan.md §2.7 (a) R12（旧: multi-tab layoutは先頭tab形状） + docs/design/detailed-design.md DD-10.6 v2.2（反復単位 = layout全体。T = 鋳型数・N_t = 鋳型tのslot数・S = sum(N_t)。旧「最初のtab形状を反復単位とする」規定の廃止） + docs/design/remap-v3-multi-tab-task75.md §2.2・requirements.md §2.6（multi-tab layouts SHALL be reproduced as a whole）"
+description = "multi-tab layoutの反復単位一般化（TASK-75 v2.2。旧v2.1「先頭tab形状のみ反復」から反転。条件idはR12対応表の安定参照として維持）: 2-tab layout（各3 slot）の反復単位はlayout全体でS=6（先頭tabの3ではない）。M=4はS=6に対して反復不要（k=1）で、鋳型0に3 pane・鋳型1に1 paneが割当たる（M>N error廃止の再確認込み。割当式の本体はmulti-tab-allocation-cumulative-slots）"
+given = "各3 slotの2-tab layoutをnormalize_tab_templatesで正規形化（T=2・N_t=3,3・S=6）し、4 paneと正規形TabTemplate列をplan_v2へ与える"
+expect_return = "s_slots=6（S=sum(N_t)）・plan_v2のk=1（blocks長1・groups長2）・割当は鋳型0へ3件・鋳型1へ1件"
 
 [[condition]]
 id = "layout-planner.r12-zellij-bare-bools-and-property-nodes-parse"
-source_lines = "tests/unit/layout_planner.rs:274"
+source_lines = "tests/unit/layout_planner.rs:333"
 target_function = "layout::parse"
 source = "docs/testing/test-plan.md §2.7 (a) R12（実機KDL形式のparse頑健性） + docs/design/design-review.md §4.2 MR-16（zellij layout常用のbare boolをparse拒否する回帰） + docs/design/detailed-design.md DD-10.6"
 description = "実機zellij layoutが常用する形式のparse頑健性: bare bool属性（borderless=true・focus=true）・property node（cwd / start_suspended）を含むlayoutがparse時にquote正規化されslot数として数えられる（MR-16回帰）"
@@ -130,18 +132,99 @@ expect_return = "いずれもparse成功し、slot数は1・1・1"
 
 [[condition]]
 id = "layout-planner.r20-quoted-chars-in-pane-command-warn-but-do-not-fail"
-source_lines = "tests/unit/layout_planner.rs:294"
+source_lines = "tests/unit/layout_planner.rs:351"
 target_function = "plan_v2（preflight warning）"
-source = "docs/testing/test-plan.md §2.7 (b) R20 + docs/design/detailed-design.md DD-10.13（pane_command空白分割は引数のquoteを復元不可 → 該当paneのrun一致が外れるためpreflight warning（実行は可））"
-description = "quoting warningの基本条件: pane_commandに `\"` / `\\` を含むpaneがあればpreflight warningを出し実行は可（errorにしない）。対象paneがいなければwarningなし"
-given = "codex exec（通常）・double quoteを含む echo \"x\"・backslash 1文字を含む echo C:［backslash］path の3 paneをN=3でplan_v2へ与える場合と、通常3 paneのみを与える場合"
-expect_return = "前者はOk（k=1）かつwarningsにterminal_2・terminal_3を含みterminal_1を含まない。後者はwarningsが空"
+source = "docs/testing/test-plan.md §2.7 (b) R20 + docs/design/detailed-design.md DD-10.13（TASK-74改訂: warning対象をpane_commandからterminal_commandへ変更） + docs/design/remap-v2-matching-fix-task74.md §2.1（quoting warning: 対象をpane.commandからpane.terminal_commandへ変更（表示textも読み替え）。理由は同一——空白分割でquoteが復元できずrun一致が外れうる）"
+description = "quoting warningの基本条件: **terminal_command**（invoked_with序列化。idのpane-commandは歴史的名称であり対象はTASK-74で変更済み）に `\"` / `\\` を含むpaneがあればpreflight warningを出し実行は可（errorにしない）。対象paneがいなければwarningなし。pane_command（前景process）にquoteがあってもterminal_commandがNoneならwarning対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕では quote入りpane_commandかつterminal_command=Noneのpaneに誤warningを出し、quote入りterminal_commandを検出できない）"
+given = "terminal_commandが codex exec（通常）・echo \"x\"（double quote入り）・echo C:［backslash］path（backslash 1文字入り）の3 paneをN=3でplan_v2へ与える場合、通常3 paneのみを与える場合、およびquote入りpane_command（echo \"y\"）かつterminal_command=Noneのpaneを与える場合"
+expect_return = "第1はOk（k=1）かつwarningsにterminal_2・terminal_3を含みterminal_1を含まない。第2はwarningsが空。第3のpaneはwarningsに現れない"
 
 [[condition]]
 id = "layout-planner.quoting-warning-covers-single-quotes-newlines-control-chars"
-source_lines = "tests/unit/layout_planner.rs:327"
+source_lines = "tests/unit/layout_planner.rs:396"
 target_function = "needs_quoting_warning"
-source = "docs/design/design-review.md §4.7 C6（TASK-39レビュー。関連: docs/testing/test-plan.md §2.7 (b) R20） + docs/design/detailed-design.md DD-10.13"
-description = "quoting warningの文字種拡張（C6回帰）: warning対象は `\"` / `\\` に加え `'`・改行・制御文字（split_whitespaceでargvが壊れうる文字）を含むpane_command。通常の引数区切り空白は対象外"
-given = "単quoteを含む bash -lc 'echo a b'・改行を含む echo a（途中でLF）b・ESC制御文字（U+001B）を含む echo（ANSI escape）・通常の codex exec --plan の4 paneをN=4でplan_v2へ与える"
+source = "docs/design/design-review.md §4.7 C6（TASK-39レビュー。関連: docs/testing/test-plan.md §2.7 (b) R20） + docs/design/detailed-design.md DD-10.13（TASK-74改訂: 文字種拡張の対象もterminal_commandへ変更） + docs/design/remap-v2-matching-fix-task74.md §2.1"
+description = "quoting warningの文字種拡張（C6回帰）: warning対象は **terminal_command** の `\"` / `\\` に加え `'`・改行・制御文字（split_whitespaceでargvが壊れうる文字）を含むpane。通常の引数区切り空白は対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕ではterminal_command側の該当文字を検出できない）"
+given = "terminal_commandが 単quoteを含む bash -lc 'echo a b'・改行を含む echo a（途中でLF）b・ESC制御文字（U+001B）を含む echo（ANSI escape）・通常の codex exec --plan の4 paneをN=4でplan_v2へ与える"
 expect_return = "warningsにterminal_1・terminal_2・terminal_3を含み、terminal_4（通常の引数区切り空白のみ）を含まない"
+
+[[condition]]
+id = "layout-planner.run-derives-from-invoked-with"
+source_lines = "tests/unit/layout_planner.rs:431"
+target_function = "plan_v2（V2Assignment.run算出）"
+source = "docs/design/remap-v2-matching-fix-task74.md §2.1（照合keyをterminal_command〔invoked_with序列化〕へ変更。pane_command〔前景process〕は参照しない） + docs/design/detailed-design.md DD-10.8（occupied slot: terminal_commandを注入。command = 空白分割のargv[0]、args = 残り。cwdは注入しない。terminal_command = None はbare pane slotのまま）・DD-10.1 事実5（F1/F2/F3: terminal_command = invoked_with序列化・pane_command = PTY前景process・bare起動paneはinvoked_with=None）"
+description = "run算出のdata source（TASK-74主因A修正の核）: V2Assignment.runはpane.terminal_command基準で算出する。terminal_command=None（bare・既定shell起動pane）→run=None（生成KDLはbare slotのまま。pane_command〔前景process〕の値は参照しない）・terminal_command=Some(s)→run=Some(s.split_whitespace())（command=argv[0]・args=残り・cwdは注入しない）。TR74-4直交2 paneを含み、旧実装（pane_command依存のrun算出）が必ずFAILするfail-first条件: P-shell-proc（terminal_command=None+pane_command=Some）は旧実装ではcommand注入されるが新実装ではrun=None／P-cmd-pane（terminal_command=Some+pane_command欠損）は旧実装ではrun=None（bare化）だが新実装ではrun=Some(argv)"
+given = "P-shell-proc（terminal_command=None・pane_command=Some(\"vim src/main.rs\")）・P-cmd-pane（terminal_command=Some(\"claude --model x\")・pane_command=None）・通常pane（両方None）の3 paneと正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・P-shell-procのrun=None・P-cmd-paneのrun=Some([\"claude\", \"--model\", \"x\"])・通常paneのrun=None。pane_commandの値（vim src/main.rs）はrunに一切反映されない"
+
+[[condition]]
+id = "layout-planner.normalize-tab-templates-doc-order-and-tab-attributes"
+source_lines = "tests/unit/layout_planner.rs:470"
+target_function = "layout::normalize_tab_templates"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.1・§3.1（正規形TabTemplate列: layoutの各tab nodeを文書順に列挙し各tabの鋳型〔subtree・name・focus・n_slots・pane_focus_slot〕を構築。name/focusはtab nodeの属性でsubtree本体からは除去。template無しlayoutはtab subtreeをそのまま。tab無しlayoutは1つの名無しtab鋳型T=1。new_tab_template・pane_template/tab_templateはSKIP_NODES維持） + docs/design/detailed-design.md DD-10.6 v2.2（正規形TabTemplate列） + docs/design/first/260821/requirements.md §2.6（multi-tab layout全体再現・tab名・tab focus属性）"
+description = "正規形TabTemplate列構築の本体: layoutの各tab nodeを文書順に列挙し、各tabの鋳型を構築する。tab属性（name・focus）はsubtree本体から除去して鋳型fieldへ保持する。template無しlayoutではtab subtreeをそのまま用い、default_tab_template付きlayoutではchildren置換済みsubtree（置換判定の本体はlayout-generator.template-children-substitution。v2.2一元化によりgeneratorはtemplate引数を持たない）。tab nodeが1つもないlayout（--inline・tab無しfile layout）は1つの名無し鋳型（T=1・旧base_subtree相当）。new_tab_template・pane_template/tab_templateはSKIP_NODES維持で鋳型化対象外。E2E vb改修（2026-09-16）追記: 複数のfocus=true鋳型（tab focus）がある場合は文書順最初の採用とともにwarning 1件を返す（§2.4・§5.2系列b。出力経路はremap-cli.preflight-warning-paths-stderr-and-jsonが管轄）"
+given = "tab name・focus属性付き2-tab layout（各tab subtreeにbare pane 2つ）・tab無しlayout（layout直下にpane 3つ）・new_tab_template混在tab layoutをnormalize_tab_templatesへ与える場合、focus=true鋳型1件の2-tab layoutの場合、tab0とtab2の両方がfocus=trueの3-tab layout（E2E focus-dual.kdl相当）の場合"
+expect_return = "第1はT=2・鋳型0はname=Some(\"T-a\")・focus=true・n_slots=2、鋳型1はname=None・focus=false・n_slots=2、各subtreeにtab属性（name/focus）は残存しない。第2はT=1・name=None・focus=false・n_slots=3。第3はnew_tab_templateを鋳型に含めない（Tはtab node数のみ）。focus=true鋳型1件はwarningなし・複数focus=true鋳型はwarning 1件（focus語を含む）"
+
+[[condition]]
+id = "layout-planner.multi-tab-allocation-cumulative-slots"
+source_lines = "tests/unit/layout_planner.rs:539"
+target_function = "plan_v2"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.2（配分則: i → b=floor(i/S)・o=i%S → 累積slot数C_t（C_0=0）についてo in [C_t, C_t+N_t)を満たすt・s=o-C_t。生成tabは全block全tab k×Tで(b,t)=(0,0)のみanchor） + docs/design/detailed-design.md DD-10.6 v2.2（割当の累積slot式・決定論性保証範囲(i)〔各paneのgroup=block×tab所属はvisual orderから決定論的〕） + requirements.md §2.6"
+description = "multi-tab割当の累積slot式: source visual orderのpane index iはblock b=floor(i/S)・block内offset o=i%Sへ写像され、累積slot数C_tについてo in [C_t, C_t+N_t)を満たすtab t・slot s=o-C_tへ割当てられる（visual order逐次充填）。生成tabは全block全tab（k×T）で(b,t)=(0,0)のみanchor。決定論保証範囲(i)（group=block×tab所属はvisual orderから決定論的）の本体。fail-first: 現行実装は単一鋳型（T=1）の割当しか行わない"
+given = "ref-hetero相当のmulti-tab layout（T=3・N_t=9,1,2・S=12）の正規形TabTemplate列と、visual順15 pane（M=15 → k=2）をplan_v2へ与える"
+expect_return = "k=2・blocks長2・各blockのgroups長3。pane i=0..8はgroup (0,0)のslot 0..8・i=9は(0,1)のslot 0・i=10,11は(0,2)のslot 0,1・i=12,13,14は(1,0)のslot 0,1,2・(1,1)/(1,2)は割当0件。割当は入力並び順に依存せずvisual orderで固定（r10規則のmulti-tab拡張）"
+
+[[condition]]
+id = "layout-planner.k-uses-total-slots"
+source_lines = "tests/unit/layout_planner.rs:601"
+target_function = "plan_v2"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.2（k（block数）= max(1, ceil(M/S))・S=sum(N_t)。M=0: k=1・全tab全slot空） + docs/design/detailed-design.md DD-10.6 v2.2（M = source pane数。block数 k = max(1, ceil(M/S))） + requirements.md §2.6（k = max(1, ceil(M/S))）"
+description = "k式のS基準化: block数kはlayout全体のslot数S=sum(N_t)を用い、k = max(1, ceil(M/S))。旧v2.1のN（先頭tab slot数）基準から一般化（T=1ではS=Nのため一致・t1-formula-level-backward-compat）。M=0はk=1で全tab全slot空"
+given = "T=3・N_t=9,1,2（S=12）の正規形TabTemplate列に、M=11・12・13・0の各sourceをplan_v2へ与える"
+expect_return = "kはそれぞれ1・1・2・1。M=0は割当0件・全groupのempty_slots=N_t"
+
+[[condition]]
+id = "layout-planner.tab-names-from-templates-and-block-suffix"
+source_lines = "tests/unit/layout_planner.rs:619"
+target_function = "plan_v2"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.3（tab名生成規則: (b,t)=(0,0)はanchor名〔renameしない・name=None〕。幹 = T>=2 かつ鋳型tがname属性を持つなら鋳型名、そうでなければbase。b>=1なら幹に-<b+1>を接尾。名無し鋳型はzellij自動名〔Tab #N〕に依存せずzelperが命名） + docs/design/detailed-design.md DD-10.6 v2.2（tab名）・DD-10.13（Tab #N自動名は再現対象外） + requirements.md §2.6例外(b)"
+description = "生成tab名規則: (b,t)=(0,0)はname=None（anchor保持・renameしない・D1）。それ以外の幹はT>=2かつ鋳型名ありなら鋳型名、そうでなければbase（layout名 / --pathのfile stem / remap）。b>=1は幹に-<b+1>接尾（block間同名なし。block 0内の同名はlayout自身の宣言による・U75-7）。名無し鋳型のzellij自動名（Tab #N）は再現対象外でzelper命名に置換（U75-8）。fail-first: 現行実装は単一鋳型命名（base幹のみ）しか生成しない"
+given = "T=3（鋳型0: name=\"T-3x3\"・9 slot、鋳型1: name=\"T-single\"・1 slot、鋳型2: 名無し・2 slot。S=12）の正規形TabTemplate列にM=15（k=2）のsourceとbase=\"ref-hetero\"をplan_v2へ与える"
+expect_return = "生成tab名は (0,0)=None、(0,1)=\"T-single\"、(0,2)=\"ref-hetero\"、(1,0)=\"T-3x3-2\"、(1,1)=\"T-single-2\"、(1,2)=\"ref-hetero-2\""
+
+[[condition]]
+id = "layout-planner.zero-slot-tab-template-invalid"
+source_lines = "tests/unit/layout_planner.rs:636"
+target_function = "layout::normalize_tab_templates / plan_v2"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.2（N_t=0 tab〔terminal slotを持たないtab鋳型・pluginのみのtab等〕はLayoutInvalid）・§4.2 U75-2（remapの適用経路は全生成tabにterminal pane経由の具体化を要し、terminal pane 0の新規tab作成は未検証のため事前中断） + docs/design/detailed-design.md DD-10.6 v2.2（N_t=0の鋳型はLayoutInvalid）・DD-10.14（LayoutInvalid: N_t=0）"
+description = "N_t=0鋳型の事前中断: terminal slotを持たないtab鋳型（plugin leafのみのtab・空tab等）を含むlayoutはLayoutInvalid（exit 7系preflight・状態変更前）。T=1全体のN_0=0はr11が既に検証しており本条件はmulti-tab内の部分的なN_t=0鋳型が対象"
+given = "有効なtab（bare pane 3つ）とplugin leafのみのtab（N_t=0）からなる2-tab layoutをnormalize_tab_templates/plan_v2へ与える"
+expect_return = "Err（ErrorClass=LayoutInvalid）"
+
+[[condition]]
+id = "layout-planner.pane-focus-slot-first-focused-leaf"
+source_lines = "tests/unit/layout_planner.rs:651"
+target_function = "layout::normalize_tab_templates"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.1（pane_focus_slot: subtree内でfocus=trueを持つ文書順最初のterminal pane leafのslot index〔Option<usize>〕。複数のfocus=true leafがある場合は文書順最初を採用しwarning——zellijの複数focus=true挙動は未検証のためzelper側規則として確定）・§3.1（walk_slots抽出・複数個はwarning用情報をplanner warningsへ接続）・§4.2 U75-1 + docs/design/detailed-design.md DD-10.6 v2.2（pane_focus_slot）"
+description = "pane_focus_slot抽出: 各鋳型subtree内の文書順最初のfocus=true terminal pane leaf（plugin leaf除外）のslot indexをOption<usize>で返す。focus=true leafが複数ある場合は文書順最初を採用しwarning（U75-1: 未検証挙動に依存しないzelper側規則）。focus=true leafなしはNone（実行側はslot 0へfallback: remap-sequence.focus-pane-id-after-override-per-tab）。fail-first: 現行実装はTabTemplate/pane_focus_slotを持たない"
+given = "bare pane・focus=true付きpane・bare paneの順の3-slot subtreeを持つ鋳型、focus=true leaf 2件（slot 0と2）を持つ鋳型、focus=trueを持たない鋳型をnormalize_tab_templatesへ与える"
+expect_return = "第1はpane_focus_slot=Some(1)。第2はpane_focus_slot=Some(0)かつ複数focus検出のwarning 1件。第3はNone・warningなし"
+
+[[condition]]
+id = "layout-planner.empty-group-planned-for-all-blocks-tabs"
+source_lines = "tests/unit/layout_planner.rs:677"
+target_function = "plan_v2"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.2（空slot: 最終blockの各tabでのみ発生〔割当pane数がN_tに満たないtab・割当0件のgroupを含む〕）・§3.2（空group〔割当0件〕もV2TabPlanとして生成。nameは命名規則どおり） + docs/design/detailed-design.md DD-10.6 v2.2"
+description = "空groupの計画: 割当0件のgroup（最終blockのtail等）も他groupと同じくV2TabPlanとして生成され、empty_slots=N_t・nameは命名規則どおり付く（実行側のnew-tab経路はremap-sequence.empty-group-tab-created-via-new-tab-then-rename）。anchor (0,0)もM=0なら割当0件の空groupになる。fail-first: 現行実装は割当0件のinstance planを生成しない"
+given = "T=3・N_t=9,1,2・M=15（k=2。block 1の割当は3件で(1,1)/(1,2)が空group）のplan_v2"
+expect_return = "(1,1)と(1,2)のV2TabPlanが存在し、assignments長0・empty_slots=1と2・nameは命名規則どおり（-2接尾付き）。block 0の各groupに空groupなし"
+
+[[condition]]
+id = "layout-planner.t1-formula-level-backward-compat"
+source_lines = "tests/unit/layout_planner.rs:700"
+target_function = "plan_v2"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.7（T=1後方互換: 割当式・k式・命名・tab focus復帰先の4項目がv2.1と式レベルで一致。保証範囲は計画レベルの一致であり実行操作列全体の一致ではない——pane focus再現〔focus-pane-id〕はT=1でも新たに実行される。TR75-3） + docs/design/detailed-design.md DD-10.6 v2.2（T=1後方互換） + requirements.md §2.6（formula-level backward compatibility）"
+description = "T=1式レベル後方互換の回帰固定: T=1（単tab layout・tab無しlayout・--inline）ではS=N_0=Nであり、割当式b=floor(i/N)・s=i%N、k=max(1,ceil(M/N))、命名は幹=baseで(0,0)=anchor・b>=1は<base>-<b+1>、tab focus復帰先はfocus=true鋳型が(0,0)=anchorを指すため無指定時と同一のanchor——計画レベル（割当式・k式・命名・tab focus復帰先）がv2.1と厳密一致する。既存r1〜r7・r39系がT=1 fixtureで期待値不変のままこの一致を固定する。保証範囲外（TR75-3明記）: 実行操作列全体の一致ではなく、focus-pane-id呼出はT=1でも新たに実行される（remap-sequence.focus-pane-id-after-override-per-tab。破壊的変更としてCHANGELOGへ記載予定）"
+given = "単tab node layout（name属性付き・N=3）とtab無しlayout（N=3）の各正規形TabTemplate列に、同一の4 pane source（M=4）と同一baseをplan_v2へ与える"
+expect_return = "両者ともk=2・割当はb=floor(i/3)・s=i%3（v2.1のinstance j式・slot式と同一）・(0,0)はname=None（anchor）・block 1はbase幹の<base>-2・最終go-to先（tab_focus_target）はanchor。単tab layoutの鋳型nameはT=1のため命名幹に使われない（幹=base）"

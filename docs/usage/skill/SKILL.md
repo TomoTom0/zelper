@@ -10,7 +10,7 @@ zelperはzellij sessionをverb-first文法で操作するCLI。`zellij`バイナ
 ## 実行原則
 
 - 対象session: `--session NAME` > 環境変数 `ZELLIJ_SESSION_NAME` > 実行中sessionが1つならそれ > error（候補表示）
-- 破壊的操作（`remove`）はまず `--dry-run --json` で計画を確認する。`remap` に破壊的経路はないが、多pane再配置では `--dry-run --json` で計画（M/N/k・割当・生成KDL）を確認する
+- 破壊的操作（`remove`）はまず `--dry-run --json` で計画を確認する。`remap` に破壊的経路はないが、多pane再配置では `--dry-run --json` で計画（M/S/k・割当・生成KDL）を確認する
 - 構造の把握は `zelper list panes --json` から始める（pane ID / title / command / 位置を一括取得）
 
 ## 対象指定（全verb共通）
@@ -62,16 +62,16 @@ zelper docs readme | llm usage|skill|snippet
 
 既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置する。対象はsession全体のselectable・tiled terminal pane（`--tab`指定時はそのtabのpaneに絞り込み、そのtabがanchor）。
 
-- pane数 M > slot数 N でもerrorにならない: k = max(1, ceil(M/N)) 個のlayout instanceを反復して全paneを配置。kill/restart経路は存在しない
-- instance 0はanchor tab（省略時active tab。tab名は保持）。以降は新規tab `<layout名>-2` …と連番命名。移動で空になったtabは自動close
+- 反復単位はlayout全体（T tab鋳型・S = 全tabのslot数和）。pane数 M > S でもerrorにならない: k = max(1, ceil(M/S)) block × T tabを生成して全paneを配置。kill/restart経路は存在しない
+- 生成tab (0,0)はanchor tab（省略時active tab。tab名は保持）。それ以外の生成tab名は幹（名前ありtab鋳型のname / base〔layout名・file stem・`remap`〕）+ `-<b+1>` block接尾。tab名・tab focus・pane focus・`default_tab_template`由来barを`zellij --layout`起動時と同一に再現。移動で空になったtabは自動close。remap対象外の過剰tabはcloseされず報告（`leftover_tabs`）
 - 移動が必要な場合のみcompanion plugin（binary埋込wasm + permissions.kdl seed）を使用。probe不成立なら状態変更前に中断
 - floating paneが存在するとerror。`--embed-floating` でtiled化（process保持）してから組入れ
 - atomicityは主張しない。途中失敗時は実行済み/失敗/未実行を報告
 
 ## 既知の制限
 
-- remapのslot割当はgroup（instance/tab）所属とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証しない
-- `pane_command` に `"` `'` `\` 改行・制御文字を含むpaneはquotingを復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
+- remapのslot割当はgroup（block×tab所属）とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証しない
+- `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneはquotingを復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
 - `list sessions` のJSONはzellijが提供しないためテキストparse（name / created / current / panes_per_tab を返す。EXITED な dead session は表示・session解決から除外される）
 - tab IDはclose後に再利用されるため、取得したtab IDは即時使用のみに用いる

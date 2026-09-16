@@ -69,7 +69,7 @@ zelper docs readme | llm usage|skill|snippet
 ```
 
 - `detail` / `error` は該当時のみ。部分失敗は隠されない（一部失敗でexit 6、全対象失敗はexit 5）
-- `remap` は単一のenvelope。成功時の `data` は `m` / `n` / `k`・`mapping[]`（pane / instance / slot / tab / preserved / alive）・`tabs[]`。検証失敗時は `error.data` にmappingとmissingが載る。`--dry-run` の `data` は `source[]`（visual order）・M/N/k・割当表（`instances[].assignments[]`）・instance毎の生成KDL（`instances[].kdl`）・操作列（`operations[]`）で、状態は一切変更しない
+- `remap` は単一のenvelope。成功時の `data` は `m` / `n`（= S: layout全体slot数）/ `k` / `t`（tab鋳型数）/ `s` / `n_slots`（tab毎slot数列）・`mapping[]`（pane / block〔instance keyは維持〕 / tab_index / slot / tab / preserved / alive）・`tabs[]`（生成tabのblock/tab_index/id/name）・`leftover_tabs[]`（remap対象外の残存tab。closeされない）・`warnings`・`snapshot_len`。検証失敗時は `error.data` にm/n/k/t/n_slots・mapping・missingが載る。`--dry-run` の `data` は `dry_run` / `source[]`（visual order・`invoked_with`含む）・M/S/k/T/`n_slots`・`tabs[]`（鋳型name/focus）・割当表（`instances[]`〔block×tab毎のassignments〕）・生成tab毎のKDL preview（`instances[].kdl`）・操作列（`operations[]`・new-tab〔空group〕/focus-pane-id/最終go-to含む）・`warnings` で、状態は一切変更しない
 - `list sessions` のみJSONをzellijが提供しないためテキストparse。name / created（zellijの相対表記）/ current / panes_per_tab（tab毎tiled pane数。取得失敗時null）を返す。EXITED（dead session）は表示・session解決から除外される
 - `list layouts` の `layouts` は `{name, size, modified_epoch}` の配列（stat失敗時はsize/modified_epochがnull）
 
@@ -96,13 +96,13 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 
 ## remap意味論要点
 
-- 既存paneのprocessを**すべて**保持したままlayoutへ再配置。対象はsession全体のselectable・tiled terminal pane（`--tab` はsource絞り込み兼anchor指定）
-- pane数 M > slot数 N でもerrorにならない: k = max(1, ceil(M/N)) 個のlayout instanceで反復し全paneを配置。kill/restart経路は存在しない
-- instance 0 = anchor tab（`--tab`指定時そのtab・省略時active tab・tab名は保持）。j >= 1 は新規tab `<base>-<j+1>`（baseはlayout名 / file stem / `remap`（`--inline`））
-- 割当順はvisual order（tab position → y → x）で決定的。空slotは既定shellで埋まる。移動で空になったtabは自動close
-- 移動が必要な場合のみcompanion plugin（binary埋込wasm + permissions.kdl seed）を使用し、probe成功後に移動。probe不成立は状態変更前に中断（`OperationFailed` exit 5）
+- 既存paneのprocessを**すべて**保持したままlayoutへ再配置。対象はsession全体のselectable・tiled terminal pane（`--tab` はsource絞り込み兼anchor指定。この場合layout最初のtab鋳型による単tab適用）
+- 反復単位はlayout全体（T tab鋳型・S = 全tabのslot数和）。pane数 M > S でもerrorにならない: k = max(1, ceil(M/S)) block × T tabを生成し全paneを配置。kill/restart経路は存在しない
+- 生成tab (b,t)=(0,0) = anchor tab（`--tab`指定時そのtab・省略時active tab・tab名は保持）。それ以外の生成tab名は幹 + `-<b+1>`（b >= 1 のblock接尾。幹は名前ありtab鋳型のname / base〔layout名・file stem・`remap`（`--inline`）〕。名無し鋳型はzelper命名）。tab名・tab focus（focus=true鋳型のblock 0 tabへ最終go-to）・pane focus（`focus-pane-id`）・`default_tab_template`由来barを`zellij --layout`起動時と同一に再現（anchor名は保持例外）
+- 割当順はvisual order（tab position → y → x）で決定的。割当0件のgroup（空group）は `new-tab --layout-string` で生成。空slotは既定shellで埋まる。移動で空になったtabは自動close
+- 割当ありgroupのcross-tab移動が必要な場合のみcompanion plugin（binary埋込wasm + permissions.kdl seed）を使用し、probe成功後に移動（空groupのnew-tabのみならplugin不使用）。probe不成立は状態変更前に中断（`OperationFailed` exit 5）
 - floating pane存在時は `Preflight` error（exit 7）。`--embed-floating` でtiled化（process保持）して組入れ
-- 適用後、pane ID生存・割当tab所属・各tabのpane数を検証。不一致は `VerificationFailed`（exit 7）
+- 適用後、pane ID生存・割当tab所属・各生成tabのpane数（== N_t）・pane focus（is_focused）を検証。不一致は `VerificationFailed`（exit 7）。remap対象外の過剰tabはcloseされず `leftover_tabs` として報告
 - atomicityは主張しない。途中失敗は実行済み/失敗/未実行を報告
 
 ## 誤用と正解
@@ -118,8 +118,8 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 
 ## 既知の制限（agentが前提にしてはならないこと）
 
-- remapのslot割当はgroup（instance/tab）所属とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証外
-- `pane_command` に `"` `'` `\` 改行・制御文字を含むpaneは、空白分割でquotingを復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
+- remapのslot割当はgroup（block×tab所属）とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証外
+- `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneは、空白分割でquotingを復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
 - tab IDはclose後に再利用される。取得したtab IDは即時使用のみ
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。config.kdlの `layout_dir` は読まない

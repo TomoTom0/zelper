@@ -24,11 +24,45 @@ pub struct FakeBackend {
     pub override_count: Cell<usize>,
     /// この回数を超えたoverride後の最初のgo-to-tabを1回失敗させる（focus復帰失敗模擬）
     pub fail_go_to_after: Cell<Option<usize>>,
-    /// 最初のpipe呼出より後の最初のlist_panesをこの時間だけ遅延させる
+    /// 最初のpipe呼出より後の最初のlist_panes_lenientをこの時間だけ遅延させる
     /// （polling deadline超過後の条件成立模擬。C3）
     pub slow_list_panes_after_pipe: Cell<Option<std::time::Duration>>,
     /// rename_tabを記録・成功扱いにするが名前を変えない（rename不生效模擬。C5）
     pub mute_rename_tab: Cell<bool>,
+    /// 最初のpipe呼出より後のlist_panes_lenient応答の先頭N回を空（Ok(None)）にする
+    /// （TASK-74。CR74-3: run冒頭のsnapshot_lenientでは計数が消費されないarm法）
+    pub empty_panes_after_pipe: Cell<usize>,
+    /// 最初のpipe呼出より後のlist_panes（strict）応答の先頭N回を空stdout相当の
+    /// 失敗にする（busy windowはlenient/strict両呼び出しに掛かる模擬。CR74-2:
+    /// poll内のstrict再取得が空でfatalになる窓を検出させる）
+    pub strict_empty_panes_after_pipe: Cell<usize>,
+    /// 最初のoverride-layout呼出より後のlist_panes_lenient応答の先頭N回を空にする
+    /// （TASK-74。CR74-3: 検証冒頭snapshotへ空を届けるarm法。layout適用phaseと
+    /// 検証冒頭の間にlenient呼び出しがないため最終override以降のarmと同義）
+    pub empty_panes_after_override: Cell<usize>,
+    /// 最初のoverride-layout呼出より後のlist_tabs_lenient応答の先頭N回を空にする
+    pub empty_tabs_after_override: Cell<usize>,
+    /// 最初のoverride-layout呼出より後のlist_panes_lenient応答のうち指定番目
+    /// （1開始）の呼び出しのみ空にする（TASK-75 E2E要因A改訂: step 6のfocus対象
+    /// 決定・存在確認pollが先頭N回空を全数消化するようになったため、適用後再取得
+    /// の特定位置へ空を届ける精密arm法）
+    pub empty_panes_nth_after_override: Cell<Option<usize>>,
+    /// 同型のtabs側精密arm（指定番目の呼び出しのみ空）
+    pub empty_tabs_nth_after_override: Cell<Option<usize>>,
+    /// empty_*_nth_after_overrideの呼び出し計数（1開始）
+    pub lenient_panes_count: Cell<usize>,
+    pub lenient_tabs_count: Cell<usize>,
+    /// move phase完了後（最初のbreak系pipe後・go-to-tab呼出前）のlist-tabs系応答で
+    /// 指定tabのidを別idへ入れ替える（tab id再利用のemulation。TASK-75 TR75-4:
+    /// step 6直前のtargets再解決〔pane所属基準〕が行われることの検証用注入）
+    pub swap_tab_id_before_apply: Cell<Option<(TabId, TabId)>>,
+    /// 同timingのlist-tabs系応答で指定tabをpaneごと除去する（tab消失により再解決
+    /// 不能となる系列のemulation。TR75-4 fatal系）
+    pub drop_tab_before_apply: Cell<Option<TabId>>,
+    /// focus_paneを「Pane ... is already focused」のexit 2相当（focus状態は実際に
+    /// 成立している）で応答する（E2E acceptance b系列実測のemulation。TASK-75
+    /// 要因A改訂: already focusedは成功扱いであることの検証用注入）
+    pub already_focused_focus: Cell<bool>,
 }
 
 pub struct FakeState {
@@ -76,6 +110,17 @@ impl FakeBackend {
             fail_go_to_after: Cell::new(None),
             slow_list_panes_after_pipe: Cell::new(None),
             mute_rename_tab: Cell::new(false),
+            empty_panes_after_pipe: Cell::new(0),
+            strict_empty_panes_after_pipe: Cell::new(0),
+            empty_panes_after_override: Cell::new(0),
+            empty_tabs_after_override: Cell::new(0),
+            empty_panes_nth_after_override: Cell::new(None),
+            empty_tabs_nth_after_override: Cell::new(None),
+            lenient_panes_count: Cell::new(0),
+            lenient_tabs_count: Cell::new(0),
+            swap_tab_id_before_apply: Cell::new(None),
+            drop_tab_before_apply: Cell::new(None),
+            already_focused_focus: Cell::new(false),
         }
     }
 
@@ -96,6 +141,12 @@ impl FakeBackend {
 
     pub fn calls(&self) -> Vec<String> {
         self.calls.borrow().clone()
+    }
+
+    /// pipe_pluginが既に呼ばれたか（busy window系注入〔CR74-2/3〕のarm条件。
+    /// 最初のpipe = probe）
+    fn pipe_seen(&self) -> bool {
+        self.calls.borrow().iter().any(|c| c.starts_with("pipe "))
     }
 
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
@@ -136,6 +187,91 @@ impl FakeBackend {
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
     pub fn mute_rename_tab(&self) {
         self.mute_rename_tab.set(true);
+    }
+
+    /// 最初のpipe呼出以降にbusy windowを発生させる: lenient list-panes応答の
+    /// 先頭N回を空（Ok(None)）にし、strict list_panes応答の先頭N回を空stdout
+    /// 相当の失敗にする（TASK-74。CR74-3のarm法。実backendでは空stdoutは
+    /// lenientでOk(None)・strictでparse失敗となるため両方に掛ける）
+    #[allow(dead_code)]
+    pub fn empty_panes_after_pipe(&self, count: usize) {
+        self.empty_panes_after_pipe.set(count);
+        self.strict_empty_panes_after_pipe.set(count);
+    }
+
+    #[allow(dead_code)]
+    pub fn empty_panes_after_override(&self, count: usize) {
+        self.empty_panes_after_override.set(count);
+    }
+
+    #[allow(dead_code)]
+    pub fn empty_tabs_after_override(&self, count: usize) {
+        self.empty_tabs_after_override.set(count);
+    }
+
+    /// 最初のoverride-layout呼出より後のlist_panes_lenient応答のうち指定番目
+    /// （1開始）の呼び出しのみ空にする（TASK-75 E2E要因A改訂の精密arm法）
+    #[allow(dead_code)]
+    pub fn empty_panes_nth_after_override(&self, nth: usize) {
+        self.empty_panes_nth_after_override.set(Some(nth));
+    }
+
+    /// 同型のtabs側精密arm
+    #[allow(dead_code)]
+    pub fn empty_tabs_nth_after_override(&self, nth: usize) {
+        self.empty_tabs_nth_after_override.set(Some(nth));
+    }
+
+    /// move phase完了後（break系pipe後・最初のgo-to-tab前）のlist-tabs系応答で
+    /// tab idを入れ替える（TR75-4。v2.2実装のstep 6直前存在確認経路で消費される。
+    /// 現行実装はこのwindowでlist-tabsを呼ばないため適用されず残る）
+    #[allow(dead_code)]
+    pub fn swap_tab_id_before_apply(&self, old: TabId, new: TabId) {
+        self.swap_tab_id_before_apply.set(Some((old, new)));
+    }
+
+    /// 同timingのlist-tabs系応答でtabをpaneごと除去する（TR75-4 fatal系）
+    #[allow(dead_code)]
+    pub fn drop_tab_before_apply(&self, tab: TabId) {
+        self.drop_tab_before_apply.set(Some(tab));
+    }
+
+    /// focus_pane応答を「already focused」のexit 2相当へ切替（TASK-75要因A改訂の
+    /// 検証用注入。focus状態は設定したうえでzellij実機と同じerrorを返す）
+    #[allow(dead_code)]
+    pub fn already_focused_focus(&self) {
+        self.already_focused_focus.set(true);
+    }
+
+    /// armed state（break系pipe呼出済み・go-to-tab未呼び出し）のlist-tabs系呼び出し
+    /// でtab id操作注入を適用する（1回で消費）
+    fn apply_tab_id_injection(&self) {
+        let armed = {
+            let calls = self.calls.borrow();
+            calls.iter().any(|c| c.starts_with("pipe break-"))
+                && !calls.iter().any(|c| c.starts_with("go-to-tab"))
+        };
+        if !armed {
+            return;
+        }
+        if let Some((old, new)) = self.swap_tab_id_before_apply.get() {
+            self.swap_tab_id_before_apply.set(None);
+            let mut s = self.state.borrow_mut();
+            if let Some(t) = s.tabs.iter_mut().find(|t| t.id == old) {
+                t.id = new;
+            }
+            for p in s.panes.iter_mut() {
+                if p.tab_id == old {
+                    p.tab_id = new;
+                }
+            }
+        }
+        if let Some(drop) = self.drop_tab_before_apply.get() {
+            self.drop_tab_before_apply.set(None);
+            let mut s = self.state.borrow_mut();
+            s.tabs.retain(|t| t.id != drop);
+            s.panes.retain(|p| p.tab_id != drop);
+        }
     }
 
     /// pane群をtabへ移動（E6実証: プロセス保存・pane id不変）。
@@ -194,6 +330,18 @@ fn spawn_shell_pane(s: &mut FakeState, tab: TabId, title: &str) -> PaneKindId {
         .find(|t| t.id == tab)
         .map(|t| (t.name.clone(), t.position))
         .unwrap_or_default();
+    // TASK-75（E2E要因A改訂）: focus対象・検証(d)は適用後のvisual order（y,x昇順）
+    // で決まるため、spawn pane（空slot相当）は当該tabの既存terminal paneより常に
+    // 後ろに来る位置（max y + 1行）へ置く。割当paneのvisual order = mapping slot順・
+    // spawn paneは空slot、の対応をfake内で決定的にする
+    let y = s
+        .panes
+        .iter()
+        .filter(|p| p.tab_id == tab && p.is_remap_source())
+        .map(|p| p.geometry.y)
+        .max()
+        .unwrap_or(0)
+        + 1;
     s.panes.push(PaneState {
         id: PaneKindId::Terminal(pid),
         title: title.to_string(),
@@ -204,11 +352,12 @@ fn spawn_shell_pane(s: &mut FakeState, tab: TabId, title: &str) -> PaneKindId {
         is_held: false,
         geometry: Geometry {
             x: 0,
-            y: 0,
+            y,
             rows: 10,
             cols: 10,
         },
         command: None,
+        terminal_command: None,
         cwd: None,
         tab_id: tab,
         tab_position: tab_pos,
@@ -236,7 +385,28 @@ impl ZellijBackend for FakeBackend {
 
     fn list_tabs(&self) -> Result<Vec<TabState>, ZelperError> {
         self.record("list-tabs")?;
+        self.apply_tab_id_injection();
         Ok(self.state.borrow().tabs.clone())
+    }
+
+    fn list_tabs_lenient(&self) -> Result<Option<Vec<TabState>>, ZelperError> {
+        self.record("list-tabs-lenient")?;
+        // 検証冒頭（override-layout以降）へ空を届けるbusy window注入（CR74-3）
+        if self.override_count.get() > 0 {
+            let remaining = self.empty_tabs_after_override.get();
+            if remaining > 0 {
+                self.empty_tabs_after_override.set(remaining - 1);
+                return Ok(None);
+            }
+            // 精密arm（TASK-75 E2E要因A改訂）: 指定番目の呼び出しのみ空
+            let n = self.lenient_tabs_count.get() + 1;
+            self.lenient_tabs_count.set(n);
+            if self.empty_tabs_nth_after_override.get() == Some(n) {
+                return Ok(None);
+            }
+        }
+        self.apply_tab_id_injection();
+        Ok(Some(self.state.borrow().tabs.clone()))
     }
 
     fn list_tabs_for(&self, session: &str) -> Result<Vec<TabState>, ZelperError> {
@@ -246,15 +416,55 @@ impl ZellijBackend for FakeBackend {
 
     fn list_panes(&self) -> Result<Vec<PaneState>, ZelperError> {
         self.record("list-panes")?;
-        // 最初のpipe呼出より後の最初のlist_panesを遅延させる（C3注入:
-        // backend呼出がdeadlineを消費してから条件成立を返す系列の模擬）
+        // busy window中のstrict呼び出しは空stdout相当（実backendのlist_panesは
+        // 空出力でparse失敗。CR74-2の窓検出用注入）
+        if self.pipe_seen() {
+            let remaining = self.strict_empty_panes_after_pipe.get();
+            if remaining > 0 {
+                self.strict_empty_panes_after_pipe.set(remaining - 1);
+                return Err(ZelperError::new(
+                    ErrorClass::OperationFailed,
+                    "failed to parse list-panes output: empty response (injected)",
+                ));
+            }
+        }
+        Ok(self.state.borrow().panes.clone())
+    }
+
+    fn list_panes_lenient(&self) -> Result<Option<Vec<PaneState>>, ZelperError> {
+        self.record("list-panes-lenient")?;
+        // 最初のpipe呼出より後の最初のlenient list-panesを遅延させる（C3注入:
+        // backend呼出がdeadlineを消費してから条件成立を返す系列の模擬）。
         if let Some(delay) = self.slow_list_panes_after_pipe.get()
             && self.calls.borrow().iter().any(|c| c.starts_with("pipe "))
         {
             self.slow_list_panes_after_pipe.set(None);
             std::thread::sleep(delay);
         }
-        Ok(self.state.borrow().panes.clone())
+        // busy window注入（CR74-3）: 最初のpipe以降のlenient応答の先頭N回は空。
+        // run冒頭snapshot（pipeより前）では消費されずpollに実際に空が届く
+        if self.pipe_seen() {
+            let remaining = self.empty_panes_after_pipe.get();
+            if remaining > 0 {
+                self.empty_panes_after_pipe.set(remaining - 1);
+                return Ok(None);
+            }
+        }
+        // 検証冒頭（override-layout以降）へ空を届けるbusy window注入（CR74-3）
+        if self.override_count.get() > 0 {
+            let remaining = self.empty_panes_after_override.get();
+            if remaining > 0 {
+                self.empty_panes_after_override.set(remaining - 1);
+                return Ok(None);
+            }
+            // 精密arm（TASK-75 E2E要因A改訂）: 指定番目の呼び出しのみ空
+            let n = self.lenient_panes_count.get() + 1;
+            self.lenient_panes_count.set(n);
+            if self.empty_panes_nth_after_override.get() == Some(n) {
+                return Ok(None);
+            }
+        }
+        Ok(Some(self.state.borrow().panes.clone()))
     }
 
     fn current_tab(&self) -> Result<TabState, ZelperError> {
@@ -361,6 +571,7 @@ impl ZellijBackend for FakeBackend {
             } else {
                 Some(spec.command.join(" "))
             },
+            terminal_command: None,
             cwd: spec.cwd.as_ref().map(|p| p.to_string_lossy().into_owned()),
             tab_id: spec.tab.unwrap_or(TabId(0)),
             tab_position: 0,
@@ -412,6 +623,8 @@ impl ZellijBackend for FakeBackend {
             let command = sc
                 .map(|s| s.command_argv.join(" "))
                 .filter(|c| !c.is_empty() && !self.fail_restart.borrow().contains(c));
+            // TASK-75（E2E要因A改訂）: layout生成paneのvisual orderがslot宣言順に
+            // 対応するよう幾何は行位置 i に置く（focus対象・検証(d)の位置基準）
             s.panes.push(PaneState {
                 id: PaneKindId::Terminal(pid),
                 title: format!("Pane #{pid}"),
@@ -422,11 +635,12 @@ impl ZellijBackend for FakeBackend {
                 is_held: false,
                 geometry: Geometry {
                     x: 0,
-                    y: 0,
+                    y: i as u32,
                     rows: 10,
                     cols: 10,
                 },
                 command,
+                terminal_command: None,
                 cwd: sc.and_then(|s| s.cwd.clone()),
                 tab_id: TabId(id),
                 tab_position: 0,
@@ -547,6 +761,34 @@ impl ZellijBackend for FakeBackend {
         Ok(())
     }
 
+    /// TASK-75（v2.2・TR75-10）: 薄い実装+呼出記録。対象paneのtab内でfocusを設定
+    /// する（R75-3: 非active tabもis_focusedを持つ。focus-pane-idが他tabのfocusを
+    /// 解除しない前提〔U75-3〕と同形に、tab内の他paneのみfocus解除する）。
+    /// already_focused_focus注入時はfocus状態を設定したうえでzellij実機と同じ
+    /// 「already focused」error（exit 2相当）を返す
+    fn focus_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError> {
+        self.record(&format!("focus-pane-id {}", pane.as_spec()))?;
+        let mut s = self.state.borrow_mut();
+        let Some(tab) = s.panes.iter().find(|p| &p.id == pane).map(|p| p.tab_id) else {
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                "pane not found",
+            ));
+        };
+        for p in s.panes.iter_mut() {
+            if p.tab_id == tab {
+                p.is_focused = p.id == *pane;
+            }
+        }
+        if self.already_focused_focus.get() {
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!("Pane {:?} is already focused", pane),
+            ));
+        }
+        Ok(())
+    }
+
     fn dump_layout(&self) -> Result<String, ZelperError> {
         self.record("dump-layout")?;
         Ok("layout {\n}\n".to_string())
@@ -608,6 +850,7 @@ impl ZellijBackend for FakeBackend {
                             cols: 10,
                         },
                         command: None,
+                        terminal_command: None,
                         cwd: None,
                         tab_id: host,
                         tab_position: 0,

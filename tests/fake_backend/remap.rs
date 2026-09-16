@@ -40,6 +40,7 @@ fn pane_at(
             cols: 10,
         },
         command: cmd.map(|c| c.to_string()),
+        terminal_command: None,
         cwd: Some("/w".into()),
         tab_id: TabId(tab_id),
         tab_position,
@@ -176,7 +177,12 @@ fn pipes(b: &FakeBackend) -> Vec<String> {
 static XDG_LOCK: Mutex<()> = Mutex::new(());
 
 fn with_isolated_xdg<T>(f: impl FnOnce(&Path) -> T) -> T {
-    let _guard = XDG_LOCK.lock().unwrap();
+    // fail-first期のfail testがpanicでlockを毒化しても、XDG_CACHE_HOMEは入口で
+    // 毎回上書きされるため毒化回復しても後続testへ影響しない（直列化のみ維持し、
+    // 他testを巻き込まない）
+    let _guard = XDG_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = std::env::temp_dir().join(format!("zelper-remap-xdg-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -504,6 +510,15 @@ fn r36_polling_timeout_reports_groups_and_latency_note() {
         "移動済み/未移動groupの報告: {}",
         err.message()
     );
+    // timeoutはscreen繁忙（screen応答1s timeoutによる一時的な空list応答）でも
+    // 起こりうる旨のF8機構の注記を含む（CR74-4: この注記なしでは空応答由来の
+    // timeoutが権限問題と誤診されうる）
+    assert!(
+        msg.contains("screen")
+            && (msg.contains("busy") || msg.contains("1s") || msg.contains("empty")),
+        "screen繁忙の1s list応答timeout機構の注記: {}",
+        err.message()
+    );
     // group 0は影響を受けずanchorにいる（移動済みgroupの状態は保持）
     let s = b.state.borrow();
     let p4 = s
@@ -574,6 +589,106 @@ fn r38_instance_tab_pane_count_mismatch_fails_verification() {
         "期待/実測の差分を報告: {}",
         err.message()
     );
+    assert!(
+        err.message().contains("cwd"),
+        "起動cwdが照合不成立の原因となる可能性を案内: {}",
+        err.message()
+    );
+}
+
+// [covers:remap-sequence.empty-list-panes-retry-in-polls]
+#[test]
+fn empty_list_panes_is_retried_during_poll() {
+    // poll中の空list-panes応答はretry（TASK-74副因C）: 最初のpipe（probe）以降に
+    // armした空応答（run冒頭snapshotでは計数が消費されないarm法。CR74-3）が
+    // probe pollに実際に届く系列。probe pollのtitle判定はlenient呼び出しの戻り値で
+    // 直接行い、1 tickあたりlist-panes系backend呼び出しは1回とする（lenientを
+    // gateのみに使いstrict list_panesで再取得すると、gate直後のstrict呼び出しが
+    // 空応答を返した時点でfatalになる窓が残るため——CR74-2）
+    let (panes, tabs) = four_panes_two_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    b.empty_panes_after_pipe(2);
+    let result = with_isolated_xdg(|_| run(&b, &args(false)));
+    assert!(result.is_ok(), "空応答を跨いでpollが成立する: {result:?}");
+    let calls = b.calls();
+    let probe_at = calls
+        .iter()
+        .position(|c| c.starts_with("pipe probe "))
+        .expect("probe pipe");
+    let break_at = calls
+        .iter()
+        .position(|c| c.starts_with("pipe break-"))
+        .expect("break pipe");
+    // probe poll window（probe pipeとbreak pipeの間）: 空応答2回 + 成立1回の
+    // 計3回以上のlenient呼び出しで、pollが実際に空を跨いで継続したことを検証
+    let window = &calls[probe_at + 1..break_at];
+    let lenient = window
+        .iter()
+        .filter(|c| c.as_str() == "list-panes-lenient")
+        .count();
+    assert!(
+        lenient >= 3,
+        "空応答2回を跨いだpoll継続（retryの実証）: {window:?}"
+    );
+    assert!(
+        !window.iter().any(|c| c.as_str() == "list-panes"),
+        "probe pollは1 tick 1回のlenient呼び出しのみでstrict list_panesを含まない: {window:?}"
+    );
+}
+
+// [covers:remap-sequence.empty-response-retry-before-verify]
+#[test]
+fn empty_response_is_retried_before_verify_snapshot() {
+    // 検証冒頭（10.9）のlist-panes/list-tabs再取得、およびstep 6のfocus対象決定
+    // （E2E要因A改訂で追加された適用後のlist-panes取得）は空応答でもdeadline内で
+    // 再試行する。空はrun冒頭snapshotでも先行pollでも消費されないよう、
+    // override-layout以降にarmする。v2.2の呼び出し順では先頭N回空のarm法だと
+    // step 6のfocus対象決定・存在確認pollが空を全数消化して検証冒頭に届かなく
+    // なるため、精密arm（指定番目の呼び出しのみ空）で特定位置へ届ける:
+    // panes 1回目 = (0,0)のfocus対象決定（跨いで再試行）・
+    // tabs 2回目 = 検証冒頭再取得（(1,0)存在確認が1回目で成立した後）
+    let (panes, tabs) = four_panes_two_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    b.empty_panes_nth_after_override(1);
+    b.empty_tabs_nth_after_override(2);
+    let result = with_isolated_xdg(|_| run(&b, &args(false)));
+    assert!(
+        result.is_ok(),
+        "検証冒頭の空応答を跨いで検証まで成功する: {result:?}"
+    );
+    // 最終override-layoutより後: panesはfocus対象決定・検証冒頭を合わせ2回以上・
+    // tabsは検証冒頭の再取得が空を跨ぎ2回以上（空1回 + 成立1回）
+    let calls = b.calls();
+    let last_override = calls
+        .iter()
+        .rposition(|c| c.starts_with("override-layout"))
+        .expect("override-layout");
+    let after = &calls[last_override + 1..];
+    let panes_calls = after
+        .iter()
+        .filter(|c| c.as_str() == "list-panes-lenient")
+        .count();
+    let tabs_calls = after
+        .iter()
+        .filter(|c| c.as_str() == "list-tabs-lenient")
+        .count();
+    assert!(
+        panes_calls >= 2,
+        "適用後のpanes再取得（focus対象決定・検証冒頭）が空を跨いだ再試行であることの実証: {after:?}"
+    );
+    assert!(
+        tabs_calls >= 2,
+        "検証冒頭のtabs再取得が空を跨いだ再試行であることの実証: {after:?}"
+    );
+
+    // 空応答がdeadline（10s）を超えて継続する系列は、focus対象決定のpoll
+    // timeoutはwarning skip（best-effort）ののち検証冒頭snapshotのtimeoutとして
+    // OperationFailed（従来のpolling timeout errorへ合流）
+    let (panes, tabs) = four_panes_two_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    b.empty_panes_after_override(1000);
+    let err = with_isolated_xdg(|_| run(&b, &args(false))).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
 }
 
 // [covers:remap-sequence.r39-new-tab-names-and-anchor-survives]
@@ -639,6 +754,17 @@ fn r41_verification_failure_reports_diff_and_progress() {
         data["mapping"].as_array().is_some_and(|m| !m.is_empty()),
         "raw: {data}"
     );
+    // TASK-75（v2.2）: error.dataは m・n（=S）・k に加え t（T）・n_slots（N_t列）を
+    // 載せ、mapping要素は pane → block/tab/slot/TabId へ拡張される
+    // （T=1ではn=S=N=3・t=1・n_slots=[3]）
+    assert_eq!(data["t"], 1, "raw: {data}");
+    assert_eq!(data["n_slots"], serde_json::json!([3]), "raw: {data}");
+    assert!(
+        data["mapping"]
+            .as_array()
+            .is_some_and(|m| m.iter().all(|e| e.get("block").is_some())),
+        "mapping要素はblock keyを含む（tab keyはv2.1から維持）: {data}"
+    );
 }
 
 // [covers:remap-sequence.r42-focus-restore-failure-is-not-operation-failure]
@@ -675,6 +801,7 @@ fn r47_dry_run_never_mutates_even_when_move_needed() {
             "new-tab",
             "rename-tab",
             "close-pane",
+            "focus-pane-id",
         ] {
             assert!(
                 !calls.iter().any(|c| c.starts_with(banned)),
@@ -763,6 +890,16 @@ fn c3_poll_deadline_not_extended_by_slow_backend_call() {
         "probe不成立として報告: {}",
         err.message()
     );
+    // probe側timeout文面もscreen繁忙（screen応答1s timeoutによる一時的な空list
+    // 応答）で起こりうる旨のF8機構の注記を含む（CR74-4: 空応答を権限問題と
+    // 誤診させない）
+    let msg = err.message().to_lowercase();
+    assert!(
+        msg.contains("screen")
+            && (msg.contains("busy") || msg.contains("1s") || msg.contains("empty")),
+        "screen繁忙の1s list応答timeout機構の注記: {}",
+        err.message()
+    );
     // 遅延実行を成功扱いしないため、状態変更（break pipe・layout適用）へ進まない
     let calls = b.calls();
     assert!(
@@ -843,5 +980,751 @@ fn exited_held_panes_are_excluded_from_source_and_survive() {
     assert!(
         !calls.iter().any(|c| c.contains("toggle-embed")),
         "{calls:?}"
+    );
+}
+
+// ---- TASK-74段階8コードレビュー対応（CR74-1） ----
+
+/// children block内に `children` nodeを持たないdefault_tab_template付きlayout
+/// （template系LayoutInvalidの例。children marker不在）
+const TEMPLATE_NO_CHILDREN: &str = "layout {\n    default_tab_template {\n        pane size=1 borderless=true {\n            plugin location=\"zellij:compact-bar\"\n        }\n    }\n    tab {\n        pane\n        pane\n        pane\n    }\n}\n";
+
+// [covers:remap-sequence.template-invalid-detected-before-mutation]
+#[test]
+fn template_invalid_is_detected_before_mutation() {
+    // template系LayoutInvalid（children marker不在）はrun()の状態変更前（dry-run
+    // 分岐と同形の位置でのinstance_kdls計算）に検出する（CR74-1: execute step 6で
+    // 計算するとprobe・break/move・rename後に発火し、DD-10.7前提（全preflightを
+    // 状態変更前に完了）と設計§2.2「事前中断」に違反する）
+    let (panes, tabs) = four_panes_two_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    let mut a = args(false);
+    a.inline = Some(TEMPLATE_NO_CHILDREN);
+    let err = with_isolated_xdg(|xdg| {
+        let err = run(&b, &a).unwrap_err();
+        // companion setup（wasm extract・permissions seed）も不発生
+        assert!(
+            !xdg.join("zelper").exists(),
+            "companion setup（wasm extract）は不発生: {}",
+            xdg.display()
+        );
+        assert!(
+            !xdg.join("zellij").join("permissions.kdl").exists(),
+            "permissions seedは不発生"
+        );
+        err
+    });
+    assert_eq!(*err.class(), ErrorClass::LayoutInvalid);
+    assert!(
+        err.message().contains("default_tab_template"),
+        "raw: {}",
+        err.message()
+    );
+    // 一切の状態変更（probe pipe・toggle・rename・tab切替・layout適用）は不発生
+    let calls = b.calls();
+    for banned in [
+        "pipe ",
+        "toggle-embed",
+        "rename-tab",
+        "go-to-tab",
+        "override-layout",
+        "focus-pane-id",
+        "new-tab",
+    ] {
+        assert!(
+            !calls.iter().any(|c| c.starts_with(banned)),
+            "状態変更前に中断するため {banned} は不発生: {calls:?}"
+        );
+    }
+}
+
+// ---- TASK-75（DD-10 v2.2: multi-tab layout全体再現） ----
+
+/// T=2 layout（tab0=名無し2 slot・tab1 "single" 1 slot。N_t=2,1 → S=3）
+const TWO_TAB_LAYOUT: &str = "layout {\n    tab {\n        pane\n        pane\n    }\n    tab name=\"single\" {\n        pane\n    }\n}\n";
+
+/// T=2 layout（tab0=名無し3 slot・tab1 "sub" 2 slot。N_t=3,2 → S=5）
+const TWO_TAB_3_2: &str = "layout {\n    tab {\n        pane\n        pane\n        pane\n    }\n    tab name=\"sub\" {\n        pane\n        pane\n    }\n}\n";
+
+/// T=2 layout（tab0 slot1にpane focus=true・tab1名無し1 slot。N_t=2,1 → S=3）
+const FOCUS_SLOT_LAYOUT: &str = "layout {\n    tab {\n        pane\n        pane focus=true\n    }\n    tab {\n        pane\n    }\n}\n";
+
+/// T=3 layout（N_t=2,1,1）。系列a: focus=trueは鋳型1のみ（最終go-to先は新規tab側）
+const FOCUS_SERIES_A: &str = "layout {\n    tab {\n        pane\n        pane\n    }\n    tab name=\"focus-tab\" focus=true {\n        pane\n    }\n    tab {\n        pane\n    }\n}\n";
+
+/// T=3 layout（N_t=2,1,1）。系列b: tab0とtab2の両方にfocus=true（文書順最初のtab0）
+const FOCUS_SERIES_B: &str = "layout {\n    tab focus=true {\n        pane\n        pane\n    }\n    tab name=\"focus-tab\" {\n        pane\n    }\n    tab focus=true {\n        pane\n    }\n}\n";
+
+/// T=3 layout（N_t=2,1,1）。系列c: focus=trueなし（anchor復帰）
+const FOCUS_SERIES_C: &str = "layout {\n    tab {\n        pane\n        pane\n    }\n    tab name=\"focus-tab\" {\n        pane\n    }\n    tab {\n        pane\n    }\n}\n";
+
+/// T=3 layout（tab0=9 slot・tab1 "one" 1 slot・tab2 "two" 2 slot。N_t=9,1,2 → S=12）
+const NINE_ONE_TWO: &str = "layout {\n    tab {\n        pane\n        pane\n        pane\n        pane\n        pane\n        pane\n        pane\n        pane\n        pane\n    }\n    tab name=\"one\" {\n        pane\n    }\n    tab name=\"two\" {\n        pane\n        pane\n    }\n}\n";
+
+fn multi_args(layout: &'static str) -> RemapArgs<'static> {
+    let mut a = args(false);
+    a.inline = Some(layout);
+    a
+}
+
+// [covers:remap-sequence.move-phase-generalized-block-tab-order]
+#[test]
+fn move_phase_generalized_block_tab_order() {
+    // 移動系列のblock×tab一般化: 5-a（group (0,0)のanchor外paneをbreak-idで先行）
+    // → 5-b（block昇順・tab昇順で (0,0)以外を break-new → membership poll → rename）。
+    // T=2（N_t=3,2 → S=5）にM=7: (0,0)=p1,2,3（うちp3がanchor外）・(0,1)=p4,5・
+    // (1,0)=p6,7・(1,1)=空group（new-tab経路で具体化）
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+        pane_at(4, "d", 1, 1, 0, 50, Some("cmd4")),
+        pane_at(5, "e", 2, 2, 0, 0, Some("cmd5")),
+        pane_at(6, "f", 2, 2, 0, 50, Some("cmd6")),
+        pane_at(7, "g", 3, 3, 0, 0, Some("cmd7")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 2),
+        tab_state(2, 2, "t2", false, 2),
+        tab_state(3, 3, "t3", false, 1),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(TWO_TAB_3_2)).expect("multi-tab移動系列で成功する");
+    });
+    let calls = b.calls();
+    // 5-a: group (0,0)のanchor外pane（p3）のbreak-idが最初のbreak-newより先
+    let break_id_at = calls
+        .iter()
+        .position(|c| c.starts_with("pipe break-id "))
+        .expect("break-id pipe");
+    let first_break_new = calls
+        .iter()
+        .position(|c| c.starts_with("pipe break-new "))
+        .expect("break-new pipe");
+    assert!(break_id_at < first_break_new, "inbound先行: {calls:?}");
+    let payload = calls[break_id_at].trim_start_matches("pipe break-id ");
+    assert!(payload.contains("terminal_3"), "raw: {payload}");
+    // 5-b: (0,1) break-new（p4,5）→ rename（鋳型名幹 "sub"）→ (1,0) break-new
+    // （p6,7）→ rename（base幹 + -2接尾）の順
+    let bn_sub = calls
+        .iter()
+        .position(|c| {
+            c.starts_with("pipe break-new ") && c.contains("terminal_4") && c.contains("terminal_5")
+        })
+        .expect("group (0,1) break-new");
+    let rn_sub = calls
+        .iter()
+        .position(|c| c == "rename-tab 4 sub")
+        .expect("group (0,1) rename（鋳型名幹・b=0は接尾なし）");
+    let bn_b2 = calls
+        .iter()
+        .position(|c| {
+            c.starts_with("pipe break-new ") && c.contains("terminal_6") && c.contains("terminal_7")
+        })
+        .expect("group (1,0) break-new");
+    let rn_b2 = calls
+        .iter()
+        .position(|c| c == "rename-tab 5 remap-2")
+        .expect("group (1,0) rename（base幹 + -<b+1>接尾）");
+    assert!(bn_sub < rn_sub, "raw: {calls:?}");
+    assert!(rn_sub < bn_b2, "block昇順: {calls:?}");
+    assert!(bn_b2 < rn_b2, "raw: {calls:?}");
+    // (1,1) 空group: break-new（空list）ではなく new-tab --layout-string（生成KDL
+    // 適用済みtab作成・E2E要因B改訂）で具体化し rename（鋳型名幹 + -2接尾）
+    let new_tab_at = calls
+        .iter()
+        .position(|c| c.starts_with("new-tab name=None layout=Some("))
+        .expect("空groupはnew-tab --layout-stringでtab作成");
+    let rn_empty = calls
+        .iter()
+        .position(|c| c == "rename-tab 6 sub-2")
+        .expect("空groupのrename（鋳型名幹 + -2接尾）");
+    assert!(new_tab_at < rn_empty, "raw: {calls:?}");
+    assert!(
+        calls
+            .iter()
+            .filter(|c| c.starts_with("pipe break-new "))
+            .all(|c| c.contains("terminal_")),
+        "空listのbreak-new呼出は不発生: {calls:?}"
+    );
+}
+
+// [covers:remap-sequence.empty-group-tab-created-via-new-tab-then-rename]
+#[test]
+fn empty_group_tab_created_via_new_tab_then_rename() {
+    // 割当0件のgroupはbreak-new（空list）ではなく new-tab --layout-string <生成KDL>
+    // でtabを作成時点で生成KDLを適用し、stdout由来idをparse直後にrenameで命名
+    // （取得直後に消費）。E2E要因B改訂: 旧経路（layout引数なし→override-layoutで
+    // 正規化）は既定paneがbare slotに照合されず残存するため廃止。step 6では
+    // 当該tabへのoverride-layoutはskip（作成時点で適用済み）
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+    ];
+    let tabs = vec![tab_state(0, 0, "t0", true, 2)];
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(TWO_TAB_LAYOUT)).expect("M=2・S=3・k=1（(0,1)は空group）で成功");
+    });
+    let calls = b.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("new-tab name=None layout=Some(")),
+        "空groupはnew-tab --layout-string <生成KDL>（tab作成時点で生成KDL適用）: {calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c == "rename-tab 1 single"),
+        "new-tab由来idはparse直後のrenameで消費: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("pipe break-")),
+        "割当ありgroup (0,0)は全pane anchor内のためbreak系不発生: {calls:?}"
+    );
+    // step 6: 生成tab (0,1)へはgo-toするが override-layout は不発生（new-tab
+    // --layout-stringで作成時点で生成KDL適用済みのためskip）
+    let go_to_new = calls
+        .iter()
+        .position(|c| c == "go-to-tab 1")
+        .expect("空group生成tabへgo-to");
+    let scope = &calls[go_to_new..];
+    let next_tab_boundary = scope
+        .iter()
+        .position(|c| c.starts_with("go-to-tab") && *c != "go-to-tab 1")
+        .unwrap_or(scope.len());
+    assert!(
+        !scope[..next_tab_boundary]
+            .iter()
+            .any(|c| c.starts_with("override-layout")),
+        "空groupのstep 6はoverride-layoutをskip: {calls:?}"
+    );
+    let s = b.state.borrow();
+    let single = s.tabs.iter().find(|t| t.name == "single").expect("生成tab");
+    assert_eq!(
+        tiled_count(&b, single.id),
+        1,
+        "tab作成時点の生成KDL適用でpane数 == N_t=1"
+    );
+
+    // new-tabの失敗（非zero exit / stdout parse不能に相当するL2注入）は
+    // OperationFailedで中断（部分状態報告）
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+    ];
+    let tabs = vec![tab_state(0, 0, "t0", true, 2)];
+    let b = FakeBackend::new(panes, tabs);
+    b.inject_failure("new-tab");
+    let err = with_isolated_xdg(|_| run(&b, &multi_args(TWO_TAB_LAYOUT))).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
+}
+
+// [covers:remap-sequence.focus-pane-id-after-override-per-tab]
+#[test]
+fn focus_pane_id_after_override_per_tab() {
+    // 各生成tabの処理は go-to-tab → override-layout → （list-panesで対象特定）→
+    // focus-pane-id terminal_<id> の順。対象pane idはmappingでなく適用後の実状態の
+    // 位置——当該tabのterminal paneをvisual order（geometry y,x昇順）に並べたs番目
+    // （s = 鋳型pane_focus_slot、無ければslot 0）——から決定する（E2E要因A改訂。
+    // bare pane群のrun一致配置は割当順と一致しないためmapping基準だと実幾何とずれる）。
+    // 空slot（spawn pane）も位置から特定可能なため全生成tabで実行。呼出失敗は
+    // warningで継続し、focus未反映は検証(d)が検知する
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 1),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SLOT_LAYOUT)).expect("focus対象は全tab occupiedのため成功");
+    });
+    let calls = b.calls();
+    let ops: Vec<&String> = calls
+        .iter()
+        .filter(|c| {
+            c.starts_with("go-to-tab")
+                || c.starts_with("override-layout")
+                || c.starts_with("focus-pane-id")
+        })
+        .collect();
+    assert!(
+        ops.len() >= 6,
+        "各tab go-to→override→focus-pane-idの3操作×2tab: {ops:?}"
+    );
+    assert!(ops[0].starts_with("go-to-tab"), "raw: {ops:?}");
+    assert!(ops[1].starts_with("override-layout"), "raw: {ops:?}");
+    assert_eq!(
+        ops[2], "focus-pane-id terminal_2",
+        "tab0のfocus対象は適用後のvisual order slot 1（pane focus=true。= terminal_2）: {ops:?}"
+    );
+    assert!(ops[3].starts_with("go-to-tab"), "raw: {ops:?}");
+    assert!(ops[4].starts_with("override-layout"), "raw: {ops:?}");
+    assert_eq!(
+        ops[5], "focus-pane-id terminal_3",
+        "tab1はfocus指定なしなのでvisual slot 0（= terminal_3）: {ops:?}"
+    );
+
+    // focus-pane-id呼出をErrにする系列: 呼出失敗はwarning（継続）のためrun自体は
+    // OperationFailedにならず、focus未反映が検証(d)のVerificationFailedとして検知される
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 1),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    b.inject_failure("focus-pane-id");
+    let err = with_isolated_xdg(|_| run(&b, &multi_args(FOCUS_SLOT_LAYOUT))).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::VerificationFailed,
+        "呼出失敗はwarning化され検証(d)で検知: {}",
+        err.message()
+    );
+    assert!(
+        b.calls().iter().any(|c| c.starts_with("focus-pane-id ")),
+        "focus-pane-id呼出自体は試みられている: {:?}",
+        b.calls()
+    );
+
+    // focus対象slotが最終blockで空slotになる構成: 位置ベース決定のため空slot
+    // （spawn pane）も位置から特定でき、全生成tabでfocus-pane-idが実行される
+    // （E2E要因A改訂: occupied限定撤廃）。
+    // (0,0)=t1,t2 → visual slot 1 = terminal_2・(0,1)=t3 → slot 0 = terminal_3・
+    // (1,0)=t4+spawn(id 6・y=末尾) → slot 1 = terminal_6（spawn pane = 空slot相当）・
+    // (1,1)=new-tab --layout-string生成pane(id 5) → slot 0 = terminal_5
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 0, 0, 10, 0, Some("cmd3")),
+        pane_at(4, "d", 0, 0, 10, 50, Some("cmd4")),
+    ];
+    let tabs = vec![tab_state(0, 0, "t0", true, 4)];
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SLOT_LAYOUT))
+            .expect("空slot対象も位置から特定されfocus検証（位置基準）が成功する");
+    });
+    let focuses: Vec<String> = b
+        .calls()
+        .iter()
+        .filter(|c| c.starts_with("focus-pane-id "))
+        .cloned()
+        .collect();
+    assert_eq!(
+        focuses,
+        vec![
+            "focus-pane-id terminal_2".to_string(),
+            "focus-pane-id terminal_3".to_string(),
+            "focus-pane-id terminal_6".to_string(),
+            "focus-pane-id terminal_5".to_string(),
+        ],
+        "全生成tabでfocus-pane-id: (1,0)のfocus対象は空slot（spawn pane = terminal_6）\
+・(1,1)はnew-tab --layout-string生成pane = terminal_5: {:?}",
+        b.calls()
+    );
+
+    // zellijが「already focused」でexit 2を返す系列: focus状態が実際に成立している
+    // ため成功扱い（warningでなく継続）。runは成功し検証(d)も位置基準で通る
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 1),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    b.already_focused_focus();
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SLOT_LAYOUT))
+            .expect("already focusedは成功扱い（focus成立と同じ状態）のためrun成功");
+    });
+    let s = b.state.borrow();
+    let focused2 = s
+        .panes
+        .iter()
+        .find(|p| p.id == PaneKindId::Terminal(2))
+        .unwrap()
+        .is_focused;
+    drop(s);
+    assert!(
+        focused2,
+        "already focused応答でもfocus状態は成立している: {:?}",
+        b.calls()
+    );
+}
+
+// [covers:remap-sequence.final-go-to-honors-template-focus]
+#[test]
+fn final_go_to_honors_template_focus() {
+    // tab focus決定則: focus=true鋳型の文書順最初t*についてblock 0のtab (0,t*)へ
+    // 最終go-toする。無ければanchor復帰。最終go-toは検証後・best-effort
+    let last_go_to = |b: &FakeBackend| -> String {
+        let calls = b.calls();
+        let at = calls
+            .iter()
+            .rposition(|c| c.starts_with("go-to-tab"))
+            .expect("最終go-to呼出");
+        calls[at].clone()
+    };
+    let four_panes_three_tabs = || -> (Vec<PaneState>, Vec<TabState>) {
+        (
+            vec![
+                pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+                pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+                pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+                pane_at(4, "d", 2, 2, 0, 0, Some("cmd4")),
+            ],
+            vec![
+                tab_state(0, 0, "t0", true, 2),
+                tab_state(1, 1, "t1", false, 1),
+                tab_state(2, 2, "t2", false, 1),
+            ],
+        )
+    };
+
+    // 系列a: focus=trueは鋳型1のみ → 最終go-to先はblock 0の (0,1)（anchorでない）
+    let (panes, tabs) = four_panes_three_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SERIES_A)).expect("系列aは成功");
+    });
+    assert_eq!(
+        last_go_to(&b),
+        "go-to-tab 3",
+        "系列a: 最終go-to先は (0,1) の生成tab（anchorでない）: {:?}",
+        b.calls()
+    );
+
+    // 系列b: 複数focus=true（tab0とtab2）→ 文書順最初のtab0（= anchor）へ
+    let (panes, tabs) = four_panes_three_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SERIES_B)).expect("系列bは成功");
+    });
+    assert_eq!(
+        last_go_to(&b),
+        "go-to-tab 0",
+        "系列b: 文書順最初のfocus=true鋳型 (0,0)（= anchor）: {:?}",
+        b.calls()
+    );
+
+    // 系列c: focus=trueなし → anchor復帰（現行挙動と同一）
+    let (panes, tabs) = four_panes_three_tabs();
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SERIES_C)).expect("系列cは成功");
+    });
+    assert_eq!(
+        last_go_to(&b),
+        "go-to-tab 0",
+        "系列c: focus指定なしはanchor復帰: {:?}",
+        b.calls()
+    );
+}
+
+// [covers:remap-sequence.verify-per-tab-pane-count]
+#[test]
+fn verify_per_tab_pane_count() {
+    // 検証(b)のper-tab化: 各生成tab (b,t)のpane数 == N_t。anchor (0,0)を含む全生成
+    // tabが対象（TR75-6: anchor例外は名前・位置のみであり形状・slot数の例外ではない）
+    let mut panes = Vec::new();
+    for i in 1..=9u32 {
+        panes.push(pane_at(
+            i,
+            "a",
+            0,
+            0,
+            (i - 1) / 3,
+            ((i - 1) % 3) * 50,
+            Some("cmd"),
+        ));
+    }
+    panes.push(pane_at(10, "j", 1, 1, 0, 0, Some("cmd")));
+    panes.push(pane_at(11, "k", 2, 2, 0, 0, Some("cmd")));
+    panes.push(pane_at(12, "l", 2, 2, 0, 50, Some("cmd")));
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 9),
+        tab_state(1, 1, "t1", false, 1),
+        tab_state(2, 2, "t2", false, 2),
+    ];
+
+    // 成立系: M=12 = S → k=1。各tabのpane数 == N_t（anchor tabも9）
+    let b = FakeBackend::new(panes.clone(), tabs.clone());
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(NINE_ONE_TWO)).expect("M=12・S=12・k=1で各tab pane数 == N_tとなり成功");
+    });
+    {
+        let s = b.state.borrow();
+        let by_name = |n: &str| {
+            s.tabs
+                .iter()
+                .find(|t| t.name == n)
+                .unwrap_or_else(|| panic!("tab {n}: {:?}", s.tabs))
+                .id
+        };
+        let counts = [
+            (tiled_count(&b, TabId(0)), 9),
+            (tiled_count(&b, by_name("one")), 1),
+            (tiled_count(&b, by_name("two")), 2),
+        ];
+        for (got, want) in counts {
+            assert_eq!(got, want, "各生成tabのpane数 == N_t");
+        }
+    }
+
+    // fatal系: 鋳型1（N_t=1）のtab適用後に重複paneが湧く → 期待/実測差分に当該tabの
+    // N_t（expected 1）が載る。v2.2採番では (0,1) がbreak-newでtab 3を得る
+    let b = FakeBackend::new(panes, tabs);
+    b.spawn_extra_on_override(TabId(3));
+    let err = with_isolated_xdg(|_| run(&b, &multi_args(NINE_ONE_TWO))).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::VerificationFailed);
+    assert!(
+        err.message().contains("expected 1"),
+        "鋳型1のN_t=1との差分報告: {}",
+        err.message()
+    );
+}
+
+// [covers:remap-sequence.pane-focus-verified-via-is-focused]
+#[test]
+fn pane_focus_verified_via_is_focused() {
+    // 検証(d) pane focus: 各生成tabの期待focus対象pane（pane_focus_slot or slot 0の
+    // occupied pane）が is_focused == true。非active tabも検証対象（R75-3）。
+    // focus未反映はVerificationFailedとして検知される
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 1),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(FOCUS_SLOT_LAYOUT)).expect("成立系は成功");
+    });
+    let s = b.state.borrow();
+    let focused = |id: u32| {
+        s.panes
+            .iter()
+            .find(|p| p.id == PaneKindId::Terminal(id))
+            .unwrap_or_else(|| panic!("pane {id}"))
+            .is_focused
+    };
+    assert!(focused(2), "tab0の期待focus対象（slot 1 = terminal_2）");
+    assert!(
+        focused(3),
+        "tab1の期待focus対象（slot 0 = terminal_3。非active tabも検証対象）"
+    );
+    drop(s);
+
+    // fatal系: focus-pane-id呼出が失敗しfocusが未反映のまま → 検証(d)の
+    // VerificationFailedとして検知される（呼出失敗のwarning化と区別される）
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 1),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    b.inject_failure("focus-pane-id");
+    let err = with_isolated_xdg(|_| run(&b, &multi_args(FOCUS_SLOT_LAYOUT))).unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::VerificationFailed);
+    assert!(
+        err.message().contains("focus"),
+        "期待focus対象paneの差分が載る: {}",
+        err.message()
+    );
+}
+
+// [covers:remap-sequence.leftover-tabs-reported-not-closed]
+#[test]
+fn leftover_tabs_reported_not_closed() {
+    // 過剰tab（targetsに含まれないtab）はcloseせず放置し、leftover_tabs
+    // （id/name/position/selectable pane数）として報告する（D6。失敗条件にしない）。
+    // v2.2実装でrun()の戻り値がVec<LeftoverTab>（報告経路）へ拡張されたため、
+    // 報告欄のassertを実装後の経路で検証する（human warning行・--jsonの
+    // data.leftover_tabsはこの戻り値から出力される）
+    let (mut panes, mut tabs) = same_tab_three();
+    let mut plugin = pane_at(8, "companion-host", 1, 1, 0, 0, None);
+    plugin.id = PaneKindId::Plugin(1);
+    plugin.is_selectable = false;
+    plugin.plugin_url = Some("file:zelper-companion.wasm".into());
+    panes.push(plugin);
+    tabs.push(tab_state(1, 1, "leftover", false, 0));
+    let b = FakeBackend::new(panes, tabs);
+    let leftovers =
+        with_isolated_xdg(|_| run(&b, &args(false)).expect("leftoverの存在は失敗条件にしない"));
+    let calls = b.calls();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("close-pane")),
+        "明示的なcloseは行わない: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("close-tab")),
+        "明示的なcloseは行わない: {calls:?}"
+    );
+    assert!(
+        b.state.borrow().tabs.iter().any(|t| t.id == TabId(1)),
+        "leftover tabは生存（放置）: {:?}",
+        b.state.borrow().tabs
+    );
+    // 報告: id/name/position/selectable pane数が載る（closeしない・run成功のまま）
+    assert_eq!(leftovers.len(), 1, "raw: {leftovers:?}");
+    let l = &leftovers[0];
+    assert_eq!(l.id, TabId(1), "raw: {l:?}");
+    assert_eq!(l.name, "leftover", "raw: {l:?}");
+    assert_eq!(l.position, 1, "raw: {l:?}");
+    assert_eq!(l.selectable_tiled, 0, "raw: {l:?}");
+
+    // 対照: leftover不在の構成では報告は空
+    let (panes, tabs) = same_tab_three();
+    let b = FakeBackend::new(panes, tabs);
+    let leftovers = with_isolated_xdg(|_| run(&b, &args(false)).unwrap());
+    assert!(leftovers.is_empty(), "raw: {leftovers:?}");
+}
+
+// [covers:remap-sequence.new-tab-only-needs-no-companion]
+#[test]
+fn new_tab_only_needs_no_companion() {
+    // M=0（source空）のmulti-tab remap: k=1・生成tab 3（(0,0)=anchor）。break系pipe
+    // 0件のためcompanion plugin・probe・permissions.kdl書換を一切行わない（move_needed
+    // 判定とprobe要否の分離）。preflightは状態変更前に同一depthで完了している
+    // （LayoutInvalid系はtemplate-invalid-detected-before-mutation）
+    let b = FakeBackend::new(vec![], vec![tab_state(0, 0, "t0", true, 0)]);
+    with_isolated_xdg(|xdg| {
+        run(&b, &multi_args(NINE_ONE_TWO)).expect("M=0・k=1で成功");
+        let calls = b.calls();
+        assert!(
+            pipes(&b).is_empty(),
+            "break系pipe・probeともに不使用: {calls:?}"
+        );
+        assert!(
+            !xdg.join("zelper").exists(),
+            "companion setup（wasm extract）不使用: {}",
+            xdg.display()
+        );
+        assert!(
+            !xdg.join("zellij").join("permissions.kdl").exists(),
+            "permissions seed不使用"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c.starts_with("new-tab name=None layout=Some("))
+                .count(),
+            2,
+            "空group (0,1)・(0,2) はnew-tab --layout-string（作成時点で生成KDL適用）で具体化: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|c| c == "rename-tab 1 one")
+                && calls.iter().any(|c| c == "rename-tab 2 two"),
+            "生成tab名は鋳型名どおり: {calls:?}"
+        );
+        assert_eq!(
+            calls.iter().filter(|c| c.starts_with("go-to-tab")).count(),
+            4,
+            "step 6の3 tab分 + 最終go-to（anchor復帰）: {calls:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c.starts_with("override-layout"))
+                .count(),
+            1,
+            "override-layoutはanchor (0,0)のみ（空groupはnew-tab --layout-stringで作成時点適用のためskip・E2E要因B改訂）: {calls:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c.starts_with("focus-pane-id "))
+                .count(),
+            3,
+            "focus-pane-idは全生成tabで実行（位置ベース決定のため空slot/spawn paneも特定できる・E2E要因A改訂）: {calls:?}"
+        );
+    });
+}
+
+// [covers:remap-sequence.tab-id-resolution-lenient-before-apply]
+#[test]
+fn tab_id_resolution_lenient_before_apply() {
+    // targets[b*T+t]配列をexecute scope内で保持し、step 6の各group処理直前に
+    // list-tabs（lenient）で存在確認する。idが不在なら再解決（割当ありgroupはpane
+    // 所属基準・空groupはrename済み生成tab名基準）。再解決不能はOperationFailed
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 2),
+        tab_state(1, 1, "t1", false, 1),
+    ];
+
+    // 成立系: 生成tab (0,1)のid（break-newで採番されたtab 2）がlist-tabs上で
+    // 別id（5）に入れ替わる → 再解決（pane 3の所属基準）で go-to-tab 5 が向く
+    let b = FakeBackend::new(panes.clone(), tabs.clone());
+    b.swap_tab_id_before_apply(TabId(2), TabId(5));
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(TWO_TAB_LAYOUT)).expect("再解決成立系は成功");
+    });
+    assert!(
+        b.calls().iter().any(|c| c == "go-to-tab 5"),
+        "go-to/overrideは再解決後のtab idへ向けられる: {:?}",
+        b.calls()
+    );
+
+    // CR75-1: 再解決時のlist_panes取得はlenient poll（一時的な空stdout〔screen繁忙の
+    // 1s list応答timeout〕で即時失敗しない。DD-10.7/10.9の空応答設計と同一規則）。
+    // 再解決位置（(0,1)の存在確認でid不在→resolve_target内のlist_panes_lenient。
+    // override後2回目のlist-panes-lenient呼び出し）に空応答を精密armし、retryで
+    // 再解決が成立することを検証（strict 1回呼び出しなら再解決は空応答を跨げず
+    // go-to 5 直前の連続lenient呼び出しが1回だけになるためfailする）
+    let b = FakeBackend::new(panes.clone(), tabs.clone());
+    b.swap_tab_id_before_apply(TabId(2), TabId(5));
+    b.empty_panes_nth_after_override(2);
+    with_isolated_xdg(|_| {
+        run(&b, &multi_args(TWO_TAB_LAYOUT)).expect("再解決時の空応答を跨いでretry成功");
+    });
+    let calls = b.calls();
+    let gt5 = calls
+        .iter()
+        .position(|c| c == "go-to-tab 5")
+        .expect("再解決後のidへgo-to");
+    let consecutive: Vec<&String> = calls[..gt5]
+        .iter()
+        .rev()
+        .take_while(|c| c.as_str() == "list-panes-lenient")
+        .collect();
+    assert!(
+        consecutive.len() >= 2,
+        "再解決のlist-panes取得は空→retryの連続2回（strict 1回呼び出しでない）: {calls:?}"
+    );
+
+    // fatal系: tab自体が消失し再解決不能 → OperationFailed（中断時報告）
+    let b = FakeBackend::new(panes, tabs);
+    b.drop_tab_before_apply(TabId(2));
+    let err = with_isolated_xdg(|_| run(&b, &multi_args(TWO_TAB_LAYOUT))).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "再解決不能はOperationFailed（検証失敗ではない）: {}",
+        err.message()
     );
 }

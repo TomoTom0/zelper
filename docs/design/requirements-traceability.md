@@ -63,11 +63,12 @@
 
 | 要件 | 分類 | 根拠・備考 |
 |---|---|---|
-| 既存terminal paneのprocess保持再配置 | orchestration | 同一tab内の配置は`override-layout --apply-only-to-active-tab --retain-existing-terminal-panes`のrun一致照合（各slotに既存paneと同一の`command`+`args`を記述）で決定論化（E6）。cross-tab移動はcompanion plugin（`break_panes_to_*`）で構成。プロセス保存を実証済み（E6・L4 S-v2-1: pid継続） |
+| 既存terminal paneのprocess保持再配置 | orchestration | 同一tab内の配置は`override-layout --apply-only-to-active-tab --retain-existing-terminal-panes`のrun一致照合（各slotに既存paneと同一の`command`+`args`を記述）で決定論化（E6）。cross-tab移動はcompanion plugin（`break_panes_to_*`）で構成。プロセス保存を実証済み（E6・L4 S-v2-1: pid継続）。v2.2（TASK-75）: layout全体（T tab鋳型）の再現へ一般化し、空groupの新規tabは`new-tab --layout-string`経路で具体化（L4 S-v3-1〜5: 80条件全PASS） |
 | layout name指定 | direct | bare name（拡張子なし）がlayout_dir解決される |
 | path / inline指定の明示的代替 | direct | positional=path、`--layout-string`=inline（**改行区切りKDL必須**） |
-| overflow: 追加tabへのlayout反復 | orchestration | companion pluginの`break_panes_to_*`によるプロセス保存のcross-tab移動で実現（E6実証）。k = max(1, ceil(M/N)) instance反復として実装し、L4で実証（S-v2-1: 9 pane → 3 instance・全pid保存）。v1時点の「プロセス保存付きでは不可」はCLI primitiveのみに基づく旧判定（§4-1参照） |
-| pane順序の決定性 | approximate | 割当順はvisual order（tab position → y → x）で固定。group（instance/tab）所属とrun（command+args）に一意なpaneのslot対応は決定的。同一runの複数pane間・複数shell pane間のslot順は保証外（要件の決定論性からの明示例外。DD-10.6） |
+| overflow: 追加tabへのlayout反復 | orchestration | companion pluginの`break_panes_to_*`によるプロセス保存のcross-tab移動で実現（E6実証）。v2.2（TASK-75）は反復単位をlayout全体へ一般化: S = sum(N_t)（T tab鋳型のper-tab slot数和）として k = max(1, ceil(M/S)) block × T tabを生成（DD-10.6 v2.2）。L4で実証（S-v2-1: 9 pane → k=3・全pid保存。S-v3-4: M=15 > S=12 → k=2・block 1 tabの`-2`接尾・6 tab・15 pane全生存）。v1時点の「プロセス保存付きでは不可」はCLI primitiveのみに基づく旧判定（§4-1参照） |
+| multi-tab layout全体再現（tab名・focus・bar。2026-09-15要件追記） | orchestration | v2.2（TASK-75・DD-10 v2.2）: layoutの全tabを正規形TabTemplate列の鋳型として展開し、tab名（名前あり鋳型名/base幹 + `-<b+1>` block接尾。anchor名保持例外）・tab focus（focus=true鋳型のblock 0 tabへ最終go-to・複数指定は文書順最初+warning）・pane focus（`focus-pane-id`・適用後list-panes位置ベース）・`default_tab_template`由来bar（全生成tabの生成KDLへ維持）を`zellij --layout`起動時と同一に再現。同一性の例外（anchor名・名無しtab自動名・pane title・pane id）は要件§2.6・DD-10.13に明示。T=1は計画レベルで後方互換。L4 S-v3-2〜5で実証（条件書: TASK-75新規22条件〔layout-planner 8・layout-generator 1・remap-sequence 9・remap-cli 3・backend-process 1〕） |
+| pane順序の決定性 | approximate | 割当順はvisual order（tab position → y → x）で固定。group（block×tab所属）とrun（command+args）に一意なpaneのslot対応は決定的。同一runの複数pane間・複数shell pane間のslot順は保証外（要件の決定論性からの明示例外・v2.2でgroup定義をblock×tabへ一般化。DD-10.6） |
 | plugin paneの明示扱い | orchestration | `is_selectable`/`plugin_url`で判別しslot勘定から除外。companion plugin paneはnon-selectableとしてsource・検証からも除外（DD-10.3） |
 | dry-run/plan | orchestration | zelperのplan layer（zellij機能に依存しない） |
 
@@ -132,7 +133,7 @@ Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 ## 6. Phase 8 最終監査（P0要件・AC × 設計・実装・テスト）
 
 分類: implemented / implemented with documented limitation（文書化された制限付き）/ not implemented。
-テスト階層: L1 unit / L2 fake-backend / L3 CLI契約（`cargo test`63件）/ L4 実機統合（S1〜S10全PASS。harness・実行記録はrepo管理外の検証作業dirに残置）。remap v2実装後はL2/L3含む110テスト全green・L4 S-v2-1〜6全PASS（TASK-39。記録は`tmp/260904_l4_harness_39/`・`tmp/260904_l4_podman_run*_39.log`）。
+テスト階層: L1 unit / L2 fake-backend / L3 CLI契約（`cargo test`63件）/ L4 実機統合（S1〜S10全PASS。harness・実行記録はrepo管理外の検証作業dirに残置）。remap v2実装後はL2/L3含む110テスト全green・L4 S-v2-1〜6全PASS（TASK-39。記録は`tmp/260904_l4_harness_39/`・`tmp/260904_l4_podman_run*_39.log`）。remap v2.2（TASK-75・multi-tab layout全体再現）実装後はcargo test 171件全green・L4 S-v3-1〜5全PASS（80条件・2026-09-16。記録は`tmp/task75/acceptance/`）。
 
 | 要件（requirements.md） | 設計 | 実装 | 自動テスト | L4 | 分類 |
 |---|---|---|---|---|---|
@@ -143,23 +144,23 @@ Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 | rename pane/tab（§2.4） | DD-8 | app/rename.rs | L2 | S4 | implemented |
 | add/remove pane/tab（§2.7/2.8） | DD-11 | app/add.rs, app/remove.rs | L2 | S5 | implemented（空tab実削除は代替検証のみ: zellij 0.44.3で空tab作成不能。MR-14） |
 | 高位resize（§2.5） | DD-9 | app/resize.rs | L2 | S6 | implemented with documented limitation（近似・完全幾何保証なし） |
-| remap保存（§2.6） | DD-10（v2） | app/remap.rs, companion.rs, plugin/ | L1〜L3 remap v2 matrix R1〜R50・dry-run | S7・S-v2-1（heartbeat pid継続+pane ID同一で実証） | implemented（v2は全paneプロセス保存。kill/restart経路が存在しないため要件93を無条件で充足） |
-| remap overflow（§2.6） | DD-10.6/10.7 | 同上 | L2/L3 R3〜R7・R29〜R36 | S-v2-1（9 pane→k=3・全pid保存） | implemented（E6+companion pluginで旧制約を解決。§4-1） |
+| remap保存（§2.6） | DD-10（v2.2） | app/remap.rs, layout/mod.rs, companion.rs, plugin/ | L1〜L3 remap v2 matrix R1〜R50・dry-run + TASK-75新規22条件（layout-planner 8・layout-generator 1・remap-sequence 9・remap-cli 3〔E2E vb回帰1込み〕・backend-process 1） | S7・S-v2-1（heartbeat pid継続+pane ID同一で実証）・S-v3-1〜5（multi-tab全体再現80条件・15 pane生存） | implemented（v2.2は全paneプロセス保存。kill/restart経路が存在しないため要件93を無条件で充足） |
+| remap overflow（§2.6） | DD-10.6/10.7（v2.2） | 同上 | L2/L3 R3〜R7・R29〜R36 + TASK-75新規: layout-planner.multi-tab-allocation-cumulative-slots・k-uses-total-slots・tab-names-from-templates-and-block-suffix・empty-group-planned-for-all-blocks-tabs・remap-sequence.move-phase-generalized-block-tab-order・empty-group-tab-created-via-new-tab-then-rename | S-v2-1（9 pane→k=3・全pid保存）・S-v3-3/S-v3-4（空group new-tab経路・M=15→k=2 block反復） | implemented（E6+companion pluginで旧制約を解決。§4-1） |
 | JSON出力（§3.6） | DD-4 | output/json.rs | L1 error_map / L3 json contract | S1〜S9 | implemented |
 | shell completion（P0） | DD-1.7 | main.rs | L3 completion | - | implemented |
 | clear error handling（P0） | DD-4/12 | error.rs | L1対応表 / L3 exit code | S10 | implemented |
 | dry-run（§3.7） | DD-12 | remap/remove | L2 / L3 | S8・S5 | implemented with documented limitation（`resize equalize`/`add`はP1: MR-7） |
 | AC-1〜6・9〜11・13・14 | 上記対応行と同一 | - | - | S1〜S6, S10 | implemented（AC-14はhelp文言test無し、実装と--help出力で確認） |
 
-**AC-7（kill/recreateなしのremap）**: L4 S7・S-v2-1で実証（保存対象paneのheartbeat pidと連番が途切れなく継続、pane ID同一、geometry変化）。v2には再作成paneが存在しないため、旧S9のrecreated pane検証は廃止。
-**AC-8（overflow決定性）**: S-v2-1で実証（9 pane→k=3・visual order割当・`<base>-<j+1>` 連番tab）。v2は要件2.6の文言どおりの実装（§4-1）。旧S9時点の `--overflow tabs` による代替設計は廃止済み。
+**AC-7（kill/recreateなしのremap）**: L4 S7・S-v2-1で実証（保存対象paneのheartbeat pidと連番が途切れなく継続、pane ID同一、geometry変化）。v2には再作成paneが存在しないため、旧S9のrecreated pane検証は廃止。S-v3-2〜4でもsource pane全生存（remap前後のpane id集合一致・最大15 pane）を再実証。
+**AC-8（overflow決定性）**: S-v2-1で実証（9 pane→k=3・visual order割当・連番tab）。v2.2（TASK-75）後の実装は反復単位がlayout全体（S=sum(N_t)）へ一般化され、tab名はlayout由来（名前あり鋳型名/base幹 + `-<b+1>` block接尾。anchor名保持例外）へ変更。block反復はS-v3-4（M=15 > S=12 → k=2・block 1 tabの`-2`接尾・6 tab）で実証。v2は要件2.6の文言どおりの実装（§4-1）。旧S9時点の `--overflow tabs` による代替設計は廃止済み。
 **not implemented**: なし（P0範囲）。P1（bulk rename・`--no-fill`・equalize/add dry-run・watch等）はrequirements P1リストのまま未実装。
 
 ## 4. 制約と設計への指示（impossible要件の代替）
 
 1. **cross-tab pane移動**（旧制約: not possible → **解決・implemented**）: CLI actionには移動primitiveが存在せず（実機確認済み）、override-layout単体でも既存paneは第1tabにしか配分されない（実験E1〜E5で確定）。ただしPlugin API（zellij-tile）の `break_panes_to_*` をcompanion plugin + `action pipe` でCLI駆動すればプロセス保存のcross-tab移動が可能（capabilities §4.1 E6で実証）。zelper v2の実装（detailed-design DD-10）:
-   - M pane + N slot → k = max(1, ceil(M/N)) 個のlayout instance反復で全paneを配置（M > N でもerrorなし）。kill/restart経路は存在しない
-   - instance 0はanchor tab（既定active tab・`--tab`で指定可・tab名保持）。以降は `break_panes_to_new_tab` / `break_panes_to_tab_with_id` で新規tab `<base>-<j+1>` へ移動し、command+args一致KDLでoverride-layout適用（run一致照合で決定論的配置）
+   - M pane + N slot → k = max(1, ceil(M/N)) 個のlayout instance反復で全paneを配置（M > N でもerrorなし。v2.2〔TASK-75〕では反復単位がlayout全体へ一般化: S = sum(N_t)・k = max(1, ceil(M/S)) block × T tab。§2.6参照）。kill/restart経路は存在しない
+   - instance 0はanchor tab（既定active tab・`--tab`で指定可・tab名保持）。以降は `break_panes_to_new_tab` / `break_panes_to_tab_with_id` で新規tab `<base>-<j+1>`（v2.2: 幹〔名前あり鋳型名/base〕+`-<b+1>` block接尾）へ移動し、command+args一致KDLでoverride-layout適用（run一致照合で決定論的配置）
    - 権限はpermissions.kdl seedで自動化（session起動後のseedも有効: `request_permission`が呼出毎にfileを再読込。L4 S-v2-1で実証）。probe pipeで状態変更前に応答性を確認し、不成立は中断
    - 要件2.6のoverflow（M>N時の追加tab layout反復・プロセス保存）を要件文言どおり実装。要件93（明示選択時以外のkill/再作成の禁止）は「破壊的再作成mode自体が存在しない」ため無条件で充足。v1の代替設計（`--overflow nest|tabs`）は廃止（v0.1.xでoptionごと削除済み）
 2. **session一覧のJSON不在**: `list sessions --json`はセマンティクスをzelperが定義したJSONに載せ替える（sourceはテキストparse）

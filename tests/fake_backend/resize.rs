@@ -16,6 +16,7 @@ fn pane(id: u32, title: &str, y: u32, x: u32, rows: u32, cols: u32) -> PaneState
         is_held: false,
         geometry: Geometry { x, y, rows, cols },
         command: None,
+        terminal_command: None,
         cwd: None,
         tab_id: TabId(0),
         tab_position: 0,

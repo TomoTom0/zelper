@@ -22,6 +22,8 @@ L4の実行形: Phase 1と同一のpodman構成（docs/research/zellij-capabilit
 
 **R番号（remap v2 matrix R1〜R50）の定義正本は条件書へ移譲された**（各条件のsource欄・given/expect。旧§2.7本文は上記更新で削除）。R番号で来た参照は`tests/design/README.md`の対応表経由で条件へ到達できる（conditions-migration §10.3）。
 
+TASK-74改訂（2026-09-15）: R13/R14/R15/R18/R20/R48/R49の定義はremap照合key変更（terminal_command〔invoked_with序列化〕基準・quoting warning対象変更）・default_tab_template反映・dry-run出力改訂に伴い条件書側で更新済み（該当: layout-generator.r13〜r15/r18・layout-generator.template-children-substitution・layout-planner.r20系・layout-planner.run-derives-from-invoked-with・remap-cli.r48/r49。設計書 remap-v2-matching-fix-task74.md §2/§3）。§5等の歴史的参照（fail-first履歴）は改訂前定義を指す。
+
 旧節番号（§2.1〜§2.11）は条件書source欄のlocaterとして下表の行で存続させる:
 
 | 旧節 | 領域 | 条件書 | 主なtest target |
@@ -70,7 +72,16 @@ L4の実行形: Phase 1と同一のpodman構成（docs/research/zellij-capabilit
 
 ### 3.3 実施記録（repo管理外の検証作業dirに残置）
 
-- **S1〜S11全PASS**（修正後再実行含む。remap保存はheartbeat pid継続+pane ID同一で実証、overflow tabs modeの再作成paneのcommand一致も検証、plugin config子nodeのslot除外はbare/wrapper両形式で検証）。**旧remap仕様v1による実証**であり、v2の再実証はS-v2-1〜6（cross-tab移動保存・permissions seed・probe込み）として実施済み（requirements-traceability §6）
+- **S1〜S11全PASS**（修正後再実行含む。remap保存はheartbeat pid継続+pane ID同一で実証、overflow tabs modeの再作成paneのcommand一致も検証、plugin config子nodeのslot除外はbare/wrapper両形式で検証）。**旧remap仕様v1による実証**であり、v2の再実証はS-v2-1〜6（cross-tab移動保存・permissions seed・probe込み）として実施済み（requirements-traceability §6）。v2.2（multi-tab layout全体再現・TASK-75）の実証はS-v3-1〜5（下記）
+- **S-v3-1〜5全PASS**（TASK-75 remap v2.2・2026-09-16。手順は設計書 docs/design/remap-v3-multi-tab-task75.md §5.2・改修経緯は§7.1。成果物: `tmp/task75/acceptance/`〔verdict.txt・acceptance.sh・採取panes/tabs JSON+TSV・dump・remap JSON〕。podman sandbox〔§1構成〕container通算15回）:
+  - S-v3-1 = (i) 単tab回帰 7条件: TASK-74 (ii)手順（9-pane-single.kdl）の再実行。terminal 9 pane・幾何reference一致・bar（y=59 rows=1 cols=200）・dumpのsplit nesting一致。T=1後方互換の実機確認（focus-pane-id 1回が増えること込み）
+  - S-v3-2 = (ii) 異構成multi-tab M=12（ref-hetero.kdl・T=3〔9+1+2 slot〕・S=12・k=1）18条件: 3 tab生成・tab名（anchor=seed名保持・T-single〔鋳型名〕・base名〔名無し鋳型〕）・active tab=anchor（focus=true鋳型T-3x3がblock 0 tab 0=anchor）・per-tab幾何reference一致（3x3/1 pane/左右2分割・anchor含む全生成tab）・bar全3 tab・各tab pane focus slot 0・source pane全生存
+  - S-v3-3 = (iii) 空groupのnew-tab経路 M=3（S=12 > Mでtab1/tab2が割当0件の空group）16条件: new-tab --layout-string経路の実証。bare spawn込み総terminal 12 pane・tab名・per-tab幾何・既定paneのN_t正規化（tab1=1・tab2=2）・bar全tab・pane focus（空group tab含む）
+  - S-v3-4 = (iv) M>S block反復 M=15（k=2・6 tab）26条件: block 1生成tabの`-2`接尾・block 1空group2件のnew-tab経路・全6 tab幾何（block 1含む）・bar全6 tab・pane focus位置ベース（block 1空group tab含む全生成tab）・15 source pane全生存（総24 pane）
+  - S-v3-5 = (v) tab focus決定則matrix 3系列 13条件: 系列a=focus=true鋳型が文書順2番目（T-single）→ active=T-single（anchorでない新規tab側）・系列b=複数focus=true（tab0+tab2）→ 文書順最初（=anchor）採用+複数focus検出warning出力・系列c=focus指定なし→ anchor復帰。各系列exit 0・ok:true・active tab期待どおり・pane focus
+  - 改修経緯（§7.1）: 1巡目は55 PASS/18 FAIL。要因A（focus-pane-id対象をmapping pane idから適用後のlist-panes位置〔visual order s番目〕ベースへ変更・occupied限定撤廃・already focused exit 2は成功扱い）と要因B（空groupをnew-tab --layout-string経路へ変更・step 6のoverride-layout skip。実験4で経路確定）を改修し全PASS。vb系列は複数tab focus鋳型検出warningが未実装の退化（1巡目vb PASSはalready focused警告の偶発的担い）で、normalize_tab_templatesへの複数focus warning追加+stderr/JSON data.warnings伝達で解消（条件: remap-cli.preflight-warning-paths-stderr-and-json）
+  - harness: acceptance.sh（5系列・judge採点。TASK-74 harnessと同一構成）・musl static buildのzelper binary・geom75.awk（list-panes JSON→TSV幾何抽出）・tabs.awk・reference幾何file（ref_geom_*）
+  - 既知の検証限界: dump-layoutとの完全一致は検証対象外（比較はtab毎slot数・幾何・bar存在・is_focused/activeに限定。dump除外項目対応表は設計書§4.3）・anchor tab名は保持例外（layout最初のtab名と一致しないことを確認するのが条件）・pane title（name属性→title）は保証外・pane idは検証の手段であって比較対象でない（生存検証はremap前後のid集合一致で実施）
 - 既知の検証限界: zellij 0.44.3では空tabを作成できない（new-tabが必ずpaneを作る）ため、`remove tab --empty`の実削除は代替検証（dry-run計画・非空tab保護・error契約）のみ
 
 ## 4. tests/構成（tests/README.mdで管理。MR-8で実態に合わせ更新）

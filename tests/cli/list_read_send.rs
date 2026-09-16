@@ -4,6 +4,13 @@ use assert_cmd::Command;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
+/// fake zellij shimのwrite↔exec競合（ETXTBSY）対策: binary内のfake zellij
+/// testを直列化する（CR59-5・TASK-73。src/zellij/process.rs test moduleと同一構成+契約doc comment）。
+/// test fn冒頭でのみ取得すること。wrapper・helper内では再取得しないこと
+/// （std::sync::Mutexは非reentrantのため同一thread再取得は永久blockし、
+/// failではなくtest hangとして発覚する）。
+static FAKE_ZELLIJ_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/zellij")
 }
@@ -43,8 +50,12 @@ if [[ "$3" == "action" ]]; then
 fi
 exit 0
 "#;
-    std::fs::write(&shim, script).unwrap();
-    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // 実行内容とmode確定後にのみ公開する。最終の実行pathはwrite open状態にならない
+    // （LinuxのETXTBSY回避）。
+    let staged = dir.join("zellij.staged");
+    std::fs::write(&staged, script).unwrap();
+    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::rename(staged, &shim).unwrap();
     let log = dir.join("calls.log");
     (dir, log)
 }
@@ -78,6 +89,7 @@ fn calls(log: &PathBuf) -> Vec<String> {
 // [covers:json-contract.list-panes-json-success-envelope]
 #[test]
 fn list_panes_json_contract() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-panes");
     let out = cmd
         .args(["list", "panes", "--json"])
@@ -97,6 +109,7 @@ fn list_panes_json_contract() {
 // [covers:list-display.sessions-and-tabs-basic-output]
 #[test]
 fn list_sessions_and_tabs() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-sessions");
     let out = cmd
         .args(["list", "sessions", "--json"])
@@ -126,6 +139,7 @@ fn list_sessions_and_tabs() {
 // [covers:list-display.sessions-live-only-with-exited-present]
 #[test]
 fn list_sessions_works_with_exited_sessions() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-sessions-exited");
     let out = cmd
         .env(
@@ -161,6 +175,7 @@ fn list_sessions_works_with_exited_sessions() {
 // [covers:list-display.sessions-human-metadata-columns]
 #[test]
 fn list_sessions_human_shows_metadata_columns() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-sessions-human");
     cmd.env(
         "FAKE_SESSIONS",
@@ -177,6 +192,7 @@ fn list_sessions_human_shows_metadata_columns() {
 // [covers:cli-grammar.session-auto-resolve-single-live-with-exited]
 #[test]
 fn read_resolves_single_live_session_with_exited_present() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("read-exited-resolve");
     cmd.env(
         "FAKE_SESSIONS",
@@ -191,6 +207,7 @@ fn read_resolves_single_live_session_with_exited_present() {
 // [covers:list-display.panes-human-columns-with-cwd]
 #[test]
 fn list_panes_human_includes_cwd_column() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-panes-cwd");
     cmd.args(["list", "panes"]).assert().success().stdout(
         "PANE_ID\tTAB\tTITLE\tCOMMAND\tCWD\n\
@@ -205,6 +222,7 @@ fn list_panes_human_includes_cwd_column() {
 // [covers:list-display.layouts-without-session-resolution]
 #[test]
 fn list_layouts_works_without_session_resolution() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-layouts-nosession");
     let dir = std::env::temp_dir().join(format!("zelper-fake-layouts-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -249,6 +267,7 @@ fn list_layouts_works_without_session_resolution() {
 // [covers:read-send.read-single-and-multi-results]
 #[test]
 fn read_single_and_multi_with_tail() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("read-1");
     let out = cmd
         .args(["read", "1", "--json"])
@@ -268,6 +287,7 @@ fn read_single_and_multi_with_tail() {
 // [covers:read-send.read-nonexistent-pane-is-no-target-exit3]
 #[test]
 fn read_nonexistent_pane_is_no_target_exit3() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("read-miss");
     cmd.args(["read", "999", "--json"])
         .assert()
@@ -278,6 +298,7 @@ fn read_nonexistent_pane_is_no_target_exit3() {
 // [covers:json-contract.cli-error-envelope-on-failure]
 #[test]
 fn json_error_envelope_on_failure() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     // レビュー回帰: --json指定時の失敗はstdoutにerror envelope（DD-4.2）
     let (mut cmd, _) = zelper("json-err");
     let out = cmd
@@ -297,6 +318,7 @@ fn json_error_envelope_on_failure() {
 // [covers:read-send.send-broadcast-visual-order-calls]
 #[test]
 fn send_broadcast_records_calls_in_visual_order() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, log) = zelper("send-broadcast");
     cmd.args(["send", "2", "1", "--", "y"]).assert().success();
     let cs = calls(&log);
@@ -313,6 +335,7 @@ fn send_broadcast_records_calls_in_visual_order() {
 // [covers:read-send.send-enter-appends-cr-and-keys-use-send-keys]
 #[test]
 fn send_enter_appends_cr_and_keys_use_send_keys() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, log) = zelper("send-enter");
     cmd.args(["send", "1", "--enter", "--", "hello"])
         .assert()
@@ -338,6 +361,7 @@ fn send_enter_appends_cr_and_keys_use_send_keys() {
 // [covers:cli-grammar.send-requires-double-dash-text-is-usage-error]
 #[test]
 fn send_without_double_dash_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("send-nodash");
     cmd.args(["send", "1", "y"]).assert().failure().code(2);
 }
@@ -345,6 +369,7 @@ fn send_without_double_dash_is_usage_error() {
 // [covers:cli-grammar.send-text-keys-conflict-is-usage-error]
 #[test]
 fn send_text_and_keys_conflict_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("send-conflict");
     cmd.args(["send", "1", "--keys", "Enter", "--", "y"])
         .assert()
@@ -355,6 +380,7 @@ fn send_text_and_keys_conflict_is_usage_error() {
 // [covers:cli-grammar.remap-layout-sources-conflict-is-usage-error]
 #[test]
 fn remap_layout_sources_conflict_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("remap-conflict");
     cmd.args(["remap", "three", "--path", "./x.kdl"])
         .assert()
@@ -365,6 +391,7 @@ fn remap_layout_sources_conflict_is_usage_error() {
 // [covers:cli-grammar.invalid-pane-spec-is-usage-error]
 #[test]
 fn invalid_pane_spec_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("bad-spec");
     cmd.args(["read", "pane:12"]).assert().failure().code(2);
 }
@@ -372,6 +399,7 @@ fn invalid_pane_spec_is_usage_error() {
 // [covers:cli-grammar.completion-generates-script]
 #[test]
 fn completion_generates_script() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("completion");
     let out = cmd
         .args(["completion", "bash"])
@@ -388,6 +416,7 @@ fn completion_generates_script() {
 // [covers:read-send.human-output-pane-headers]
 #[test]
 fn human_read_output_has_pane_headers() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("read-human");
     cmd.args(["read", "1"])
         .assert()
@@ -402,6 +431,7 @@ fn human_read_output_has_pane_headers() {
 // [covers:list-display.sessions-summary-elides-beyond-four-tabs]
 #[test]
 fn list_sessions_panes_summary_elides_beyond_four_tabs() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-sessions-6tabs");
     let dir = std::env::temp_dir().join(format!("zelper-fake-tabs6-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -451,6 +481,7 @@ fn list_sessions_panes_summary_elides_beyond_four_tabs() {
 // [covers:list-display.sessions-tabs-fetch-failure-fallback]
 #[test]
 fn list_sessions_fallback_when_tabs_fetch_fails() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-sessions-tabsfail");
     cmd.env("FAKE_SESSIONS", "live-a [Created 1m ago] (current)")
         .env("FAKE_FAIL_LIST_TABS", "1")
@@ -478,6 +509,7 @@ fn list_sessions_fallback_when_tabs_fetch_fails() {
 // [covers:list-display.panes-compact-shows-tab-and-short-cwd]
 #[test]
 fn list_panes_compact_shows_tab_and_short_cwd() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-panes-compact");
     let dir = std::env::temp_dir().join(format!("zelper-fake-panes-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -499,6 +531,7 @@ fn list_panes_compact_shows_tab_and_short_cwd() {
 // [covers:list-display.compact-names-and-json-precedence]
 #[test]
 fn list_compact_names_and_json_precedence() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-tabs-compact");
     cmd.args(["list", "tabs", "--compact"])
         .assert()
@@ -529,6 +562,7 @@ fn list_compact_names_and_json_precedence() {
 // [covers:list-display.layouts-compact-names-only]
 #[test]
 fn list_layouts_compact_shows_names_only() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("list-layouts-compact");
     let dir = std::env::temp_dir().join(format!("zelper-fake-layouts2-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

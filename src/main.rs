@@ -235,7 +235,8 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                 dry_run: *dry_run,
                 json: *json,
             };
-            zelper::app::remap::run(backend.as_ref(), &args)
+            // 戻り値はleftover tab報告（v2.2。human/JSON出力はrun内で完結済み）
+            zelper::app::remap::run(backend.as_ref(), &args).map(|_| ())
         }
     }
 }

@@ -12,7 +12,7 @@ note = "src/app/add.rs も検証対象"
 
 [[condition]]
 id = "add-remove.add-pane-count-and-postcondition"
-source_lines = "tests/fake_backend/rename_add_remove.rs:77"
+source_lines = "tests/fake_backend/rename_add_remove.rs:78"
 target_function = "add::run_pane"
 source = "docs/design/first/260821/requirements.md §2.7（add pane(s)・count > 1 should be supported） + docs/design/detailed-design.md DD-11 add（pane: new-paneをcount回（--cwd/--name/--tab-id/-- commandをmap）。戻りIDをresultsへ / postcondition: list-panes/list-tabsで存在確認）"
 description = "add paneの基本経路: count回のnew-pane実行と--nameの付与（連番suffix）、postconditionとしての存在確認。検証限界: --name（w-1/w-2）とcountの組合せのみのassertであり、--cwd/--tab/-- CMD...の各option mapは未検証（excluded参照）"
@@ -21,7 +21,7 @@ expect_return = "Okかつstateにtitle=w-1・w-2のpaneが追加されpanesは3�
 
 [[condition]]
 id = "add-remove.add-tab-layout-sources-conflict"
-source_lines = "tests/fake_backend/rename_add_remove.rs:89"
+source_lines = "tests/fake_backend/rename_add_remove.rs:90"
 target_function = "add::run_tab（layout source排他）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: add tab 3source併用） + docs/design/detailed-design.md DD-1.5（add tab: --layout / --path / --inline は相互排他） + docs/design/first/260821/requirements.md §2.9（mutually exclusive source forms must be rejected when supplied together。同一原則はCLI全体へ適用）"
 description = "add tabのlayout指定3形式（--layout / --path / --inline）の相互排他: 複数同時指定はusage error。remap 3source排他（cli-grammar条件）と同一原則のadd側適用。§8.3 (g)の対応: 本条件で排他機構を条件化。検証限界: name+pathの2source併用のみのassertであり、3source同時・残り組合せ（name+inline・path+inline）は未検証（同一の排他検査経路）"
@@ -30,7 +30,7 @@ expect_return = "Err（ErrorClass=Usage）"
 
 [[condition]]
 id = "add-remove.remove-pane-safety-gate"
-source_lines = "tests/fake_backend/rename_add_remove.rs:110"
+source_lines = "tests/fake_backend/rename_add_remove.rs:111"
 target_function = "remove::run_pane（安全gate）"
 source = "docs/design/first/260821/requirements.md §2.8（destructive multi-target actions require clear preview/confirmation policy or explicit noninteractive flags） + docs/design/detailed-design.md DD-11 remove安全（2対象以上の破壊的削除、または--emptyは--yesまたは--dry-run必須。単一pane/tab削除は確認不要）"
 description = "remove paneの安全gate: 単一対象は確認不要で実行、2対象以上は--yes/--dry-runなしではPreflight失敗、--dry-runは実行しない（DD-1.5の--dry-run×--yes併用経路: --yes併用でもdry-runが優先）、--yesで実行。非対話環境での確定的挙動（CMR-5: gate 4局面を1条件に統合）"
@@ -39,7 +39,7 @@ expect_return = "単一はOk（3→2件）。2対象gateなしはErr（ErrorClas
 
 [[condition]]
 id = "add-remove.remove-empty-unknown-tab-name-is-error-not-silent-widen"
-source_lines = "tests/fake_backend/rename_add_remove.rs:136"
+source_lines = "tests/fake_backend/rename_add_remove.rs:137"
 target_function = "remove::run_tab（--empty: TABSPEC解決）"
 source = "docs/design/first/260821/requirements.md §2.8（空tab削除の考慮・明示的方針） + docs/design/detailed-design.md DD-11 remove --empty + docs/design/design-review.md §4.2 MR-20（remove tab --emptyのTABSPEC解決失敗を黙って捨て、削除対象が全空tabへ暗黙拡大する問題の修正。回帰test追加）"
 description = "remove tab --emptyのTABSPEC解決失敗はerrorであり黙って捨てない（解決不能指定→全空tabへの暗黙拡大防止）。名前で一意解決できる場合はそのtabのみ対象。MR-20回帰"
@@ -48,7 +48,7 @@ expect_return = "前者はErr（ErrorClass=NoTarget）。後者はOkでempty1の
 
 [[condition]]
 id = "add-remove.remove-empty-selects-only-empty-tabs"
-source_lines = "tests/fake_backend/rename_add_remove.rs:167"
+source_lines = "tests/fake_backend/rename_add_remove.rs:168"
 target_function = "remove::run_tab（--empty: 対象選択）"
 source = "docs/design/detailed-design.md DD-11 remove --empty（空tab = selectable な pane（tiled+floating両方）が0個のtab。tab-bar等のnon-selectable pluginのみのtabが該当。対象をdry-run形式で列挙してから削除） + docs/design/first/260821/requirements.md §2.8（useful structural cleanup such as removal of empty tabs）"
 description = "remove tab --empty（TABSPEC省略）の対象選択: selectable pane 0個のtabのみを削除し、paneを持つtabは残す。dry-runは対象列挙のみで削除しない（CMR-5: 空tab選択とdry-run非破壊を1条件に統合）"
@@ -57,7 +57,7 @@ expect_return = "dry-runはOkでtabs 2件のまま。本実行はOkでtab1のみ
 
 [[condition]]
 id = "add-remove.remove-empty-requires-gate-even-for-single"
-source_lines = "tests/fake_backend/rename_add_remove.rs:183"
+source_lines = "tests/fake_backend/rename_add_remove.rs:184"
 target_function = "remove::run_tab（--empty: gate）"
 source = "docs/design/detailed-design.md DD-11 remove安全（2対象以上の破壊的削除、または--emptyは--yesまたは--dry-run必須（非対話環境で確定的な挙動））"
 description = "remove tab --emptyは単一候補でもgate（--yes/--dry-run）を要求する。空tab掃除が条件なしで走る事故防止の境界（単一対象の一般規則（確認不要）の--empty側例外）"
@@ -66,7 +66,7 @@ expect_return = "Err（ErrorClass=Preflight）"
 
 [[condition]]
 id = "add-remove.remove-missing-pane-is-no-target"
-source_lines = "tests/fake_backend/rename_add_remove.rs:191"
+source_lines = "tests/fake_backend/rename_add_remove.rs:192"
 target_function = "remove::run_pane（存在確認）"
 source = "docs/design/detailed-design.md DD-11 remove（pane: close-pane -p順次） + DD-1.4（対象0件 → no target matched error） + DD-4.3（NoTarget = exit 3）"
 description = "remove paneの対象存在確認: 不在pane ID指定はNoTargetとして失敗する（close-paneへ渡す前に解決段で検出）"

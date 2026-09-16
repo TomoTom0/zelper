@@ -1,19 +1,19 @@
-# remap CLI契約（src/app/remap.rs: 廃止flag・version gate・dry-run出力）の検証条件。出典: test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側・DD-12・design-review §4.7/§4.8
-# 対応test: tests/cli/remap.rs（8件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# remap CLI契約（src/app/remap.rs: 廃止flag・version gate・dry-run出力）の検証条件。出典: test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側・DD-12・design-review §4.7/§4.8・TASK-75設計書（remap-v3-multi-tab-task75.md §3.7・DD-10 v2.2）
+# 対応test: tests/cli/remap.rs（10件予定: 既存8件 + TASK-75新規2件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1。TASK-75新規2件は後段のtest更新作業で追加）
 # fake zellij shimをtest実行時に生成する（実zellijに依存しない。L3）
 [meta]
 feature = "remap-cli"
 source_file = "src/app/remap.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-09-16"
 verified_by = "claude"
 test_command = "cargo test --test cli_remap"
-source_hash = "588b2fb3bc89f175275abf4d25f37f47329174d4"
-note = "廃止flag・version gateは src/cli.rs・src/zellij/process.rs も検証対象"
+source_hash = "5aa7140ffbc1079871a56411f611ee48ee36e363"
+note = "廃止flag・version gateは src/cli.rs・src/zellij/process.rs も検証対象。TASK-74（2026-09-15）条件書更新: r48（source[]へinvoked_with追加・human inv:表記）・r49（KDL preview: bare slot・bar leaf・boolean属性quoteなし真偽値）の期待値を更新——（当時記録。その後の実装・test追従で解消済み・cargo test --test cli_remap は全pass。CR74-8補正）。TASK-75（2026-09-15）条件書更新: v2.2のtest-first前段としてdry-run-reports-s-and-per-tab-slots・json-n-field-holds-total-slotsの2条件を追加し、r48/r49へT=1期待値不変の注記・r50へfocus-pane-id・最終go-to種別を追記。新条件は当時未実装のためfail-first状態（テストコード・実装は後段の追従待ち）——（当時記録。TASK-75実装・test追従・E2E acceptance 80条件PASS（S-v3-1〜5・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応まで完了〔2026-09-16〕。cargo test --test cli_remap は全pass）。TASK-75 E2E vb改修（2026-09-16）: 複数tab focus鋳型検出warningの伝達経路（stderr・JSON data.warnings）としてpreflight-warning-paths-stderr-and-jsonを追加（vb系列退化の回帰固定。170→171条件）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新"
 
 [[condition]]
 id = "remap-cli.r43-removed-flags-are-usage-error-exit2"
-source_lines = "tests/cli/remap.rs:101"
+source_lines = "tests/cli/remap.rs:116"
 target_function = "remap CLI parse（廃止option）"
 source = "docs/testing/test-plan.md §2.7 (g) R43（--overflow nest / --overflow tabs / --session-scope はusage error（exit 2）。remap本体は実行されない） + docs/design/detailed-design.md DD-1.2/1.5・DD-10.2 #11・DD-12 + docs/design/design-review.md §4.8（TASK-43: 廃止optionの即時削除）"
 description = "廃止optionの拒否: v0.1.xで削除済みの --overflow nest / --overflow tabs / --session-scope の指定はusage error（exit 2）でremap本体は実行されない。stdoutには何も出ず、usage errorはstderrへ出る"
@@ -22,7 +22,7 @@ expect_return = "いずれもexit 2・stdout空・stderrにusage error"
 
 [[condition]]
 id = "remap-cli.r44-removed-flag-json-keeps-stdout-empty"
-source_lines = "tests/cli/remap.rs:130"
+source_lines = "tests/cli/remap.rs:151"
 target_function = "remap CLI parse（廃止option × --json）"
 source = "docs/testing/test-plan.md §2.7 (g) R44（--json併用時もstdoutには何も出ない（usage errorはclap経由でstderrのみ。単一envelope契約を破るstdout出力は存在しない）） + docs/design/detailed-design.md DD-4・DD-12"
 description = "廃止optionと--jsonの併用: usage errorはclap経由でstderrのみに出て、stdoutは空のまま（--json時でもerror envelopeではなくclap usage error。単一envelope契約を破るstdout出力は存在しない）"
@@ -31,7 +31,7 @@ expect_return = "exit 2・stdout空・stderrにusage error"
 
 [[condition]]
 id = "remap-cli.r45-removed-flags-absent-from-help"
-source_lines = "tests/cli/remap.rs:151"
+source_lines = "tests/cli/remap.rs:178"
 target_function = "remap CLI help（廃止optionの非表示）"
 source = "docs/testing/test-plan.md §2.7 (g) R45（当該optionはclap helpに出現しない） + docs/design/detailed-design.md DD-1.2・DD-12 + docs/design/design-review.md §4.6 R6（clap側のhelp非表示化を固定するtest要件）"
 description = "廃止optionのhelp非表示: remap --help に --overflow・--session-scope は出現せず、廃止対象外のoption（--embed-floating）は見える"
@@ -40,7 +40,7 @@ expect_return = "exit 0。helpに--overflow・--session-scopeを含まず--embed
 
 [[condition]]
 id = "remap-cli.r46-below-minimum-and-future-series-exit4"
-source_lines = "tests/cli/remap.rs:171"
+source_lines = "tests/cli/remap.rs:204"
 target_function = "version gate（zellij --version判定）"
 source = "docs/testing/test-plan.md §2.7 (h) R46（zellij <0.44.3（0.44.2 / 0.43.1）→ UnsupportedVersion exit 4。実証済み0.44.x系列超過（0.45.0等）も同様） + docs/design/detailed-design.md DD-3.1（最小サポート0.44.3）・DD-3.5（compatibility policy）"
 description = "version gateの拒否範囲: 最小0.44.3未満（0.44.2・0.43.1）と実証済み0.44.x系列超過（0.45.0）の両方をUnsupportedVersion（exit 4）で拒否する"
@@ -49,39 +49,66 @@ expect_return = "いずれもexit 4"
 
 [[condition]]
 id = "remap-cli.r48-dry-run-json-reports-source-mnk-and-partition"
-source_lines = "tests/cli/remap.rs:187"
+source_lines = "tests/cli/remap.rs:226"
 target_function = "remap dry-run（--json出力）"
-source = "docs/testing/test-plan.md §2.7 (i) R48（source一覧（visual order・現在tab付き）・M/N/k・pane割当表（全件preserved・empty slot数）を出力） + docs/design/detailed-design.md DD-10.10 (a)(b)(c)"
-description = "dry-run --jsonの計画報告: source一覧4件（visual order）・M=4/N=3/k=2・割当表（全4 paneがassignmentsに載る・instance 1はempty_slots=2）を出す。成功envelope（ok:true・schemaに沿うdata）。検証限界: source一覧は4件という件数のみassertであり、visual order順序・現在tab付きの表示内容は未assert"
-given = "4 pane / 2 tab fixture（M=4, N=3 → k=2）のfake zellij shimで remap --inline <3-slot layout> --dry-run --json を実行"
-expect_return_shape = "JSONでok=true・data.m=4・data.n=3・data.k=2・data.sourceが4件・data.instancesが2 instanceでassignments合計4件・instance 1のempty_slots=2"
+source = "docs/testing/test-plan.md §2.7 (i) R48（source一覧（visual order・現在tab付き）・M/N/k・pane割当表（全件preserved・empty slot数）を出力） + docs/design/detailed-design.md DD-10.10 (a)(b)(c)（TASK-74改訂: source一覧に各paneのterminal_command〔invoked_with〕を含める。pane_command〔command〕は表示目的で残す） + docs/design/remap-v2-matching-fix-task74.md §2.4（json: source[]へinvoked_with field追加（string or null）・assignments[].runはterminal_command由來のargv〔schema不変〕・human出力はsource行のcmd:をinv:へ変更し前景processのcmd:と両方表示しない）"
+description = "dry-run --jsonの計画報告: source一覧4件（visual order）・M=4/N=3/k=2・割当表（全4 paneがassignmentsに載る・instance 1はempty_slots=2）を出す。成功envelope（ok:true・schemaに沿うdata）。TASK-74更新: source[]各要素はinvoked_with（terminal_commandのstring or null）を含みcommand（pane_command・表示目的）は残す。human形式のsource行はcmd:（前景process）の代わりにinv:（terminal_command基準）を表示する。TR74-4直交paneの値を固定: P-shell-procはinvoked_with=null・P-cmd-paneはinvoked_with=\"claude --model x\"でそのassignmentのrun=\"claude --model x\"。TASK-75（v2.2）: n fieldはS格納へ一般化されたがT=1 fixtureではS=N=3のため本条件の期待値は不変（multi-tab側のn=S・新規t/s/n_slots/tabs field・mapping block/tab_indexはjson-n-field-holds-total-slotsが管轄）。検証限界: source一覧は4件という件数のみassertであり、visual order順序・現在tab付きの表示内容は未assert"
+given = "TR74-4直交2 pane（P-shell-proc: terminal_command=null+pane_command明記 / P-cmd-pane: terminal_command=\"claude --model x\"）を含む4 pane / 2 tab fixture（M=4, N=3 → k=2）のfake zellij shimで remap --inline <3-slot layout> --dry-run --json を実行"
+expect_return_shape = "JSONでok=true・data.m=4・data.n=3・data.k=2・data.sourceが4件（各要素にinvoked_withを含む: P-shell-proc側はnull・P-cmd-pane側は\"claude --model x\"）・data.instancesが2 instanceでassignments合計4件・instance 1のempty_slots=2。P-cmd-paneのassignmentのrunは\"claude --model x\"・P-shell-procのrunは空"
 
 [[condition]]
 id = "remap-cli.r49-dry-run-shows-kdl-preview-per-instance"
-source_lines = "tests/cli/remap.rs:219"
+source_lines = "tests/cli/remap.rs:274"
 target_function = "remap dry-run（生成KDL preview）"
-source = "docs/testing/test-plan.md §2.7 (i) R49（生成KDL preview（instance毎。humanは [plan] block・--jsonは instances[].kdl）） + docs/design/detailed-design.md DD-10.10 (d)"
-description = "dry-runの生成KDL preview: --jsonは各instanceのkdl文字列（3-slotのpane nodeを含む）をinstances[].kdlへ載せ、human形式は [plan] blockとして出す（CMR-5統合: json形式とhuman形式を1条件に統合）"
-given = "4 pane / 2 tab fixtureで remap --inline <3-slot layout> --dry-run --json と --dry-run（human）の各実行"
-expect_return_shape = "--jsonは2 instanceの各kdlが3-slotの生成KDL（paneの出現3回以上）。humanはstdoutに [plan] blockを含む"
+source = "docs/testing/test-plan.md §2.7 (i) R49（生成KDL preview（instance毎。humanは [plan] block・--jsonは instances[].kdl）） + docs/design/detailed-design.md DD-10.10 (d)（TASK-74改訂: KDL previewはbare slot（shell pane）・template適用時はbar leaf出現） + docs/design/remap-v2-matching-fix-task74.md §2.4・§3（TR74-4直交fixtureのcli層配置: P-shell-proc slotはbare・P-cmd-pane slotはcommand注入） + 同§2.2 生成KDL例（boolean属性はquoteなし真偽値 borderless=true・数値属性 size=1 もquoteなし） + tmp/task74/acceptance/b_remap.json（TASK-74 E2E run3実測: quote付きboolean属性はzellij 0.44.3 layout parserに拒否される）"
+description = "dry-runの生成KDL preview: --jsonは各instanceのkdl文字列をinstances[].kdlへ載せ、human形式は [plan] blockとして出す（CMR-5統合: json形式とhuman形式を1条件に統合）。TASK-74更新（fail-first: 旧実装〔pane_command注入〕ではP-shell-proc slotに前景processのcommandが乗る）: previewのKDLはTR74-4直交paneのslot形状を含み、P-shell-proc（terminal_command=null）のslotはbare（command属性なし）・P-cmd-pane（terminal_command=\"claude --model x\"）のslotはcommand=\"claude\" + args注入。default_tab_template付きlayoutではbar leaf（pane size=1 borderless=true { plugin ... }）が出現し、template無しlayoutでは出現しない。TASK-74再更新（2026-09-15 E2E run3・fail-first）: 生成KDLのboolean属性はquoteなしの真偽値形式（borderless=true）で出力されること——borderless=\"true\" のquote付き文字列形式はzellij 0.44.3 layout parserに「borderless should be either true or false, found \"true\"」として拒否される（実測: tmp/task74/acceptance/b_remap.json）。現行実装（run3 binary）はboolean属性をquote付き文字列化して出力するため本条件にfailする（test側期待値の追従は後段のtest更新作業）——（当時記録。実装・test追従で解消済み）。TASK-75（v2.2）: KDL previewは生成tab (b,t)毎へ一般化（T=1 fixtureではinstance=block相当のため期待値不変。multi-tab側はdry-run-reports-s-and-per-tab-slots）"
+given = "TR74-4直交2 paneを含む4 pane / 2 tab fixtureで remap --inline <3-slot layout> --dry-run --json と --dry-run（human）の各実行、およびdefault_tab_template（children + compact-bar）付きlayoutでの --dry-run --json 実行"
+expect_return_shape = "--jsonは2 instanceの各kdlが3-slotの生成KDL（paneの出現3回以上）で、P-shell-proc slotはbare・P-cmd-pane slotはcommand=\"claude\"を含む。template付きlayoutのkdlは plugin location=\"zellij:compact-bar\" を含み、bar leafのboolean属性はquoteなし真偽値（borderless=true）・数値属性 size=1 もquoteなし整数で出力される（borderless=\"true\" 等のquote付き文字列形式はzellij 0.44.3 layout parser拒否のため不可）。template無しlayoutは plugin location を含まない。humanはstdoutに [plan] blockを含む"
 
 [[condition]]
 id = "remap-cli.r50-dry-run-lists-planned-operation-kinds"
-source_lines = "tests/cli/remap.rs:253"
+source_lines = "tests/cli/remap.rs:363"
 target_function = "remap dry-run（操作列種別表示）"
-source = "docs/testing/test-plan.md §2.7 (i) R50（実行予定backend操作列の種別表示（companion setup・probe pipe・break pipe・rename・go-to・override）） + docs/design/detailed-design.md DD-10.10 (e)"
-description = "dry-runの操作列種別表示: 実行予定のbackend操作種別（companion・probe・break・rename・go-to・override）を表示する。M=4/N=3/k=2では全種別が計画に現れる（floatingの計画一致はremap-sequence.r50がL2で検証）"
+source = "docs/testing/test-plan.md §2.7 (i) R50（実行予定backend操作列の種別表示（companion setup・probe pipe・break pipe・rename・go-to・override）） + docs/design/detailed-design.md DD-10.10 (e)（v2.2: 実行予定backend操作列（companion setup・probe pipe・break pipe〔break-id/break-new〕・new-tab（空group）・rename・go-to・override・focus-pane-id・最終go-to先を種別表示）） + docs/design/remap-v3-multi-tab-task75.md §3.7"
+description = "dry-runの操作列種別表示: 実行予定のbackend操作種別（companion・probe・break・rename・go-to・override）を表示する。M=4/N=3/k=2では全種別が計画に現れる（floatingの計画一致はremap-sequence.r50がL2で検証）。TASK-75（v2.2・fail-first: 現行実装の操作列にfocus-pane-id・最終go-to先は未実装）: 種別にはfocus-pane-idと最終go-to先が加わる。new-tab（空group）種別は割当0件groupを含む構成でのみ計画に現れる（multi-tab fixture側はdry-run-reports-s-and-per-tab-slotsが検証）"
 given = "4 pane / 2 tab fixtureで remap --inline <3-slot layout> --dry-run（human）を実行"
-expect_return_shape = "stdoutにcompanion・probe・break・rename・go-to・overrideの全種別が現れる"
+expect_return_shape = "stdoutにcompanion・probe・break・rename・go-to・override・focus-pane-id・最終go-toの全種別が現れる"
 
 [[condition]]
 id = "remap-cli.both-removed-flags-together-still-usage-error"
-source_lines = "tests/cli/remap.rs:274"
+source_lines = "tests/cli/remap.rs:400"
 target_function = "remap CLI parse（廃止option同時指定）"
 source = "docs/design/design-review.md §4.7 C7（TASK-39レビュー: --session-scopeと--overflowの同時指定でwarningが2行出る → 統合。関連: docs/testing/test-plan.md §2.7 (g) R43（両flag同時指定を含む）） + docs/design/design-review.md §4.8（TASK-43: option削除によりwarning統合問題は消滅。同時指定もusage error）"
 description = "廃止option同時指定の拒否（C7回帰）: --session-scopeと--overflow tabsの同時指定（--json併用含む）も単一のusage error（exit 2）で拒否される。旧warning出力の統合問題はoption削除で消滅しており、stdoutには何も出ない"
 given = "remap --inline <layout> --session-scope --overflow tabs --json の実行"
 expect_return = "exit 2・stdout空"
+
+[[condition]]
+id = "remap-cli.dry-run-reports-s-and-per-tab-slots"
+source_lines = "tests/cli/remap.rs:458"
+target_function = "remap dry-run（human・--json出力のmulti-tab拡張）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.7（(b) M/S/k表示に加えper-tab slot数列（N_t = 9,1,2等）とT、(c) 割当表を pane → (block, tab, slot, tab名)へ、(d) KDL previewは生成tab (b,t)毎、(e) 操作列へnew-tab（空group）・focus-pane-id・最終go-to先を追加） + docs/design/detailed-design.md DD-10.10 v2.2拡張 + requirements.md §2.6"
+description = "dry-run出力のmulti-tab拡張: humanはM/S/kに加えT（鋳型数）とper-tab slot数列N_tを表示し、割当表は pane → (block, tab, slot, 生成tab名)、KDL preview（[plan] block）は生成tab (b,t)毎、操作列種別にnew-tab（空group）・focus-pane-id・最終go-to先が加わる。鋳型のname/focusも計画情報に含む。--jsonも同構成（数値field契約はjson-n-field-holds-total-slotsが管轄）。dry-run自体の非破壊（focus-pane-id不実施含む）はremap-sequence.r47が検証。fail-first: 現行実装はN（先頭tab）基準・単一instance表示のためmulti-tab構成でfail-first"
+given = "T=3（N_t=9,1,2・S=12・focus=true鋳型あり）multi-tab layoutにM=15（k=2・空group 2件）のfake zellij shimで remap --path <multi-tab layout> --dry-run（human）と --dry-run --json を実行"
+expect_return_shape = "humanはS=12・T=3・N_t列（9,1,2）・M=15・k=2・割当表（block/tab/slot/生成tab名）・(b,t)毎のplan block・操作列にnew-tab・focus-pane-id・最終go-to先を含む。--jsonはdata.t=3・data.s=12・data.n_slots=[9,1,2]・data.tabs（鋳型name/focus）・割当表のblock/tab/生成tab名・(b,t)毎のkdl（instances）を含む"
+
+[[condition]]
+id = "remap-cli.json-n-field-holds-total-slots"
+source_lines = "tests/cli/remap.rs:596"
+target_function = "remap dry-run --json（data数値field契約のS格納互換）"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.7（JSON（dry_run_json・成功時data）: m/kは維持、nにはSを格納〔T=1では従来値Nと同一〕。新規にt・s・n_slots〔N_t列〕・tabs〔鋳型のname/focus〕を追加。mapping系のkeyへblock/tab_index追加〔instanceはblock値で維持〕。DD-4.2のstable fields〔schema_version/ok/data/error.class等〕は不変であり、data内部のfield構成変更は契約変更にならない） + docs/design/detailed-design.md DD-10.10 v2.2・DD-4.2"
+description = "JSON数値fieldのS格納互換: dry-run/成功JSONのn fieldにはS（layout全体slot数）を格納する。T=1ではS=Nのため従来値と同一（既存r48 fixtureのdata.n=3は不変）。新規field t（T）・s（S）・n_slots（N_t列）・tabs（鋳型name/focus）が加わり、mapping/assignments系のkeyにblockとtab_indexが加わる（instance keyはblock値で維持し削除しない）。stable fields（schema_version/ok/data）は不変（envelope契約の変更なし。json-contract.tomlのexcluded参照）。fail-first: 現行実装はn=N（先頭tab slot数）格納のためmulti-tab構成でfail-first"
+given = "T=3（S=12）multi-tab fixtureの remap --path <multi-tab layout> --dry-run --json と、T=1（N=3）fixtureの remap --inline <3-slot layout> --dry-run --json（r48と同一fixture）"
+expect_return_shape = "multi-tabはdata.n=12・data.t=3・data.s=12・data.n_slots=[9,1,2]・data.tabsを含み、mapping/assignments系要素がblockとtab_indexを含む（instanceも維持）。T=1はdata.n=3（従来値Nと同一）・data.t=1・data.n_slots=[3]。いずれもschema_version=1・ok=trueのenvelope"
+
+[[condition]]
+id = "remap-cli.preflight-warning-paths-stderr-and-json"
+source_lines = "tests/cli/remap.rs:530"
+target_function = "remap preflight warningの伝達経路（normalize_tab_templates由来warnings）"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.4（複数のfocus=true鋳型がある場合は文書順最初を採用しwarningを出す。2026-09-16 E2E改修で明文化——zellijはdump上常にactive tabへfocus=trueを付けるため複数指定を機械的に判別できず、zelper側規則として文書順最初に確定し採用を利用者へ通知）・§3.7（preflight warningの伝達経路: human実行・--json実行・dry-runの全経路でstderrのwarning行へ出力〔--json実行時もstdoutのenvelope契約を壊さない〕。加えて機械可読経路としてdry-run/成功時のJSON dataへwarnings〔文字列列〕を格納） + docs/design/detailed-design.md DD-10.7 step 7 v2.2（複数focus=true鋳型は文書順最初を採用しwarning）・DD-10.10（warning伝達経路） + TASK-75設計書§5.2 (v)系列b"
+description = "preflight warningの伝達経路（E2E vb退化の回帰固定・2026-09-16）: 複数のfocus=true鋳型（tab focus）を持つlayoutのremapでは、--json dry-run実行でも複数focus検出warningがstderrのwarning行へ出力され（stdoutのenvelope契約〔ok:trueの単一JSON〕を壊さない）、機械可読経路としてJSON data.warningsへ文字列列で載る。focus=true鋳型1件のlayoutではwarningなし・data.warningsは空。検出本体（文書順最初採用・warning 1件）はlayout-planner.normalize-tab-templates-doc-order-and-tab-attributesが管轄し、本条件は出力経路（stderr・JSON data）を管轄する"
+given = "T=3（tab0とtab2がfocus=true・E2E focus-dual.kdl相当）のmulti-tab fixtureで remap --path <layout> --dry-run --json を実行した場合と、focus=true鋳型1件（tab0のみ）のMULTI_TAB_LAYOUTでの同一実行（対照）"
+expect_return_shape = "前者はstderrにwarning:行（focus語を含む）が出力され・stdoutは単一のok:true envelopeでdata.warningsにfocus語を含む文字列が載る。後者はstderrにwarning行なし・data.warningsは空配列"
 
 [[excluded]]
 item = "未実証組合せ（zellij 0.44.4以降・新series）での実機確認"

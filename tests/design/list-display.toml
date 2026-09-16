@@ -12,7 +12,7 @@ note = ""
 
 [[condition]]
 id = "list-display.sessions-and-tabs-basic-output"
-source_lines = "tests/cli/list_read_send.rs:97"
+source_lines = "tests/cli/list_read_send.rs:109"
 target_function = "list::run（Sessions / Tabs）"
 source = "docs/testing/test-plan.md §2.1（各verb正常系parse。list sessions/tabsの基本出力） + docs/design/detailed-design.md DD-4.1（list sessions: NAME / CREATED / CURRENT / PANES・CREATEDは相対表記・CURRENTは(current) suffixを*表示。list tabs: TAB_ID / POS / ACTIVE / NAME / PANES） + DD-5（sessionsはlist-sessions -n parse + 実行中session毎にlist-tabs発行）"
 description = "list sessionsとlist tabsの基本出力: sessions JSONはname/created/current/panes_per_tabをdata.sessionsへ、tabs humanはTAB_ID/POS/ACTIVE/NAME/PANES表（CMR-5: sessions JSON構造とtabs human表を1条件に統合。list panesはpanes-human-columns条件・layoutsはlayouts-without-session-resolution条件が各担当）"
@@ -21,7 +21,7 @@ expect_return_shape = "sessions JSONはdata.sessions[0]がname=fake-sess・creat
 
 [[condition]]
 id = "list-display.sessions-live-only-with-exited-present"
-source_lines = "tests/cli/list_read_send.rs:126"
+source_lines = "tests/cli/list_read_send.rs:139"
 target_function = "list::run（Sessions: exited filter）"
 source = "docs/design/detailed-design.md DD-1.2構文木注記（list sessionsはsession解決を行わない。EXITED混在・複数実行中でも表示できる） + DD-3.4（EXITED行もflag付きでparseし、実行中のみへの絞り込みは呼び出し側（list sessions表示）） + docs/design/design-review.md §4.9 TASK-44（EXITED session解決・C10文言確定）"
 description = "list sessionsは対象session解決を前提とせず一覧表示できる: EXITED行はparseされるが表示は実行中のみ。dead sessionが複数残る環境でのlist可用性"
@@ -30,7 +30,7 @@ expect_return_shape = "data.sessionsはlive-aのみ（1件）で、created=1m ag
 
 [[condition]]
 id = "list-display.sessions-human-metadata-columns"
-source_lines = "tests/cli/list_read_send.rs:161"
+source_lines = "tests/cli/list_read_send.rs:175"
 target_function = "list::run（Sessions human表）"
 source = "docs/design/detailed-design.md DD-4.1（list sessions: NAME / CREATED / CURRENT / PANES。CREATEDはlist-sessions -nの相対表記・CURRENTは*表示） + docs/design/design-review.md §4.10 TASK-46（sessions NAME/CREATED/CURRENT/PANES列拡張）"
 description = "list sessions human表の列構成: NAME/CREATED/CURRENT/PANES。current行は*・非current行は空欄。TASK-46で追加されたmetadata列の表示契約"
@@ -39,7 +39,7 @@ expect_return_shape = "NAME TAB CREATED TAB CURRENT TAB PANESのheaderと、live
 
 [[condition]]
 id = "list-display.panes-human-columns-with-cwd"
-source_lines = "tests/cli/list_read_send.rs:191"
+source_lines = "tests/cli/list_read_send.rs:207"
 target_function = "list::run（Panes human表）"
 source = "docs/design/detailed-design.md DD-4.1（list panes: PANE_ID / TAB / TITLE / COMMAND / CWD） + docs/design/design-review.md §4.9 TASK-45（list panes human出力CWD列追加）"
 description = "list panes human表の列構成: PANE_ID/TAB/TITLE/COMMAND/CWD。command・cwd不明（plugin pane等）は-。TASK-45で追加されたCWD列の表示契約"
@@ -48,7 +48,7 @@ expect_return_shape = "PANE_ID TAB TAB TAB TITLE TAB COMMAND TAB CWDのheaderに
 
 [[condition]]
 id = "list-display.layouts-without-session-resolution"
-source_lines = "tests/cli/list_read_send.rs:205"
+source_lines = "tests/cli/list_read_send.rs:222"
 target_function = "list::run（Layouts）"
 source = "docs/design/detailed-design.md DD-3.4（layout一覧: layout_dir（ZELLIJ_LAYOUT_DIR環境変数 > ~/.config/zellij/layouts）を直接読む。dir不存在時は空リスト） + DD-1.2構文木注記（layoutsはzellijを呼ばず無条件） + DD-4.1（list layouts: NAME / SIZE / MODIFIED（bytes・相対表記。file stat由来）） + docs/design/design-review.md §4.9 C8（list layouts回帰test。TASK-44）"
 description = "list layoutsはsession解決を行わず動く: 実行中session複数環境でもlayout_dirのfile列挙として動作し、NAME/SIZE/MODIFIED列（JSONはname/size/modified_epoch）を出す。TASK-44でlayouts分岐がsession解決を行わない実装へ変わった際の回帰検出（C8。CMR-5: session解決不要性とlayouts列構成を1条件に統合）"
@@ -57,7 +57,7 @@ expect_return_shape = "JSONはdata.layouts 2件（threeはsize=15・modified_epo
 
 [[condition]]
 id = "list-display.sessions-summary-elides-beyond-four-tabs"
-source_lines = "tests/cli/list_read_send.rs:402"
+source_lines = "tests/cli/list_read_send.rs:431"
 target_function = "list::run（Sessions PANES概要） + pane_count_label"
 source = "docs/design/detailed-design.md DD-4.1（PANESはtab毎pane数の+連結（5tab目以降は...省略）。list tabsのPANESはfloatingがあれば2+1f形式） + docs/design/design-review.md §4.10 TASK-46 C14(a)(b)（5tab超省略形式とfloating併記の要件本体test）・C15（session概要のPANES連結からfloatingを除外しlist tabsのPANES列に限定）"
 description = "PANES概要の形式: session概要はtab毎tiled pane数の+連結で5tab目以降...省略（floatingは除外）、list tabsのPANES列は2+1f形式でfloatingを併記。C15修正後の役割分担の固定（CMR-5: session概要省略とtabs floating併記を1条件に統合）"
@@ -66,7 +66,7 @@ expect_return_shape = "sessions行のPANESは7+7+6+2+...（floating混入なし�
 
 [[condition]]
 id = "list-display.sessions-tabs-fetch-failure-fallback"
-source_lines = "tests/cli/list_read_send.rs:451"
+source_lines = "tests/cli/list_read_send.rs:481"
 target_function = "list::run（Sessions: list_tabs_for失敗fallback）"
 source = "docs/design/detailed-design.md DD-5（sessionsはlist-sessions -n 1回 + 実行中session毎に--session NAME action list-tabsを発行。他sessionのlist-tabs失敗は該当行を-に落とし一覧は維持） + docs/design/design-review.md §4.10 C14(c)(e)（list-tabs失敗fallback・JSON current:falseの要件本体test）"
 description = "PANES概要取得（list-tabs）失敗時のfallback: 該当session行のPANESを-（JSONはnull）へ落とし一覧自体は失敗させない。session実行中に消えた等の一時失敗で一覧が全滅しない契約。suffixなしsessionのJSON current:falseも同時検証（CMR-5: human/JSON両fallbackとcurrent:falseを1条件に統合）"
@@ -75,7 +75,7 @@ expect_return_shape = "humanはPANES列が-の行。JSONはcurrent=false・panes
 
 [[condition]]
 id = "list-display.panes-compact-shows-tab-and-short-cwd"
-source_lines = "tests/cli/list_read_send.rs:478"
+source_lines = "tests/cli/list_read_send.rs:509"
 target_function = "list::run（Panes compact）"
 source = "docs/design/detailed-design.md DD-4.1（--compact（-c）: panesはTAB<tab>短縮cwd（HOME prefixを~置換・cwd不明時-）のみ） + docs/design/design-review.md §4.11 TASK-47 C22（compact時は非selectable plugin paneを除外）"
 description = "list panes --compactの形式: tab名と短縮cwd（HOME prefixを~へ置換）のみの行。header無し。非selectable plugin pane（tab bar等）は識別子を持たない行を避けるため除外（TASK-47）"
@@ -84,7 +84,7 @@ expect_return_shape = "Tab #1 TAB ~/work/app の2行のみ（plugin行の出現�
 
 [[condition]]
 id = "list-display.compact-names-and-json-precedence"
-source_lines = "tests/cli/list_read_send.rs:499"
+source_lines = "tests/cli/list_read_send.rs:531"
 target_function = "list::run（compact: tabs/sessions + JSON優先）"
 source = "docs/design/detailed-design.md DD-4.1（--compact: sessions/tabs/layoutsは名前のみ（header無し）。--json併用時はJSONを優先しcompactは無視） + docs/design/design-review.md §4.11 TASK-47（--compact縮小表示・優先規則）"
 description = "compact表示の名前のみ縮小（tabs/sessions）と--json併用時のJSON優先（compact無視）。machine可読と人間可読の切り替え規則（CMR-5: 名前のみ縮小とJSON優先を1条件に統合）"
@@ -93,7 +93,7 @@ expect_return_shape = "tabs compactはTab #1のみの行（header無し）。ses
 
 [[condition]]
 id = "list-display.layouts-compact-names-only"
-source_lines = "tests/cli/list_read_send.rs:529"
+source_lines = "tests/cli/list_read_send.rs:562"
 target_function = "list::run（Layouts compact）"
 source = "docs/design/detailed-design.md DD-4.1（--compact: sessions/tabs/layoutsは名前のみ） + docs/design/design-review.md §4.11 C24（list layouts --compact分岐の未カバー固定。TASK-47）"
 description = "list layouts --compactは名前のみの行（header無し）。compact分岐の4resourceのうちlayoutsの固定（C24）"

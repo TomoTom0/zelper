@@ -92,6 +92,8 @@ pub struct PaneInfo {
     pub tab_position: u32,
     pub tab_name: String,
     pub pane_command: Option<String>,
+    #[serde(default)]
+    pub terminal_command: Option<String>,
     pub pane_cwd: Option<String>,
 }
 
@@ -123,6 +125,7 @@ pub fn parse_panes(json: &str) -> Result<Vec<PaneState>, ZelperError> {
                 cols: i.pane_columns,
             },
             command: i.pane_command,
+            terminal_command: i.terminal_command,
             cwd: i.pane_cwd,
             tab_id: TabId(i.tab_id),
             tab_position: i.tab_position,
@@ -130,6 +133,15 @@ pub fn parse_panes(json: &str) -> Result<Vec<PaneState>, ZelperError> {
             plugin_url: i.plugin_url,
         })
         .collect())
+}
+
+/// 空のstdoutは一時的な未成立応答として扱い、非空のparse errorはfatalのまま返す。
+pub fn parse_panes_opt(json: &str) -> Result<Option<Vec<PaneState>>, ZelperError> {
+    if json.trim().is_empty() {
+        Ok(None)
+    } else {
+        parse_panes(json).map(Some)
+    }
 }
 
 /// ---- TabInfo（`list-tabs -a --json`要素・実出力field名） ----
@@ -164,4 +176,13 @@ pub fn parse_tabs(json: &str) -> Result<Vec<TabState>, ZelperError> {
             are_floating_panes_visible: i.are_floating_panes_visible,
         })
         .collect())
+}
+
+/// `parse_panes_opt`と同じ空応答契約のlist-tabs版。
+pub fn parse_tabs_opt(json: &str) -> Result<Option<Vec<TabState>>, ZelperError> {
+    if json.trim().is_empty() {
+        Ok(None)
+    } else {
+        parse_tabs(json).map(Some)
+    }
 }

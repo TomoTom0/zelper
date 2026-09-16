@@ -423,3 +423,101 @@ TASK-37レビュー時点（§4.6 R6・DD-10.2 #11）では廃止option（`--ses
 **検証（最終）**: `cargo test --lib` 50回loop 0失敗（stability log: `tmp/20260913_test_task59_stability.log`） / `cargo test`全件 pass / `mise run verify-conditions` exit 0（16 files・141 conditions・141 tags・37 excluded） / clippy 0 warning / fmt clean。
 
 **総評**: 設計レビュー5件＋code review 5件の計10指摘は、修正8・却下2で解消し、条件6件・excluded 7件・test 6件として確定した。
+
+### 4.20 TASK-73設計レビュー（L3 fake zellij shimへのETXTBSY対策適用）
+
+レビュー日: 2026-09-13。対象: TASK-73の設計（tests/cli/list_read_send.rs・tests/cli/remap.rsのsetup_fake_zellijへstaging+atomic rename公開・module直下FAKE_ZELLIJ_LOCK静的Mutex・全31 test fn冒頭guard取得。src/zellij/process.rs test module構成の踏襲）。方法: 作成者と別subagentによる独立レビュー（実態突合せ: 両test fileのhelper・test fn一覧とcall graph、src/zellij/process.rs:387-563の適用済みpattern、CR59-4/CR59-5記載、scripts/design/verify-conditions.pyのsource_lines自動sync機構、tests/README.md:14、Cargo.toml test target名、`cargo test -- --list`による総数確認）。検証結果概要: 設計の前提とされた事実はすべて一致（setup_fake_zellij直接callはzelper()内list_read_send.rs:53・zelper_with()内remap.rs:68の2箇所のみでtest fnからの直接callなし/ test fn 23+8=31/ 置換行番号 list_read_send.rs:46-47・remap.rs:51-52/ src側staging+renameはprocess.rs:400-405で設計snippetとcomment文言まで同一diff/ src側test 6 fn全て冒頭guard取得/ fake_backend・companion_seed.rsはexec対象fileをwriteせず対象外宣言どおり/ binary間pathはzelper-fake-・zelper-fake-remap-・zelper-fake-process- prefix+tag+pidで衝突なし/ 検証手順のtarget名cli_list_read_send・cli_remapはCargo.toml:49/57に実在/ 現test総数141件一致/ verify-conditionsは検査pass時にsource_linesを書き戻すため1回実行でsync差分が生成される）。技術的正当性も確認: rename公開によりshim pathのinodeはwrite fd close後にのみ公開され、再writeは常に新staged inodeへ向かうためwrite-open中inodeのexec/exec中inodeへのwrite-openの両経路を遮断する方向に働く。直列化の覆盖は同一binary内test並列のみで十分（cargo testはtest binaryを順次実行・binary間はpid付きpathで無関係）。指摘5件（P3×5・P1/P2なし）。IDはTR73-1〜TR73-5（§4.19 TR59-nに続く。TR73 = TASK-73 Review）。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| TR73-1 | P3 | 設計前提（同一tagへの逐次再writeの列挙） | r46（tests/cli/remap.rs:172-183）のみ記載されているが、r43（remap.rs:103-128）もfor loop内でzelper("r43")を3回呼び同一tagへ逐次再writeする。いずれも同一thread直列（assert_cmdは子processの終了を待つ）のため固定staging名の安全性の結論は不変だが、前提集計として不完全 | **修正** | 設計前提へr43を1行追記（前提集計の完全化。実装内容・検証手順への影響なし） |
+| TR73-2 | P3 | 設計変更内容(1) staticのdoc comment | 契約「test fn冒頭でのみ取得すること（wrapper・helper内では再取得しない）」に再取得禁止の理由がなく、理由（std::sync::Mutexは非reentrantで同一thread再取得は永久block）は設計本文(3)にのみある。将来の追記者が契約の意図を知らずguardをhelper側へ移動すると、failではなくtest hang（timeout）として発覚し診断が高価 | **修正** | doc commentへ「再取得は同一threadの再lockでdeadlockする」の1文追加を実装時に反映 |
+| TR73-3 | P3 | 設計リスク対処（poisoning受容） | poisoning連鎖の受容はsrc同一挙動として妥当だが、src側6 fnに対しL3側は23/8 fnと規模が異なり、1件のpanicが同binary内残り全testのfailとして波及するノイズが大きい点の認識記録がない | **対応** | 受容判断は維持し、規模差（初回失敗特定時の連鎖ノイズ）の1文を設計記録へ追加 |
+| TR73-4 | P3 | 設計推奨案の「src側test module構成の完全複製」表現 | src側static（process.rs:391）にはdoc commentがなく、L3側はdoc comment付きstaticを追加するため厳密には「複製+契約doc comment追加」である（改善付きで実害なし。主張の正確性のみの指摘） | **対応** | 表現を「同一構成+契約doc comment付き」へ修正 |
+| TR73-5 | P3 | 設計リスク対処（guard付け忘れ担保） | guard付け忘れの検出がdoc comment契約+README 1行のみで機械検証がない。verify-conditions.pyは#[test] fn走査を行うため「zelper()/zelper_with()を呼ぶtest fnでのguard取得有無」checkへの拡張は構造的に可能 | **却下** | 現行は契約+READMEで担保し、散発失敗の再燃時に拡張を検討（本task範囲外とする設計判断を尊重） |
+
+**検証**: 設計段階レビューのため実装検証なし（読み取り突合せのみ: `cargo test -- --list` 141件一致、grep突合せによる前提検証、src側pattern・verify script機構の直接確認）。
+
+**総評**: 指摘5件はすべてP3（前提列挙・doc comment文言・記録・表現）で、P1/P2なし。ETXTBSY回避機構の技術的正当性・src側適用済み構成との一致・変更範囲の過不足（対象2 file+自動sync差分+README 1行で過不足なし）・検証手順（50回loop 0失敗の判断基準・失敗時triage・target名実在）はすべて確認済み。設計はこのまま実装に進めてよい。
+
+#### code review（2026-09-13）
+
+TASK-73実装（tests/cli/list_read_send.rs・tests/cli/remap.rs・tests/README.mdの3 file変更）に対するcode review。指摘1件（P3×1）。IDはTR73-6（TR73-1〜5に続く）。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| TR73-6 | P3 | 実装側doc comment（tests/cli/list_read_send.rs:8・tests/cli/remap.rs:9） | 「src/zellij/process.rs test moduleと同一構成」の表現がTR73-4（設計記録側は対応済み）と同じ厳密性問題: src側static（process.rs:391）にはdoc commentがなく、L3側は契約doc comment追加付きのため厳密には「同一構成+契約doc comment」である | **修正** | 両fileのcomment文言を「src/zellij/process.rs test moduleと同一構成+契約doc comment」へ変更済み（各1行・他は不変） |
+
+その他のレビュー観点（31/31 test fn冒頭guard・wrapper/helper内でのlock取得なし・staging write→chmod→rename順序・src側diff（process.rs:400-405）とのcomment文言含む一致・既存test期待値・条件書の不変・tests/README.md実態一致・tests/内coverage完結）はいずれも指摘なし。
+
+### 4.21 TASK-74設計レビュー（remap run一致照合修正・DD-10 v2.1）
+
+レビュー日: 2026-09-15。対象: TASK-74設計（`docs/design/remap-v2-matching-fix-task74.md`・detailed-design.md DD-10 v2.1改訂〔10.1事実5精密化・10.7・10.8全面改訂・10.10・10.13〕。spike S成果物`tmp/task74/spike74/`・実験a/b/c前提）。方法: 作成者と別model（codex gpt-5.6-luna・read-only sandbox）による独立レビュー（レビューlog: repo管理外 `tmp/260915_review_design_task74.log`）。指摘7件（P1×2・P2×4・P3×1）・dispositionは全件修正・対応（却下なし）。IDはTR74-n。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| TR74-1 | P2 | 設計書§2.5 | PaneStateへ必須field追加で、tests/unit/selector.rs・tests/fake_backend/rename_add_remove.rs・tests/fake_backend/resize.rs等の既存PaneStateリテラルがcompile不能になるが§2.5に含まれていない | **修正** | `rg "PaneState \{"`で全literal箇所（tests/unit/layout_planner.rs:24・tests/unit/selector.rs:15,45,67・tests/fake_backend/remap.rs:28・rename_add_remove.rs:8・resize.rs:9・fake.rs:197,345,415,596・src/zellij/parser.rs:107）を§2.5へ列挙。PaneInfoのserde旧fixture互換（`terminal_command`欠損fixtureは`#[serde(default)]`でnull扱い・既存testは修正なしで継続）も明記 |
+| TR74-2 | P1 | 設計書§2.2/§2.5/§4(ii) | templateの引渡し経路（doc → default_tab_template_subtree → plan/dry-run/execute → instance_kdls → generate_instance_kdl_v2）が不明確。現行signatureにtemplate引数が無く、src/app/remap.rsの呼出し更新が明示されていない | **修正** | §2.2へ関数signature単位の引渡し経路（`remap::run`で1回取得・`instance_kdls(plan, base_sub, template)`・`generate_instance_kdl_v2(base, runs, template)`・dry-run経路含む）と、template有/無それぞれの生成KDL例を追加 |
+| TR74-3 | P1 | 設計書§1 F5/§2.1・DD-10.6(iii)/10.13 | 同一Run複数pane・run=None複数shell paneのslot順非保証は、requirements.md:100「pane ordering ... must be deterministic and documented」との未解決矛盾（TASK-37 R7の例外明記はDD-10側のみで要件側に未反映） | **修正** | requirements.md §2.6へR7先例形式で例外を明記（決定論保証範囲=tab/group所属・run一意paneのslot対応まで。同一run内・複数shell pane間のslot順はzellij run一致順依存で保証外。プロセス保存・pane数・所属tabは保証）。DD-10.6(iii)/10.13から要件例外への参照を追記し設計書§5対応表へ10.6行追加 |
+| TR74-4 | P2 | 設計書§3 | r14/r15/r20等のdescription更新だけでは旧実装（pane_command依存）をfail-first検出できない。terminal_command=None+pane_command=Some（shell上で前景process実行）と terminal_command=Some+pane_command=None/別値 の直交ケースが必要 | **修正** | §3へ両field直交fixture（P-shell-proc / P-cmd-pane）の最小例と期待値・旧実装の挙動対比表を追加。planner（run assert）・parser（JSON key明記）・cli（shim fixture + dry-run KDL preview期待値）の3層配置を明記。generator層はSlotRun経由で既存条件が覆盖 |
+| TR74-5 | P2 | 設計書§4(iii)(iv) | 副因C（空応答retry）のE2E検証が非決定的（「発生すれば記録・未発生ならfake test」）。(iii)の「観察項目」「合格必須からは除外しない」「spawnされない場合は記録」が相互矛盾 | **修正** | 副因Cの必須合格条件をfake backend test（remap-sequence.empty-list-panes-retry-in-polls・empty-response-retry-before-verify。N回空応答後成立の決定的注入・fail-first込み）へ昇格。§4を実機の必須合格条件・観察条件（j>=1 tab bar spawn有無・空応答発生時の非中断記録）・失敗条件に分離して再記述 |
+| TR74-6 | P2 | 設計書§2.3/§5・DD-10.7 | §2.3がverify()冒頭・snapshot取得もlenient化する一方、DD-10.7本文はpolling前言と移動phaseのみで、初期snapshot・verifyのretry・list-tabs空応答の扱いが規範本文に未対応 | **修正** | DD-10.7へ「空応答のlenient取得」節を新設: 対象（polling closure〔probe・5-a/5-b〕・step 1 snapshot・10.9検証冒頭・`list_panes_lenient`/`list_tabs_lenient`）・deadline（10s不変・C3規則不変）・fatal条件（空応答のdeadline超過継続・非空parse失敗・非zero exit）を規範化し、§5対応表の10.7行を更新 |
+| TR74-7 | P3 | 設計書§1 F4/§2.6 | F4のcwd比較はcwd=/tmpのみで、相対cwd・layout継承cwd・`zellij run --cwd`正規化差異は未検証のまま「cwd明示pane」一括扱い | **対応** | §1 F4に「検証済み=絶対path cwd明示のみ」の限定を追記。§2.6を検証状況で分解（絶対cwd明示=F4実証済み。相対・継承・正規化差異=未検証・同じ照合外れ経路と推定・追加実験は実施せず予算温存）し、preflight検出不可（terminal_commandからcwd観測不能・pane_cwdは代理にならない）を明記。§7の未判明事項を更新。DD-10.13・設計書§5対応表の10.1行にも反映 |
+
+**検証**: 文書変更のみ（src/tests不変のためcargo等の機械検証対象なし）。修正後の整合確認: 設計書§2.2/§2.5/§2.6/§3/§4/§5/§7・detailed-design.md（DD-10.6(iii)/10.7/10.13）・requirements.md §2.6の相互参照一致。spike S成果物・実験予算（残り2回）は不変。
+
+**総評**: 指摘7件は全件修正・対応で解消（却下なし）。P1の2件（TR74-2 template引渡し経路の実装指示欠落・TR74-3 要件側例外未反映）はいずれも設計書→実装・要件への接合漏れであり、文書修正で解消した。
+
+### 4.22 TASK-74 コードレビュー（remap照合修正実装）
+
+レビュー日: 2026-09-15。対象: TASK-74実装（remap照合key変更・template反映・poll lenient化・boolean出力修正。commit範囲86f0dbf..HEAD・src/tests 29 file→最終31 file程度。E2E経由でbar配置bug・boolean quote bugを発見修正済みの状態）。方法: 実装者（codex）と別model（glm・read-only）による独立レビュー。指摘8件（P1×1・P2×4・P3×3）・dispositionは全件修正・対応（却下・負債化なし）。IDはCR74-n。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| CR74-1 | P1 | src/app/remap.rs execute step 6 | template系LayoutInvalid（children不在・leaf数不一致）検証が状態変更（probe・toggle・移動・rename）後にしか走らない。DD-10.7「全preflightを状態変更前に完了」・設計§2.2「preflight追加検証…事前中断」違反。partial_phase報告も`?`伝播で省略 | **修正** | instance_kdls計算をrun()の状態変更前（dry-run分岐と同形）へ切り上げ、executeへ渡す。step 6再計算を削除。回帰条件 remap-sequence.template-invalid-detected-before-mutation（状態変更操作0件・companion setup不発生込み）を新規条件化しfail-first確認後に修正 |
+| CR74-2 | P2 | src/app/remap.rs probe poll | lenient呼び出しがgate用で実際のtitle判定はstrict list_panes再取得（tick毎2回spawn・gate直後strict空応答でfatalの窓・comment誤り） | **修正** | probe pollのtitle判定をlenient戻り値で直接行い1 tick 1回呼び出し化。fake strict側注入（busy window両掛かり模擬）に対してもpollはlenientのみで完結。C3 testの遅延注入をlenient経路へ追従 |
+| CR74-3 | P2 | tests/fake_backend | 空応答注入カウンタがrun冒頭snapshot_lenientで消費され切り、probe/5-a/5-b poll・verify冒頭に空応答が届いておらず既存2条件の記載内容がtestで未実証（経路をstrictへ戻してもpass） | **修正** | fake注入機構をpipe以降arm（empty_panes_after_pipe）・override-layout以降arm（empty_*_after_override）へ再構成。旧empty_*_before廃止。既存2条件のdescription/givenを実証ある系列へ更新しfail-first確認後に対応 |
+| CR74-4 | P2 | src/app/remap.rs timeout文面 | F8機構（screen繁忙の1s list応答timeout→空出力）注記がsnapshot_lenientのみでprobe/move両timeout文面にない（probe側は権限問題と誤診されうる） | **修正** | probe poll timeout・move系timeout（r36）文面へscreen繁忙注記を追加。poll-deadline系（C3）とr36のtest期待値へ文面assert追加 |
+| CR74-5 | P2 | src/app/remap.rs・src/layout/generator.rs・tests comment | 廃止規則（pane_command基準注入）のstale doc/comment残存（V2Assignment.run・V2Plan.warnings・SlotRun・r20 test冒頭） | **修正** | すべてterminal_command基準の文言へ更新 |
+| CR74-6 | P3 | src/layout/mod.rs normalize_zellij_kdl | 行単位字句処理のため複数行文字列（"""）内のbare true/falseを書き換えうる（旧実装からある既存制限。template配下plugin設定が流れるようになったため記録に値） | **対応** | 既知制限としてdocへ明記 |
+| CR74-7 | P3 | src/layout/mod.rs default_tab_template_subtree | children blockを持たないnode（braceなし）がchildren()=Noneでtemplate無し扱いになり黙ってbar欠落（検証(b)はplugin paneを数えず検知不能） | **修正** | node在り・children block無しはSomeを返しむらのgenerator検証でLayoutInvalid発火。template-children-substitution条件へcase追加しfail-first確認後に対応 |
+| CR74-8 | P3 | tests両README・meta note | fail-first期の記述（「期待値更新待ち」「現行実装はquote付きでfail-first」等）が現状と不一致 | **対応** | 当時記録である旨補正（layout-planner・backend-parserの同種記載含む） |
+
+**検証**: 修正後 cargo test 149/149 green（追加・更新test含む。codex sandboxで見えたcli_list_read_send 4件failはhost非再現のsandbox artifact） / mise run verify-conditions exit 0（16 file・149条件・149tag・41excluded） / clippy 0 warning / fmt clean / podman E2E acceptance run5 全必須18条件PASS（tmp/task74/acceptance/・verdict.txt・run5正本。幾何はreferenceとIDENTICAL・bar top-level生存・27 pane/3 tab・anchor bar id保存）。
+
+**総評**: P1×1（CR74-1 preflight順序違反）を含む指摘8件は全件修正・対応で解消（却下・負債化なし）。レビュアー総評「正常系の実装本体は設計・E2E実績と整合」どおり、CR74-1対応後にE2E再合格しTASK-74は完了可能となった。
+
+### 4.23 TASK-75設計レビュー（remap multi-tab全体再現・DD-10 v2.2）
+
+レビュー日: 2026-09-16。対象: TASK-75設計（`docs/design/remap-v3-multi-tab-task75.md`・detailed-design.md DD-10 v2.2改訂〔10.1事実6・10.2 #6/#8注記・10.5・10.6全面改訂・10.7・10.8・10.9・10.10・10.12 #9・10.13・10.14・DD-3.3〕・requirements.md §2.6 multi-tab要件。実験成果物`tmp/task75/`前提）。方法: 作成者と別model（codex gpt-5.6-luna・read-only sandbox）による独立レビュー（レビューlog: `tmp/20260916_review_design_task75.log`）。指摘10件（P1×1・P2×7・P3×2）・dispositionは全件**修正**（却下なし）。IDはTR75-n。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| TR75-1 | P1 | requirements.md §2.6・設計書§2.3/§2.8・DD-10.13 | requirementsは「tab名を`zellij --layout`起動時と同一に再現」「anchor以外に例外なし」と読める一方、設計/DD-10は名無しtab自動名（`Tab #N`）とpane name→titleを保証対象外としており、要件と詳細設計が矛盾する | **修正** | requirements.md §2.6へ設計/DD-10と同一の例外群を明記（(a) anchor名・位置 (b) 名無しtab自動名→zelper命名 (c) pane name→title保証外 (d) pane id）。DD-10.13 multi-tab対象外へ要件側明記済みの参照を追記 |
+| TR75-2 | P2 | detailed-design.md:313 | v2.2改訂直後に「本v2は未実装・実装はTASK-39・切替はTASK-40」の旧記述が残存し、v2.1実装済みの現状と矛盾 | **修正** | 同箇所を「v2.1まで実装済み（E2E run5合格）・v2.2は未実装」の現状注記へ更新（旧v2時点の記録は完了済みである旨を明記） |
+| TR75-3 | P2 | 設計書§2.7・DD-10.6・requirements.md:104 | 「T=1厳密一致」が式・命名・tab focusのみの一致か実行時挙動全体の一致か曖昧。T=1でもfocus-pane-idが新規実行されるため操作列全体の一致ではない | **修正** | 設計書§2.7を見出しから「T=1後方互換（割当・k・命名・tab focus復帰の式レベル一致）」へ改め、保証範囲=計画レベル4項目の一致・実行操作列全体の一致でないことを冒頭に明記。DD-10.6の当該bullet・requirements.md §2.6へも同旨の限定を追記 |
+| TR75-4 | P2 | 設計書§3.4・DD-10.7 | 空groupのnew-tab由来tab IDをlayout適用phaseまで保持するdata flowが未定義。「長寿命tab id参照を持たない」原則（DD-2）と緊張 | **修正** | 設計書§3.4・DD-10.7へdata flowを追記: targets配列（targets[b*T+t]）の単一execute実行scope内保持は現行と同じ運用であり、DD-2原則の適用範囲を「実行を超えた保持の禁止」と明確化。step 6各group処理直前にlist-tabs（lenient）で存在確認し、不在なら再解決（割当あり=pane所属基準・空group=rename済み生成tab名基準。go-to-tab-nameは同名曖昧性のため補助）。new-tab由来idはparse直後のrenameで「取得直後に消費」 |
+| TR75-5 | P2 | 設計書§3.4/§5・DD-10.7 | 空groupのみcase（M=0・source全てanchor内）のpreflight depthが不明。new-tab経路（tab ID parse・既定pane・override後N_t一致）が未検証のまま必須条件化されていない | **修正** | 設計書§3.4・DD-10.7へ「空groupのみ実行はcompanion・probe不使用・preflightは他caseと同一depth（layout解決・N_t=0・children置換・plan・生成KDL計算）を状態変更前に完了・new-tab失敗はOperationFailed」を追記。§5.1 remap-sequence条件へtab ID parse・既定paneのN_t正規化を含むfake必須条件として昇格、§5.2 (iii) E2E必須条件へ昇格 |
+| TR75-6 | P2 | 設計書§5.2・DD-10.9 | E2Eのper-tab geometry条件が「anchor tabを除く各tabで検証」となり、anchor形状検証の除外と読める。anchor例外は名前・位置のみで形状・slot数の例外ではない | **修正** | 設計書§5.2 (ii) (iii)の幾何条件を「anchorを含む全生成tabでreference幾何と一致」へ修正。DD-10.9 (b)へ「anchor (0,0)を含む全生成tabが対象」を明記、DD-10.13 (4)にも形状・slot数は例外でない旨を追記 |
+| TR75-7 | P2 | 設計書§5.2 | tab focus決定則のE2E必須条件が「文書順最初のtabにfocus」caseのみで、2番目以降のfocus tab・複数focus時の文書順最初採用・focus無指定時のanchor復帰が実機で固定されていない | **修正** | 設計書§5.2へ**(v) tab focus決定則matrix**を追加: 系列a（文書順2番目tabのfocus→最終go-to先が(0,t*!=0)）・系列b（複数focus=true→文書順最初採用+warning）・系列c（focus無指定→anchor復帰）の3系列を必須合格条件化（各系列ともactive tabをlist-tabsで検証） |
+| TR75-8 | P2 | 設計書§4.3・DD-10.9 | dump比較除外項目が一部列挙のみで、§2.3/§2.8/DD-10.13の保証外項目との対応が体系的でない。dump比較実装時に誤差項目を合格判定へ混入しうる | **修正** | 設計書§4.3を対応表へ改訂: 比較対象を「tab毎slot数・幾何・bar存在・検証可能focus（is_focused・active）」に限定し、dump出現項目×除外根拠（保証外条文・R75事実）×代替検証経路の9行対応表化。DD-10.9へ「dump-layoutとの完全一致は保証・検証対象外・比較対象限定」の規定を追記 |
+| TR75-9 | P3 | 設計書§3.8・src/app/remap.rs・src/layout/mod.rs・src/layout/generator.rs・tests/unit/* | 旧API（base_subtree・default_tab_template_subtree・template引数付きgenerate_instance_kdl_v2・単一instance V2Plan）削除時の全参照更新（remap.rs:66-125,203-265,577-595・mod.rs:264-304・generator.rs:26-49・tests/unit/*）と移行順が不足 | **修正** | 設計書§3.8へ旧API移行設計を追記: 旧API×現行参照箇所×移行先の対応表+実施順序5段（TabTemplate追加→本体切替え→旧API削除+残存0確認→test fixtureの正規形TabTemplate化→fake/cli期待値追従。各段でcargo check --all-targetsを先行） |
+| TR75-10 | P3 | 設計書§3.5・src/zellij/mod.rs・process.rs | focus_paneのargv例がterminal_3限定で、PaneKindId系列分岐・focus対象がterminalであること・失敗時warning化の責務（backendかexecuteか）が不明確 | **修正** | 設計書§3.5へ責務分担を明記: backendはargv組み立てとResultを返す薄い実装のみ（系列分離はas_spec()が担い分岐なし。zellij仕様としてはplugin_Nも受理するがremapのfocus対象はterminal slotのみ）・Errのwarning化はexecute側の責務・fake.rsも同型の薄い実装+呼出記録 |
+
+**検証**: 文書変更のみ（src/tests不変のためcargo等の機械検証対象なし）。修正後の整合確認: 設計書§2.7/§3.4/§3.5/§3.8/§4.3/§5.1/§5.2・detailed-design.md（DD-10.6/10.7/10.9/10.13・:313注記）・requirements.md §2.6（例外群・T=1後方互換・anchor例外の限定）の相互参照一致。実験成果物・予算（3回消化済み）は不変。E2E acceptanceは(v)追加により(i)〜(v)構成。
+
+**総評**: 指摘10件は全件修正で解消（却下なし。P1×1は要件側例外未反映TR75-1）。レビュアー総評「中核設計（配分式・TabTemplate正規形・per-tab適用・anchor保持）は実装可能。P1解消とP2のTR75-4〜8反映後なら実装に進める」どおり、全指摘反映によりTASK-75設計は実装段階へ進める状態となった。
+
+### 4.24 TASK-75 コードレビュー（remap multi-tab全体再現実装）
+
+レビュー日: 2026-09-16。対象: TASK-75実装（正規形TabTemplate列・block×tab配分・focus位置ベース決定・空groupのnew-tab --layout-string経路・leftover_tabs報告・E2E要因A/B改修・vb warning改修込み。diff 61d0d84..HEAD・src/tests。E2E acceptance 80条件PASS・cargo test 171/171・verify-conditions 171条件済みの状態）。方法: 実装者と別model（codex gpt-5.6-luna・read-only sandbox）による独立レビュー（レビューlog: `tmp/20260916_review_code_task75.log`）。指摘3件（P2×1・P3×2）。IDはCR75-n。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| CR75-1 | P2 | src/app/remap.rs resolve_target | 再解決経路が`list_panes()`（strict・1回のみ）を呼ぶため、tab ID再解決時の一時的空stdoutで即時失敗する。DD-10.7/10.9の空応答設計（一時状態はpoll継続）と不整合（step 6本体はlenient使用なのに再解決だけstrict） | **修正** | resolve_target内の取得を`list_panes_lenient`のpoll（deadline規則は他lenient取得と同一・timeout文面にscreen繁忙注記）へ変更。tab-id-resolution-lenient-before-apply条件のtestへ「再解決位置のlist_panes空応答（精密arm empty_panes_nth_after_override）→retryで再解決成立（go-to 5直前のlist-panes-lenient連続2回）」系列を追加（strict 1回呼び出しならfailする期待値・弱め化なし） |
+| CR75-2 | P3 | tests/design/remap-sequence.toml（--tab経路・layout適用phase失敗のexcluded） | `--tab TABSPEC`経路（source絞り込み・anchor切替・鋳型0単tab適用）とlayout適用phase失敗の部分状態報告が未testのまま。TASK-75のtargets再解決・multi-tab化との相互作用を固定できていない | **起票済み（TASK-69/70）** | 両経路とも条件書自身が未testと記録している既知項目であり、tmで管理済み（TASK-69: remap --tab TABSPEC絞り込みtest追加・TASK-70: layout適用phase失敗の報告test追加）。本レビューでは新しい対応を行わない |
+| CR75-3 | P3 | src/app/remap.rs step 6（layout適用phase） | 各生成tabごとにlist-tabs poll＋list-panes pollを逐次実行するため、screen繁忙時に最大10sの待ち時間が生成tab数（T×k）に比例して累積する。phase内での取得結果共有・再利用方針が設計にない | **対応** | 設計書remap-v3-multi-tab-task75.mdへ§4.4（実行時間の性能特性）を新設: 現状構造（逐次poll・最悪待ち時間のT×k比例）・致命的でない理由（focus対象決定はbest-effortでpoll timeout時warning skip・検証(d)で検知）・将来の改善方向（phase内取得結果共有・deadlineのphase単位共有・存在確認の間引き。実用上問題になった時に検討）を明記。実装変更なし |
+
+**検証**: CR75-1修正後 cargo test 171/171 green（tab-id-resolution-lenient-before-apply拡張込み） / mise run verify-conditions exit 0（171条件・171 tags・46 excluded） / clippy 0 warning / fmt clean。CR75-1はfake/L2で実証される変更（実機経路の挙動はlenient化で変わらずretry追加のみ）のためE2E再実行は不要。
+
+**総評**: 指摘3件は修正1件（CR75-1）・起票済み1件（CR75-2→TASK-69/70）・設計記録1件（CR75-3）で解消（却下・負債化なし）。レビュアー総評「TASK-75の主要仕様はよく反映されており、重大な配分・focus・空group実装不一致は見当たらない」どおり、P2のlenient統一によりTASK-75実装は完了状態。

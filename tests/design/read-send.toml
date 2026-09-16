@@ -12,7 +12,7 @@ note = "src/app/send.rs も検証対象"
 
 [[condition]]
 id = "read-send.read-single-and-multi-results"
-source_lines = "tests/cli/list_read_send.rs:249"
+source_lines = "tests/cli/list_read_send.rs:267"
 target_function = "read::run"
 source = "docs/testing/test-plan.md §2.4（read: 対象順のdump-screen呼び出し列） + docs/design/detailed-design.md DD-6（plan: 対象pane毎にdump-screen -p。順序はTargetSet順 / JSON: results[]: { target, title, tab, content | error }） + DD-1.3（PANESPEC = bare 3（=terminal_3）正規化）"
 description = "readの対象解決と結果取得の基盤: 単数PANESPECはbare数値（1）をterminal_1へ正規化して解決し、JSONのresults[]にtargetとcontent（dump-screen結果）を格納する。複数PANESPEC指定も同経路で受理（§2.1のPANESPEC正規形要求のうちbare正規化を本条件が担う。CMR-5: bare正規化とresults構造を1条件に統合）"
@@ -21,7 +21,7 @@ expect_return_shape = "単数時はexit 0かつresults[0].target=terminal_1・re
 
 [[condition]]
 id = "read-send.read-nonexistent-pane-is-no-target-exit3"
-source_lines = "tests/cli/list_read_send.rs:268"
+source_lines = "tests/cli/list_read_send.rs:287"
 target_function = "read::run（positional照合）"
 source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-6（解決: positional PANESPECはlist-panes結果と照合（存在確認 + 読み取り対象確定）） + DD-1.4（対象0件 → no target matched error） + DD-4.3（NoTarget = exit 3）"
 description = "readのpositional照合の負荷側: 存在しないpane ID指定はNoTarget（exit 3）で失敗する。positional PANESPECの存在確認が効いていることの検証"
@@ -30,7 +30,7 @@ expect_return = "exit 3（NoTarget）"
 
 [[condition]]
 id = "read-send.human-output-pane-headers"
-source_lines = "tests/cli/list_read_send.rs:388"
+source_lines = "tests/cli/list_read_send.rs:416"
 target_function = "read human出力"
 source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-4.1（read複数pane: pane毎にヘッダ行 === terminal_3 (HB1, tab:2 agents) === + 内容）"
 description = "readのhuman出力形式: pane毎の識別ヘッダ行（=== pane_id (title, tab:POS NAME) ===）。複数pane読み取り時にどのpaneの出力かを判別可能にする表示契約"
@@ -39,7 +39,7 @@ expect_return_shape = "stdoutに === terminal_1 (agent-a, tab:0 Tab #1) === の�
 
 [[condition]]
 id = "read-send.send-broadcast-visual-order-calls"
-source_lines = "tests/cli/list_read_send.rs:297"
+source_lines = "tests/cli/list_read_send.rs:318"
 target_function = "send::run"
 source = "docs/testing/test-plan.md §2.4（send: text→write-chars呼び出し。fake shim: 呼び出しargv列の記録と期待比較（L3）） + docs/design/detailed-design.md DD-7（実行: text → write-chars -p。順序: TargetSet順に順次） + DD-6（順序はTargetSet順（tab position → y → x））"
 description = "sendのtext送信がwrite-charsへmapされ、対象がvisual order（tab position → y → x昇順）で順次呼び出されること。broadcast系操作の実行順序の決定性（pane列挙順に依らない）をshimのargv記録で検証"
@@ -48,7 +48,7 @@ expect_return = "exit 0かつwrite-chars呼び出しが2件で、順序はtermin
 
 [[condition]]
 id = "read-send.send-enter-appends-cr-and-keys-use-send-keys"
-source_lines = "tests/cli/list_read_send.rs:313"
+source_lines = "tests/cli/list_read_send.rs:335"
 target_function = "send::run（--enter / --keys）"
 source = "docs/testing/test-plan.md §2.4（--enterで追加のwrite 13・--keys→send-keys argv分割） + docs/design/detailed-design.md DD-7（--enter → write -p 13。keys → send-keys -p（key毎に独立argv要素））"
 description = "sendの送信形式map: textはwrite-chars、--enter併用時はtext送信後にCR（write 13）を追加、--keysはkey毎に独立argv要素を持つsend-keysへ。入力送信のbackend呼び出し契約（CMR-5: --enterのCR追加と--keysのargv分割を1条件に統合）"

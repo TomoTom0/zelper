@@ -12,7 +12,7 @@ note = ""
 
 [[condition]]
 id = "cli-grammar.session-auto-resolve-single-live-with-exited"
-source_lines = "tests/cli/list_read_send.rs:177"
+source_lines = "tests/cli/list_read_send.rs:192"
 target_function = "session解決（resolve_session）"
 source = "docs/testing/test-plan.md §2.1（session解決: --session > env > 単一session > error（候補列出）の優先順） + docs/design/detailed-design.md DD-1.2（対象session解決: 実行中sessionが1つのときそれ。実行中はlist-sessions -nのEXITED行を除外して数える） + docs/design/design-review.md §4.9 TASK-44（EXITED session解決）"
 description = "対象session解決の優先順位のうち「実行中sessionが1つなら自動解決する」段: EXITED（resurrection待ちdead session）を行数から除外するため、EXITED混在環境でも実行中1件なら--session指定なしで操作系verbが成立する。session解決を必要とするverb（list tabs/panes・read/send等）共通の基盤"
@@ -21,7 +21,7 @@ expect_return = "exit 0（live-aへ解決しreadが成功）。検証限界: 複
 
 [[condition]]
 id = "cli-grammar.send-requires-double-dash-text-is-usage-error"
-source_lines = "tests/cli/list_read_send.rs:338"
+source_lines = "tests/cli/list_read_send.rs:361"
 target_function = "send構文（TEXTの--区切り）"
 source = "docs/testing/test-plan.md §2.1（非例の全パターン（DD-1.6非例）: exit 2 + usage error） + docs/design/detailed-design.md DD-1.3（sendのTEXTは--以降。targets（positional）とTEXTの区切りを構文で保証） + DD-1.6非例（zelper send 1 2 y # -- がないためusage error）"
 description = "sendのTEXTは--以降という構文規則の負荷側: --なしのoperandはTEXTと解釈せずusage error。positional PANESPEC群とTEXTの混同を構文で防ぐ（scriptingでの誤爆送信防止）"
@@ -30,7 +30,7 @@ expect_return = "exit 2（usage error）"
 
 [[condition]]
 id = "cli-grammar.send-text-keys-conflict-is-usage-error"
-source_lines = "tests/cli/list_read_send.rs:345"
+source_lines = "tests/cli/list_read_send.rs:369"
 target_function = "send排他規則（-- TEXT × --keys）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: send text/keys併用） + docs/design/detailed-design.md DD-1.5（send: -- TEXT と --keys は相互排他）"
 description = "sendの送信内容指定（-- TEXT / --keys）の相互排他: 両方指定はusage error。text送信とkey送信という別経路（write-chars / send-keys）の混在指定を構文段で拒否する"
@@ -39,7 +39,7 @@ expect_return = "exit 2（usage error）"
 
 [[condition]]
 id = "cli-grammar.remap-layout-sources-conflict-is-usage-error"
-source_lines = "tests/cli/list_read_send.rs:355"
+source_lines = "tests/cli/list_read_send.rs:380"
 target_function = "remap排他規則（layout 3source）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: remap 3source併用） + docs/design/detailed-design.md DD-1.5（remap: positional layout名 / --path / --inline の3者は相互排他） + docs/design/first/260821/requirements.md §2.9（mutually exclusive source forms must be rejected when supplied together。同一原則はCLI全体へ適用）"
 description = "remapのlayout指定3形式（positional layout名 / --path / --inline）の相互排他: 複数同時指定はusage error。DD-1.6非例「zelper remap ./three.kdl」（pathのpositional渡し）と同じ排他機構の負荷側"
@@ -48,7 +48,7 @@ expect_return = "exit 2（usage error）。検証限界: 2source（positional×-
 
 [[condition]]
 id = "cli-grammar.invalid-pane-spec-is-usage-error"
-source_lines = "tests/cli/list_read_send.rs:365"
+source_lines = "tests/cli/list_read_send.rs:391"
 target_function = "PANESPEC parse"
 source = "docs/testing/test-plan.md §2.1（PANESPEC正規形: 3→terminal_3正規化、plugin_1受理、不正文字はexit 2） + docs/design/detailed-design.md DD-1.3（PANESPEC = pane IDのみ。terminal_3 / plugin_1 / bare 3。名前・path・その他の暗黙解釈はしない）"
 description = "PANESPECはpane IDのみという規則の負荷側: 接頭辞DSL等の不正文字はusage error。bare数値→terminal_N正規化はread-send.read-single-and-multi-results条件が検証（read 1 の結果target=terminal_1）。検証限界: plugin_1受理は未検証（excluded参照）"
@@ -57,7 +57,7 @@ expect_return = "exit 2（usage error）"
 
 [[condition]]
 id = "cli-grammar.completion-generates-script"
-source_lines = "tests/cli/list_read_send.rs:372"
+source_lines = "tests/cli/list_read_send.rs:399"
 target_function = "completionサブコマンド"
 source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（clap_completeによる動的生成。stdoutへscript出力。verb・noun・一部の値を補完）"
 description = "completionサブコマンドがshell補完scriptをstdoutへ出力する。top-levelに許容される文書化された例外コマンド（DD-1.1）の動作保証"

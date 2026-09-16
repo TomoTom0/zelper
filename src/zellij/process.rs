@@ -138,6 +138,11 @@ impl ZellijBackend for ZellijCliBackend {
         parser::parse_tabs(&out)
     }
 
+    fn list_tabs_lenient(&self) -> Result<Option<Vec<TabState>>, ZelperError> {
+        let out = self.run_action(&["list-tabs", "-a", "--json"])?;
+        parser::parse_tabs_opt(&out)
+    }
+
     fn list_tabs_for(&self, session: &str) -> Result<Vec<TabState>, ZelperError> {
         let out = self.run_action_as(session, &["list-tabs", "-a", "--json"])?;
         parser::parse_tabs(&out)
@@ -146,6 +151,11 @@ impl ZellijBackend for ZellijCliBackend {
     fn list_panes(&self) -> Result<Vec<crate::domain::PaneState>, ZelperError> {
         let out = self.run_action(&["list-panes", "-a", "--json"])?;
         parser::parse_panes(&out)
+    }
+
+    fn list_panes_lenient(&self) -> Result<Option<Vec<crate::domain::PaneState>>, ZelperError> {
+        let out = self.run_action(&["list-panes", "-a", "--json"])?;
+        parser::parse_panes_opt(&out)
     }
 
     fn current_tab(&self) -> Result<TabState, ZelperError> {
@@ -323,6 +333,14 @@ impl ZellijBackend for ZellijCliBackend {
 
     fn go_to_tab(&self, tab: TabId) -> Result<(), ZelperError> {
         self.run_action(&["go-to-tab-by-id", &tab.0.to_string()])?;
+        Ok(())
+    }
+
+    fn focus_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError> {
+        // argv組み立てとResultを返す薄い実装のみ（TR75-10。warning化・retryなし。
+        // PaneKindIdの系列分離〔terminal_N / plugin_N〕はas_spec()が担う）
+        let p = pane.as_spec();
+        self.run_action(&["focus-pane-id", &p])?;
         Ok(())
     }
 
@@ -556,6 +574,46 @@ exit 0
         );
         assert!(
             err.message().contains("unexpected current-tab-info output"),
+            "message: {}",
+            err.message()
+        );
+    }
+
+    /// TASK-75設計§3.5（TR75-10）: focus_paneはargv組み立てとResultを返す薄い実装
+    /// のみ（warning化・retryなし。PaneKindIdの系列分離はas_spec()が担いbackendは
+    /// 分岐を持たない）。Terminal(3) -> focus-pane-id terminal_3。非zero exitは
+    /// 現行run()系と同一のerror変換（OperationFailed）
+    // [covers:backend-process.focus-pane-id-argv]
+    #[test]
+    fn focus_pane_id_argv_and_error_mapping() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "zelper-fake-process-focuspane-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("argv.log");
+        let script = format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> {}\nexit 0\n",
+            log.display()
+        );
+        let program = setup_fake_zellij("focus-pane", &script);
+        let backend = ZellijCliBackend::new("sess75").with_program(program);
+        backend.focus_pane(&PaneKindId::Terminal(3)).unwrap();
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            recorded.trim(),
+            "--session sess75 action focus-pane-id terminal_3",
+            "argvはas_spec()由来のterminal_N形式"
+        );
+
+        // 非zero exitはOperationFailed（現行run()系と同一のerror変換）
+        let program = setup_fake_zellij("focus-pane-fail", "#!/usr/bin/env bash\nexit 1\n");
+        let backend = ZellijCliBackend::new("sess75").with_program(program);
+        let err = backend.focus_pane(&PaneKindId::Terminal(3)).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::OperationFailed,
             "message: {}",
             err.message()
         );

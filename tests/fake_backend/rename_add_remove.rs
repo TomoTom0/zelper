@@ -20,6 +20,7 @@ fn pane(id: u32, title: &str, tab: u32, y: u32, x: u32) -> PaneState {
             cols: 10,
         },
         command: Some("codex".into()),
+        terminal_command: None,
         cwd: Some("/w".into()),
         tab_id: TabId(tab),
         tab_position: 0,

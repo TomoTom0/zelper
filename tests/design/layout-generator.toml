@@ -1,84 +1,113 @@
-# remap v2 生成KDL（src/layout/generator.rs: generate_instance_kdl_v2）の検証条件。出典: test-plan §2.7 (b) R13〜R19・(a) R9 KDL側・DD-10.8
-# 対応test: tests/unit/layout_generator.rs（8件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
-# generatorは純粋関数（slot列→run写像のKDL生成。DD-10.8）
+# remap v2 生成KDL（src/layout/generator.rs: generate_instance_kdl_v2）の検証条件。出典: test-plan §2.7 (b) R13〜R19・(a) R9 KDL側・DD-10.8・TASK-74設計書（remap-v2-matching-fix-task74.md §2.2）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.6・§3.3・DD-10 v2.2）
+# 対応test: tests/unit/layout_generator.rs（条件11件。1条件=1 test fnの1:1対応。設計書§2.3/3.4。template-children-substitution-nested-baseのtestはE2E再現回帰分として追加済み）
+# generatorは純粋関数（slot列→run写像のKDL生成。DD-10.8）。v2.2（TASK-75）: template引数は廃止され、入力baseは
+# normalize_tab_templatesが返す正規形subtree（children置換済み・tab属性除去済み）のみ。既存条件の期待値は不変（入力の読み替えのみ）。
+# 生成KDLの属性直列化（TASK-74 E2E run3・2026-09-15確定）: 文字列値はquote付き・boolean/数値属性はquoteなしリテラル（borderless=true・size=1）。quote付きbooleanはzellij 0.44.3 layout parserに拒否される（tmp/task74/acceptance/b_remap.json）。r17「値quote必須」は文字列値の規定でありboolean/数値リテラルは対象外
 [meta]
 feature = "layout-generator"
 source_file = "src/layout/generator.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-09-16"
 verified_by = "claude"
 test_command = "cargo test --test layout_generator"
-source_hash = "f717c81c59032039f85405c227f042e4d951b98a"
-note = ""
+source_hash = "966cd583937be534ecbea9f590c65e328d10751b"
+note = "TASK-74（2026-09-15）条件書更新: template-children-substitutionを追加しr13/r14/r15/r18のdescriptionを読み替え（注入data sourceのterminal_command化・plugin leaf適用範囲拡張。SlotRun API・r13〜r15/r18期待値は不変）——（以下TASK-74分は当時記録。その後の実装・test追従で解消済み・cargo test --test layout_generator は全pass。CR74-8補正。E2E acceptance (ii) 不合格を受けtemplate-children-substitution-nested-baseを追加〔testはb935e0eで追加済み〕。E2E run3のboolean属性quote付き出力障害への要求明記も実装・test追従で解消済み。CR74-7のchildren block不在LayoutInvalid要求も実装済み）。TASK-75（2026-09-15）条件書更新: v2.2のtest-first前段としてper-tab-kdl-from-normalized-templatesを追加し、全条件の入力を正規形subtree（template引数廃止・normalize_tab_templates経由）へ読み替え（期待値は不変。TASK-75設計§3.3/§3.8移行手順(4)）。template-children-substitution系2条件のtarget_functionをnormalize_tab_templates（layout解決への一元化）へ更新。新条件は当時未実装のためfail-first状態（テストコード・実装は後段の追従待ち）——（当時記録。TASK-75実装・test追従・E2E acceptance 80条件PASS（S-v3-1〜5・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応まで完了〔2026-09-16〕。cargo test --test layout_generator は全pass）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新"
 
 [[condition]]
 id = "layout-generator.r13-occupied-slot-injects-command-and-args"
-source_lines = "tests/unit/layout_generator.rs:23"
+source_lines = "tests/unit/layout_generator.rs:43"
 target_function = "generate_instance_kdl_v2"
-source = "docs/testing/test-plan.md §2.7 (b) R13 + docs/design/detailed-design.md DD-10.8（occupied slot: pane_commandを注入。command = 空白分割のargv[0]、args = 残り）"
-description = "occupied slotへのrun注入: pane_commandを空白分割しcommand=argv[0]・args=残りを別要素（command属性 + args子node）として注入する。run一致照合（既存paneの決定論的slot配置）の根拠"
-given = "3-slot layout baseに対しrun列 [bash /work/hb.sh p1, codex exec, None] をgenerate_instance_kdl_v2へ与える"
+source = "docs/testing/test-plan.md §2.7 (b) R13 + docs/design/detailed-design.md DD-10.8（TASK-74改訂: occupied slot: terminal_command〔invoked_with序列化〕を注入。command = 空白分割のargv[0]、args = 残り） + docs/design/remap-v2-matching-fix-task74.md §2.1"
+description = "occupied slotへのrun注入: run列（SlotRun。plannerがterminal_command由來で算出——layout-planner.run-derives-from-invoked-with）を空白分割しcommand=argv[0]・args=残りを別要素（command属性 + args子node）として注入する。run一致照合（既存paneの決定論的slot配置）の根拠。TASK-74改訂により注入data sourceはpane_commandからterminal_commandへ変更（generator APIのSlotRunは不変のため本条件の期待値は不変）。TASK-75（v2.2）: 入力baseは正規形subtree（template引数廃止・normalize_tab_templates経由）へ変わるが期待値は不変"
+given = "3-slot正規形subtree（template無しlayout由來）に対しrun列 [bash /work/hb.sh p1, codex exec, None] をgenerate_instance_kdl_v2へ与える"
 expect_return = "slot毎のcommand argv列が [bash /work/hb.sh p1][codex exec][空]。生成KDLはcommand=\"bash\"属性とargs \"/work/hb.sh\" \"p1\"子nodeを含む"
 
 [[condition]]
 id = "layout-generator.r14-single-word-shell-command-still-injected"
-source_lines = "tests/unit/layout_generator.rs:51"
+source_lines = "tests/unit/layout_generator.rs:71"
 target_function = "generate_instance_kdl_v2"
-source = "docs/testing/test-plan.md §2.7 (b) R14 + docs/design/detailed-design.md DD-10.8（pane_commandがSomeなら単語1つのshell起動paneでも注入する。旧shell_aware_argvの「shell名のみはbare扱い」はv2で廃止）"
-description = "単語1つのshell起動paneも注入対象: pane_commandがSome（例: bash）ならbare slot（run=None）にせずcommandとして注入する（command=\"bash\"起動paneはbare slotとrun一致しないため）"
-given = "3-slot layout baseに対しrun列 [bash, None, None] をgenerate_instance_kdl_v2へ与える"
+source = "docs/testing/test-plan.md §2.7 (b) R14 + docs/design/detailed-design.md DD-10.8（TASK-74改訂: 起動時明示command〔layout command= / zellij run〕のpaneはterminal_command=Someとなるため、単語1件でも注入対象。「pane_commandがSomeなら単語1つのshell起動paneでも注入する」の旧規則はpane_command=前景processだったため廃止） + docs/design/remap-v2-matching-fix-task74.md §2.1"
+description = "起動時明示commandの単語1件paneも注入対象: run列がSome（例: bash。= terminal_command=\"bash\"のpane）ならbare slot（run=None）にせずcommandとして注入する（command=\"bash\"起動paneはbare slotとrun一致しないため）。TASK-74で「単語1つのshell起動pane」の語義を「起動時明示commandの単語1件pane」へ確定——shell paneはterminal_command=Noneでありbare化される（r15）。TASK-75（v2.2）: 入力baseは正規形subtreeへ変わるが期待値は不変"
+given = "3-slot正規形subtreeに対しrun列 [bash, None, None] をgenerate_instance_kdl_v2へ与える"
 expect_return = "slot 0のcommand argv列が [bash]・残り2 slotは空。生成KDLはcommand=\"bash\"を含む"
 
 [[condition]]
 id = "layout-generator.r15-shell-pane-stays-bare"
-source_lines = "tests/unit/layout_generator.rs:67"
+source_lines = "tests/unit/layout_generator.rs:87"
 target_function = "generate_instance_kdl_v2"
-source = "docs/testing/test-plan.md §2.7 (b) R15 + docs/design/detailed-design.md DD-10.8（shell pane（pane_command None）: bare pane slotのまま（run=None一致））"
-description = "shell paneはbare維持: pane_command Noneのpaneはbare pane slotのまま（command属性を書かない。bare slotはshell pane（invoked_with=None）のみと一致するrun照合の対になる規則）"
-given = "3-slot layout baseに対しrun列 [None, htop, None] をgenerate_instance_kdl_v2へ与える"
+source = "docs/testing/test-plan.md §2.7 (b) R15 + docs/design/detailed-design.md DD-10.8（TASK-74改訂: terminal_command=None〔bare・既定shell起動pane〕: bare pane slotのまま（run=None一致）。pane_commandの値は参照しない） + docs/design/remap-v2-matching-fix-task74.md §2.1"
+description = "shell paneはbare維持: run=None（= terminal_command=Noneのpane。pane_command〔前景process〕がSomeでも影響しない）はbare pane slotのまま（command属性を書かない。bare slotはinvoked_with=Noneのpaneとのみ一致するrun照合の対になる規則）。TASK-75（v2.2）: 入力baseは正規形subtreeへ変わるが期待値は不変"
+given = "3-slot正規形subtreeに対しrun列 [None, htop, None] をgenerate_instance_kdl_v2へ与える"
 expect_return = "slot毎のcommand argv列が [空][htop][空]で、slot 0にcommand属性（sh等の代理値）は現れない"
 
 [[condition]]
 id = "layout-generator.r16-empty-slots-normalized-to-bare-and-cwd-never-injected"
-source_lines = "tests/unit/layout_generator.rs:82"
+source_lines = "tests/unit/layout_generator.rs:102"
 target_function = "generate_instance_kdl_v2"
 source = "docs/testing/test-plan.md §2.7 (b) R16（空slotは常にbare pane・cwd注入は全廃） + docs/design/detailed-design.md DD-10.2 #9（空slot = 常にbare pane（既定shell）に正規化）・DD-10.8（cwd注入は全廃。再作成paneが存在しないため）"
-description = "空slotの正規化とcwd全廃: layout宣言にcommand・cwdがあっても空slotはbare paneに正規化され（宣言commandは起動しない）、cwd属性はどのslotにも注入しない（CMR-5統合: 空slot正規化とcwd全廃を1条件に統合）"
-given = "pane command=\"htop\" cwd=\"/x\"・pane cwd=\"/y\"・bare pane の宣言3-slot layoutに対しrun列 [codex, None, None]（M=1）をgenerate_instance_kdl_v2へ与える"
+description = "空slotの正規化とcwd全廃: layout宣言にcommand・cwdがあっても空slotはbare paneに正規化され（宣言commandは起動しない）、cwd属性はどのslotにも注入しない（CMR-5統合: 空slot正規化とcwd全廃を1条件に統合）。TASK-75（v2.2）: 入力baseは正規形subtreeへ変わるが期待値は不変"
+given = "pane command=\"htop\" cwd=\"/x\"・pane cwd=\"/y\"・bare pane の宣言3-slot正規形subtreeに対しrun列 [codex, None, None]（M=1）をgenerate_instance_kdl_v2へ与える"
 expect_return = "slot毎のargv列が [codex][空][空]。生成KDLにhtop・cwdを含まない"
 
 [[condition]]
 id = "layout-generator.r9-fewer-panes-normalizes-declared-commands"
-source_lines = "tests/unit/layout_generator.rs:103"
+source_lines = "tests/unit/layout_generator.rs:123"
 target_function = "generate_instance_kdl_v2"
 source = "docs/testing/test-plan.md §2.7 (a) R9（(a)表のKDL側: M<N・layoutにcommand付きslot → 空slotはすべてbare paneに正規化（layout宣言commandは起動しない）） + docs/design/detailed-design.md DD-10.2 #9・DD-10.8"
-description = "R9のgenerator側条件: M<Nでlayoutがcommand付きslotを宣言していても、空slotはすべてbare paneに正規化される（宣言commandの起動は行わない。planner側のk=1維持はlayout-planner.r9）"
-given = "3 slotすべてにcommand宣言（htop・vim /etc/x・top）のあるlayoutに対しrun列 [codex exec, None, None]（M=1）をgenerate_instance_kdl_v2へ与える"
+description = "R9のgenerator側条件: M<Nでlayoutがcommand付きslotを宣言していても、空slotはすべてbare paneに正規化される（宣言commandの起動は行わない。planner側のk=1維持はlayout-planner.r9）。TASK-75（v2.2）: 入力baseは正規形subtreeへ変わるが期待値は不変"
+given = "3 slotすべてにcommand宣言（htop・vim /etc/x・top）のある正規形subtreeに対しrun列 [codex exec, None, None]（M=1）をgenerate_instance_kdl_v2へ与える"
 expect_return = "slot毎のargv列が [codex exec][空][空]。生成KDLにvim・topを含まない"
 
 [[condition]]
 id = "layout-generator.r17-newline-separated-quoted-output-is-reparseable"
-source_lines = "tests/unit/layout_generator.rs:124"
+source_lines = "tests/unit/layout_generator.rs:144"
 target_function = "generate_instance_kdl_v2"
 source = "docs/testing/test-plan.md §2.7 (b) R17（改行区切り形式（dump-layout形式）・値quote必須（DD-3.3）） + docs/design/detailed-design.md DD-3.3・DD-10.8（改行区切り形式・値quote必須。zellij 0.44.3はbare値・単行;区切りを拒否する）"
-description = "生成KDLの形式契約: 改行区切り（単行;区切りでない）・値はquote必須。生成物がそのままzellijへ渡せる（再parse可能でslot数が保存される）ことの固定"
-given = "3-slot layout baseに対しrun列 [bash /work/hb.sh, None, None] をgenerate_instance_kdl_v2へ与える"
+description = "生成KDLの形式契約: 改行区切り（単行;区切りでない）・値はquote必須。生成物がそのままzellijへ渡せる（再parse可能でslot数が保存される）ことの固定。TASK-75（v2.2）: 入力baseは正規形subtreeへ変わるが期待値は不変"
+given = "3-slot正規形subtreeに対しrun列 [bash /work/hb.sh, None, None] をgenerate_instance_kdl_v2へ与える"
 expect_return_shape = "command=\"bash\"・args \"/work/hb.sh\" のquoted値を含み「; 」を含まないKDL文字列。再parseするとslot数3"
 
 [[condition]]
 id = "layout-generator.r18-plugin-leaf-preserved-without-consuming-slot"
-source_lines = "tests/unit/layout_generator.rs:140"
+source_lines = "tests/unit/layout_generator.rs:160"
 target_function = "generate_instance_kdl_v2"
-source = "docs/testing/test-plan.md §2.7 (b) R18（plugin leafはslotを消費せず維持。size / split_direction / name等のnode属性もlayout宣言を維持。barの自動注入は行わない） + docs/design/detailed-design.md DD-10.8・DD-3.2 + docs/design/design-review.md §4.2 MR-32"
-description = "plugin leafの保存と非消費: layout宣言のplugin leaf（tab-bar等）はslotを消費せずそのまま維持し、run注入はterminal slotのみへ行う（plugin leafに注入されると以降のslotが1つずれる。MR-32/S11回帰）。node属性（size・split_direction・name）はlayout宣言を維持し、barの自動注入は行わない"
-given = "pane wrapper内tab-bar plugin leaf + split_direction/name属性付き2 terminal slot のlayoutに対しrun列 [cmdA, cmdB] をgenerate_instance_kdl_v2へ与える"
+source = "docs/testing/test-plan.md §2.7 (b) R18（plugin leafはslotを消費せず維持。size / split_direction / name等のnode属性もlayout宣言を維持。barの自動注入は行わない） + docs/design/detailed-design.md DD-10.8（TASK-74: plugin leafの保存・非消費の適用範囲を「最初のtab subtree内」から「+ default_tab_template内」へ拡張）・DD-3.2 + docs/design/design-review.md §4.2 MR-32 + docs/design/remap-v2-matching-fix-task74.md §2.2"
+description = "plugin leafの保存と非消費: layout宣言のplugin leaf（tab-bar等）はslotを消費せずそのまま維持し、run注入はterminal slotのみへ行う（plugin leafに注入されると以降のslotが1つずれる。MR-32/S11回帰）。TASK-74で対象範囲がdefault_tab_template内のplugin leaf（compact-bar等）へ拡張（template適用時のbar leaf維持の本体検証はlayout-generator.template-children-substitution）。node属性（size・split_direction・name）はlayout宣言を維持し、barの自動注入は行わない。TASK-75（v2.2）: template反映はlayout解決（normalize_tab_templates）へ一元化され、generatorは置換済みsubtreeのみを受ける（本条件のplugin leaf維持規則は不変・期待値不変）"
+given = "pane wrapper内tab-bar plugin leaf + split_direction/name属性付き2 terminal slot の正規形subtreeに対しrun列 [cmdA, cmdB] をgenerate_instance_kdl_v2へ与える"
 expect_return = "terminal slotのargv列が [cmdA][cmdB]。生成KDLはplugin location=\"zellij:tab-bar\"・size=1・split_direction=\"vertical\"・name=\"left\" を維持し、pluginの出現は宣言分の1回のみ"
 
 [[condition]]
 id = "layout-generator.r19-same-run-panes-share-instance-slot-order-unspecified"
-source_lines = "tests/unit/layout_generator.rs:168"
+source_lines = "tests/unit/layout_generator.rs:188"
 target_function = "generate_instance_kdl_v2"
 source = "docs/testing/test-plan.md §2.7 (b) R19（同一runの複数pane間・複数shell pane間のslot順は保証しない。要件例外のtest固定） + docs/design/detailed-design.md DD-10.6 (iii)/10.13（決定論性の保証範囲: 同一runの複数pane間・複数shell pane（run=None）間のslot順は保証外。プロセス保存・pane数・所属tabは保証） + docs/design/design-review.md §4.6 R7"
-description = "決定論性の明示例外の固定: 同一runが複数slotに現れることを妨げず、それらのslot間の優劣をgeneratorは決めない。複数のNone run（shell pane）も区別されないbare slotとして並ぶ。保証されるのはgroup所属・プロセス保存・pane数・所属tab"
+description = "決定論性の明示例外の固定: 同一runが複数slotに現れることを妨げず、それらのslot間の優劣をgeneratorは決めない。複数のNone run（shell pane）も区別されないbare slotとして並ぶ。保証されるのはgroup（v2.2ではblock×tab）所属・プロセス保存・pane数・所属tab"
 given = "3-slot layout baseに対しrun列 [codex exec, codex exec, None] と [None, None, htop] をそれぞれgenerate_instance_kdl_v2へ与える"
 expect_return_shape = "前者は3 slot中slot 0と1が同一run（等価なargv）でslot 2が空。後者は2つの空slotと [htop] の1 slot"
+
+[[condition]]
+id = "layout-generator.template-children-substitution"
+source_lines = "tests/unit/layout_generator.rs:216"
+target_function = "layout::normalize_tab_templates（v2.2: children置換・slot数一致検証はlayout解決へ一元化。旧: generate_instance_kdl_v2のtemplate引数 / layout::default_tab_template_subtree）"
+source = "docs/design/remap-v2-matching-fix-task74.md §2.2（default_tab_templateの生成KDL反映——template subtreeの文書順最初のchildren nodeをbase subtreeで置換〔案d〕。children不在はLayoutInvalid。preflight追加検証: 置換後terminal leaf数一致） + docs/design/detailed-design.md DD-10.8（default_tab_template反映: children node不在、および置換後のterminal leaf数がbase subtreeのslot数と不一致の場合はLayoutInvalid） + TASK-74段階8コードレビューCR74-7（children blockを持たないdefault_tab_template node〔braceなし〕がchildren()=NoneからNoneを返しtemplate無し扱いになりbarが黙って欠落する。node在り・children block無しもLayoutInvalidとする） + docs/design/remap-v3-multi-tab-task75.md §2.1・§3.1（D8一元化: children置換・slot数一致検証は正規形TabTemplate列の構築〔layout解決〕へ集約。generatorは置換済みsubtreeのみを受け取りtemplate引数を持たない）"
+description = "default_tab_templateのchildren置換（TASK-74主因B修正の核）: template=Someの場合、template subtreeの文書順最初のchildren nodeをbase subtreeのnodesで置換したtreeを生成する。template内のplugin leaf（compact-bar等）はそのまま維持されslotを消費しない（MR-32規則のtemplate内拡張。F6実証によりbar paneはRun::Plugin照合で宣言位置へ配置）。children node不在はLayoutInvalid（\"default_tab_template has no children node\"）。置換後のterminal leaf数がcount_terminal_slots(base_sub)と不一致（template配下にchildren以外のterminal paneがある）もLayoutInvalid（誤注入防止の事前検証）。CR74-7追加: default_tab_template nodeが存在してもchildren block自体を持たない（braceなしnode）場合もLayoutInvalidとする——node在り・children block無しでNoneを返すとtemplate無しlayout扱いとなり、bar leafが黙って欠落したままrunが成功してしまう。template=None（template無しlayout）は現行どおりslot木のみ（bar leafは出現しない）。TASK-75（v2.2）: 置換とLayoutInvalid判定の発火位置はnormalize_tab_templates（layout解決時点）へ一元化され、generatorはtemplate引数を持たない（判定内容・期待値は不変。test入力はnormalize_tab_templates経由へ読み替え）。本条件のfixtureはtemplateを直接組み立てたflat 2-slot baseであり、実layout（layout wrapper）からの抽出経路と入れ子baseはtemplate-children-substitution-nested-baseが管轄。template系LayoutInvalidの発火時点がremap実行の状態変更前であることはremap-sequence.template-invalid-detected-before-mutationが管轄（CR74-1）"
+given = "children + compact-bar plugin leaf（pane size=1 borderless=true { plugin location=\"zellij:compact-bar\" }）からなるdefault_tab_template付きlayout（base subtree = 2-slot）とrun列 [cmdA, cmdB] をnormalize_tab_templates経由（template反映済み正規形subtree）でgenerate_instance_kdl_v2へ与える場合・children node不在のtemplateを持つlayoutをnormalize_tab_templatesへ与える場合・children以外にterminal pane（bare pane 1つ）を持つtemplateを持つlayoutを与える場合・template無しlayoutを与える場合・children block自体を持たない（braceなし）default_tab_template nodeを含むlayoutをnormalize_tab_templatesへ与える場合"
+expect_return = "正常系は生成KDLがbase subtreeの2 slot（cmdA/cmdB注入）+ plugin location=\"zellij:compact-bar\" leafを含む（terminal slot数は2のまま・bar leafはslotを消費しない）。bar leafのboolean属性はquoteなし真偽値（borderless=true）・数値属性 size=1 もquoteなし整数で出力される（borderless=\"true\" 等のquote付き文字列形式はzellij 0.44.3 layout parser拒否のため不可——TASK-74 E2E run3実測 tmp/task74/acceptance/b_remap.json）。children node不在はErr（ErrorClass=LayoutInvalid）。leaf数不一致もErr（ErrorClass=LayoutInvalid）。children block自体の不在（braceなしnode）もErr（ErrorClass=LayoutInvalid。None扱いに黙って落ちない）。Noneは従来どおりslot木のみでplugin leafを含まない"
+
+[[condition]]
+id = "layout-generator.template-children-substitution-nested-base"
+source_lines = "tests/unit/layout_generator.rs:274"
+target_function = "layout::normalize_tab_templates / generate_instance_kdl_v2（v2.2: template引数廃止。旧: default_tab_template_subtree / base_subtree経由）"
+source = "docs/design/remap-v2-matching-fix-task74.md §2.2 生成KDL例（TR74-2: base subtree = 3x3入れ子grid + template children置換によりbar leafがbase subtreeと同階層のtop-level siblingに出現） + TASK-74 E2E acceptance (ii) 不合格実測（tmp/task74/acceptance/verdict.txt: ii.bar_survives_y59_rows1_cols200・ii.geometry_matches_reference FAIL。a_dump.kdl = barはtop-level sibling・b_dump.kdl = bar paneが3番目column内のsize=\"16%\" cell。F7: 照合不成立paneのgrid内挿入） + 同§2.2 生成KDL例の字句形式（borderless=true はquoteなし真偽値・size=1 もquoteなし） + TASK-74 E2E run3実測（tmp/task74/acceptance/b_remap.json: borderless=\"true\" はzellij 0.44.3 layout parserに「borderless should be either true or false, found \"true\"」として拒否される）"
+description = "入れ子base（実形状）でのchildren置換のbar leaf配置と抽出経路の回帰条件（TASK-74 E2E acceptanceで検出されたtest gapへの対応。既存template-children-substitutionはtemplateを直接組み立てたflat 2-slot baseのfixtureであるため、実layoutからの抽出経路とbase subtreeの入れ子が検証できていなかった）。layout { ... } wrapperを持つ実layoutを与えたときdefault_tab_template_subtreeのtemplateがSomeであり、children nodeをbase subtreeのnodesで置換した生成KDLにおいてbar leaf（pane size=1 borderless=true { plugin location=\"zellij:compact-bar\" }）がbase subtreeのnodesと同階層のtop-level siblingとして出現し、どのcolumn（split_direction container）・terminal pane nodeの内側にも入らないこと。run注入はterminal slotのみ（bar leafはslot消費なし・run注入なし。MR-32規則の入れ子base拡張）。fail-first: 現行実装（codex実装・commit cde4cd4）はdefault_tab_template_subtreeが文書root直下のnodeのみを探索してlayout node配下のdefault_tab_templateを見つけられず、実layoutからは常にtemplate=Noneが返るため生成KDLにbar leafが一切出現せず、期待「bar leafがtop-level siblingに出現する・template抽出はSome」に対して機械的にfailする（実測: acceptance (ii) でbar paneがb_dump.kdlの3番目column内cellとしてgrid挿入されたのはこの経路。置換機構自体はtemplate=Someが渡れば入れ子baseでも現行実装で動くため、本条件のgivenは実layoutからの抽出経路を必ず通ること）。TASK-74再更新（2026-09-15 E2E run3・fail-first）: 生成KDLのboolean属性はquoteなしの真偽値形式（borderless=true）で出力されること——現行実装（run3 binary）はboolean属性をquote付き文字列化（borderless=\"true\"）して出力しzellij 0.44.3 layout parserに拒否される（tmp/task74/acceptance/b_remap.json）ため本条件にfailする。L1既存test（tests/unit/layout_generator.rs: bar leafのborderlessをas_stringで比較）がquote付き形式を期待値に内包していたためE2E run3まで検出できなかった（test側期待値の修正は後段のtest更新作業）。TASK-75（v2.2）: template抽出経路はnormalize_tab_templates（正規形TabTemplate列構築）へ一元化（default_tab_template_subtree/base_subtreeは廃止。期待値は不変・test入力はnormalize経由へ読み替え）"
+given = "9-pane.kdl相当の実形状layout（layout { default_tab_template { children; pane size=1 borderless=true { plugin location=\"zellij:compact-bar\" } } tab name=\"T\" { pane split_direction=\"horizontal\" 配下に 3 × pane split_direction=\"vertical\" { pane; pane; pane } } }）をnormalize_tab_templatesで正規形化し（T=1・鋳型subtreeがtemplate反映済み〔bar leafを含む〕で取得できること・9 slot）、run列 [cmdA, None×8] をgenerate_instance_kdl_v2(正規形subtree, runs)へ与える"
+expect_return = "生成KDLのlayout node直下は2 node: horizontal container（文書順9 terminal slot・slot 0のみcmdA注入）+ bar leaf。bar leafはtop-level siblingとして出現し、任意の split_direction=\"vertical\" node（column）やterminal pane nodeの内側に出現しない。bar leafへのcommand/args注入は行われない。bar leafの属性はboolean属性 borderless がquoteなし真偽値（borderless=true）・数値属性 size がquoteなし整数（size=1）で出力され、quote付き文字列形式（borderless=\"true\"・size=\"1\"）はzellij 0.44.3 layout parser拒否のため不可（文字列属性〔location等〕はquote付き）。生成KDLを再parseするとterminal slot数 = 9（bar leafはplugin leafのため数えない）"
+
+[[condition]]
+id = "layout-generator.per-tab-kdl-from-normalized-templates"
+source_lines = "tests/unit/layout_generator.rs:397"
+target_function = "generate_instance_kdl_v2 / remap::instance_kdls（Vec<Vec<String>>: blocks × tabs）"
+source = "docs/design/remap-v3-multi-tab-task75.md §2.1（default_tab_templateがある場合、各tabのsubtreeはchildren置換適用済み。実験R75-1: default_tab_templateは全tabに展開され各tab subtree末尾にbar leafとして現れる）・§2.6（生成KDLは現行per-tab形式を維持: tab nodeなしのlayout { subtree }形式を生成tab (b,t)毎に個別適用。slotへのrun注入規則はv2.1のまま変更なし。baseは当該tabの正規形subtree）・§3.3（generate_instance_kdl_v2はtemplate引数を削除。instance_kdlsはVec<Vec<String>>〔blocks × tabs〕を返すよう一般化） + docs/design/detailed-design.md DD-10.8 v2.2（base = 当該tab鋳型の正規形subtree） + requirements.md §2.6（default_tab_template由来要素の全tab再現）"
+description = "正規形subtreeからのper-tab KDL生成: multi-tab layoutでは生成tab (b,t)毎に、当該鋳型の正規形subtree（children置換済み・tab属性除去済み）をbaseとした生成KDLを個別に返す。template由来bar leafは全tabの生成KDLへ出現し（R75-1: zellij --layout起動時の全tab展開と同一）、run注入は当該tabのterminal slotのみ。tab属性（name・focus）は生成KDLに載せない（rename-tab-by-id・go-to-tab・focus-pane-idで再現。D7）。fail-first: 現行実装のinstance_kdlsは最初のtab鋳型のみのKDL列（Vec<String>）しか返さない"
+given = "default_tab_template（children + compact-bar）付き・T=2（鋳型0=2 slot・鋳型1=1 slot）のlayoutをnormalize_tab_templatesへ通し、run列 [cmdA, cmdB]（鋳型0）と [cmdC]（鋳型1）で生成する"
+expect_return = "鋳型毎の2種の生成KDL: 鋳型0側は2 terminal slot（cmdA/cmdB注入）+ plugin location=\"zellij:compact-bar\" leaf、鋳型1側は1 terminal slot（cmdC注入）+ 同一bar leaf。両KDLともtab nodeなしのlayout { ... }形式で、他鋳型のsubtree nodeを含まない"

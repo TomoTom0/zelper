@@ -8,7 +8,7 @@ verified_at = "2026-09-13"
 verified_by = "claude"
 test_command = "cargo test --test error_map --test cli_list_read_send"
 source_hash = "30979a1ce1a1429a557edd207080b367f1426ee1"
-note = "src/error.rs（ErrorClass・exit code対応）も検証対象"
+note = "src/error.rs（ErrorClass・exit code対応）も検証対象。TASK-75（2026-09-15）: remap v2.2のdry-run/成功JSON data内部構成拡張はenvelope契約不変のまま行われるため本条件書への新規条件なし（excludedへ決定を記録。詳細はremap-cli.toml管轄）。verified = trueはenvelope契約6条件に対する検証記録のまま"
 
 [[condition]]
 id = "json-contract.class-exit-mapping-full-table"
@@ -48,7 +48,7 @@ expect_return_shape = "JSON化してtarget/ok/errorが存在し、detail field�
 
 [[condition]]
 id = "json-contract.list-panes-json-success-envelope"
-source_lines = "tests/cli/list_read_send.rs:78"
+source_lines = "tests/cli/list_read_send.rs:89"
 target_function = "list panes --json のCLI出力経路"
 source = "docs/testing/test-plan.md §2.10 + docs/design/detailed-design.md DD-4.2（成功時envelope・dataにコマンド固有object）"
 description = "list panes --jsonのCLI level契約: 成功時stdoutが単一のJSON envelope（schema_version=1・ok=true）で、data.panes配列のpane_idがterminal_N形式。L3実行経路でのenvelope履行"
@@ -57,7 +57,7 @@ expect_return_shape = "stdoutがschema_version=1・ok=true・data.panes 3件・p
 
 [[condition]]
 id = "json-contract.cli-error-envelope-on-failure"
-source_lines = "tests/cli/list_read_send.rs:278"
+source_lines = "tests/cli/list_read_send.rs:298"
 target_function = "--json指定時のerror出力経路（main）"
 source = "docs/testing/test-plan.md §2.10 + docs/design/design-review.md §4.2 MR-17（--json指定時の失敗にerror envelopeが出ない不履行の回帰） + docs/design/detailed-design.md DD-4.2（失敗時はerror envelope）"
 description = "--json指定時の失敗はstdoutへerror envelopeを出す（exit codeはerror class対応のまま）。MR-17回帰: --json利用者がstdoutだけで失敗を構造的に把握できる契約"
@@ -69,4 +69,11 @@ item = "stable fieldsの将来互換をsnapshot testで無変更強制する機�
 source = "docs/testing/test-plan.md §2.10（stable fieldsの将来互換: snapshot testで無変更を強制）"
 reason = "未test（機構不在）。stable fields（schema_version/ok/data/error.class/results[].target/results[].ok）の存在は本条件書の各envelope条件のfield assertで検証済みだが、snapshot fileによる無変更強制の機構は未導入。DD-4.2はstable外fieldの追加を許容するため、snapshot導入はstable外追加の検出抑制との整合判断を要する（tm起票済み）"
 decided_at = "2026-09-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "remap v2.2のdry-run/成功JSON data内部構成拡張（n fieldへS格納・新規t/s/n_slots/tabs〔鋳型name/focus〕・mapping系keyへのblock/tab_index追加〔instance維持〕・leftover_tabs）の詳細検証"
+source = "docs/design/remap-v3-multi-tab-task75.md §3.7（DD-4.2のstable fields〔schema_version/ok/data/error.class等〕は不変であり、data内部のfield構成変更は契約変更にならない） + docs/design/detailed-design.md DD-10.10 v2.2・DD-10.9（成功時data・leftover_tabs）"
+reason = "envelope契約（stable fields）は不変であり本条件書の各envelope条件の対象外。remap固有data fieldの詳細はremap-cli.toml管轄（json-n-field-holds-total-slots・dry-run-reports-s-and-per-tab-slots・r48/r49、error系はremap-sequence.r41。data生成はsrc/app/remap.rsでsrc/output/json.rsは不変）"
+decided_at = "2026-09-15"
 decided_by = "claude"

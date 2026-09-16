@@ -1,0 +1,167 @@
+[
+  {
+    "id": 1, "is_plugin": false, "is_focused": true, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-1",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 0, "pane_content_x": 0, "pane_y": 1, "pane_content_y": 1,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": "vim notes.md", "pane_cwd": "/work"
+  },
+  {
+    "id": 2, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-2",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 50, "pane_content_x": 51, "pane_y": 1, "pane_content_y": 1,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": "claude --model x",
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 3, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-3",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 100, "pane_content_x": 101, "pane_y": 1, "pane_content_y": 1,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 4, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-4",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 0, "pane_content_x": 0, "pane_y": 10, "pane_content_y": 10,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 5, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-5",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 50, "pane_content_x": 51, "pane_y": 10, "pane_content_y": 10,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 6, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-6",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 100, "pane_content_x": 101, "pane_y": 10, "pane_content_y": 10,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 7, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-7",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 0, "pane_content_x": 0, "pane_y": 20, "pane_content_y": 20,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 8, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-8",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 50, "pane_content_x": 51, "pane_y": 20, "pane_content_y": 20,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 9, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "agent-9",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 100, "pane_content_x": 101, "pane_y": 20, "pane_content_y": 20,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 10, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "single",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 0, "pane_content_x": 0, "pane_y": 30, "pane_content_y": 30,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 11, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "pair-1",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 50, "pane_content_x": 51, "pane_y": 30, "pane_content_y": 30,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 12, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "pair-2",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 100, "pane_content_x": 101, "pane_y": 30, "pane_content_y": 30,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 13, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "block2-1",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 0, "pane_content_x": 0, "pane_y": 40, "pane_content_y": 40,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 14, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "block2-2",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 50, "pane_content_x": 51, "pane_y": 40, "pane_content_y": 40,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  },
+  {
+    "id": 15, "is_plugin": false, "is_focused": false, "is_fullscreen": false,
+    "is_floating": false, "is_suppressed": false, "title": "block2-3",
+    "exited": false, "exit_status": null, "is_held": false,
+    "pane_x": 100, "pane_content_x": 101, "pane_y": 40, "pane_content_y": 40,
+    "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
+    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
+    "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
+    "pane_command": null, "pane_cwd": "/work"
+  }
+]

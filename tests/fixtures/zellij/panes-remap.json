@@ -16,7 +16,7 @@
     "exited": false, "exit_status": null, "is_held": false,
     "pane_x": 100, "pane_content_x": 101, "pane_y": 1, "pane_content_y": 1,
     "pane_rows": 28, "pane_content_rows": 26, "pane_columns": 100, "pane_content_columns": 98,
-    "cursor_coordinates_in_pane": null, "terminal_command": null,
+    "cursor_coordinates_in_pane": null, "terminal_command": "claude --model x",
     "plugin_url": null, "is_selectable": true, "index_in_pane_group": null,
     "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1",
     "pane_command": "codex exec --plan", "pane_cwd": "/work"
