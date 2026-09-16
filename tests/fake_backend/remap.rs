@@ -983,6 +983,63 @@ fn exited_held_panes_are_excluded_from_source_and_survive() {
     );
 }
 
+// [covers:remap-sequence.embed-floating-exited-held-excluded-from-floating-set]
+#[test]
+fn embed_floating_exited_held_panes_excluded_from_floating_set() {
+    // --embed-floating時でもexited/heldなfloating paneはfloating集合に入れない
+    // （source混入とtoggleの両方を防ぐ）。run一致照合の対象にならずtoggle後の
+    // membership検証にも落るため、floatingのまま元位置に残す（DD-10.5・PR#6指摘）
+    let (mut panes, tabs) = same_tab_three();
+    let mut exited = pane_at(8, "fx", 0, 0, 40, 0, Some("cmd-x"));
+    exited.is_floating = true;
+    exited.exited = true;
+    exited.is_held = true;
+    panes.push(exited);
+    let mut held = pane_at(7, "fh", 0, 0, 50, 0, None);
+    held.is_floating = true;
+    held.is_held = true;
+    panes.push(held);
+
+    let b = FakeBackend::new(panes, tabs);
+    let mut a = args(false);
+    a.embed_floating = true;
+    with_isolated_xdg(|_| {
+        run(&b, &a).expect("M=3（exited/held floating除外）でk=1・移動不要のため成功");
+    });
+    let s = b.state.borrow();
+    // 元3 paneはtiled sourceとして配置される
+    for id in 1u32..=3 {
+        let p = s
+            .panes
+            .iter()
+            .find(|p| p.id == PaneKindId::Terminal(id))
+            .unwrap_or_else(|| panic!("pane {id}"));
+        assert!(!p.is_floating, "元3 paneはtiled");
+    }
+    // exited/held floating paneはtoggleされずfloatingのまま生存
+    for id in [7u32, 8] {
+        let p = s
+            .panes
+            .iter()
+            .find(|p| p.id == PaneKindId::Terminal(id))
+            .unwrap_or_else(|| panic!("pane {id} 生存"));
+        assert!(
+            p.is_floating,
+            "pane {id} はfloatingのまま（toggleされない）"
+        );
+    }
+    drop(s);
+    let calls = b.calls();
+    assert!(
+        !calls.iter().any(|c| c.contains("toggle-embed")),
+        "対象floatingがいないためtoggleは不発生: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.contains("close-pane")),
+        "killもされない: {calls:?}"
+    );
+}
+
 // ---- TASK-74段階8コードレビュー対応（CR74-1） ----
 
 /// children block内に `children` nodeを持たないdefault_tab_template付きlayout

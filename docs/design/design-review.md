@@ -521,3 +521,16 @@ TASK-73実装（tests/cli/list_read_send.rs・tests/cli/remap.rs・tests/README.
 **検証**: CR75-1修正後 cargo test 171/171 green（tab-id-resolution-lenient-before-apply拡張込み） / mise run verify-conditions exit 0（171条件・171 tags・46 excluded） / clippy 0 warning / fmt clean。CR75-1はfake/L2で実証される変更（実機経路の挙動はlenient化で変わらずretry追加のみ）のためE2E再実行は不要。
 
 **総評**: 指摘3件は修正1件（CR75-1）・起票済み1件（CR75-2→TASK-69/70）・設計記録1件（CR75-3）で解消（却下・負債化なし）。レビュアー総評「TASK-75の主要仕様はよく反映されており、重大な配分・focus・空group実装不一致は見当たらない」どおり、P2のlenient統一によりTASK-75実装は完了状態。
+
+### 4.25 PR#6 レビュー対応（remap floating exited/held除外・SeedLock unlink廃止）
+
+レビュー日: 2026-09-16。対象: PR#6（TASK-59,61,73〜75集約）への外部レビュー指摘2件（いずれもP2）。対応: TASK-76/77としてtm起票のうえ即時修正。IDはPR6R-n。
+
+| ID | severity | 該当 | 指摘 | disposition | 対応内容 |
+|---|---|---|---|---|---|
+| PR6R-1 | P2 | src/app/remap.rs floating source set | `--embed-floating`時のfloating集合filterにexited/held除外がなく、`PaneState::is_remap_source()`がrejectするpaneが`floating`経由でsourceに混入する。non-anchor assignmentは`membership_matches()`reject後にtimeoutまで待ち、anchor assignmentは検証失敗・extra held paneを残しうる | **修正** | floating filterへ`!p.exited && !p.is_held`を追加（is_remap_source()と同一基準。DD-10.5のexited/held除外をfloating集合へ整合）。remap-sequence.tomlへembed-floating-exited-held-excluded-from-floating-setを新規（171→172条件）しfake_remapへtest追加 |
+| PR6R-2 | P2 | src/companion.rs SeedLock::drop | Dropでのlock file削除（unlink）はflockの相互排除を壊す: 3プロセス同時seed時、Bが旧inodeをopen保持したままAの解放を待つ間にAがunlinkし、Cが新inodeを作成・lockする。BとCが並行してpermissions.kdlを書換え、lockが防止対象のlost-update corruptionが再発する | **修正** | Dropからremove_fileを廃止（unlockのみ。`path` field削除）。lock fileは恒久的に残し再利用する運用へ変更。companion-seed.toml更新: concurrent-seeds条件のlock file期待を残留へ反転、stale-lock-file-tolerated-and-removedをtolerated-and-retainedへ改称、r26/c4へ恒久lock file許容を追記。test 4件追従 |
+
+**検証**: cargo test 172/172 green（新規1件・追従4件込み） / mise run verify-conditions exit 0（16file・172条件・172tag・46excluded） / clippy 0 warning / fmt clean。いずれもfake/L2・実file（tempdir）で機械検証される変更のためE2E再実行は不要。
+
+**総評**: 指摘2件はいずれも修正で解消（負債化・却下なし）。PR#6のCI確認はpush後に実施。

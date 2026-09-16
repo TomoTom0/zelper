@@ -244,10 +244,10 @@ retry later or grant permissions to the companion plugin manually: {companion_no
 }
 
 /// permissions.kdlと同dirのadvisory lock file（flock）によるzelper間直列化guard。
-/// Dropでunlock + lock file削除（best-effort）
+/// Dropはunlockのみ。lock fileは削除せず残す（unlinkすると旧inodeを保持するprocessと
+/// 新inodeをlockするprocessが並行し、flockの相互排除が崩れるため）
 struct SeedLock {
     file: Option<std::fs::File>,
-    path: std::path::PathBuf,
 }
 
 impl SeedLock {
@@ -266,10 +266,7 @@ impl SeedLock {
                 )
             })?;
         flock_exclusive(&file)?;
-        Ok(SeedLock {
-            file: Some(file),
-            path,
-        })
+        Ok(SeedLock { file: Some(file) })
     }
 }
 
@@ -278,8 +275,6 @@ impl Drop for SeedLock {
         if let Some(file) = self.file.take() {
             let _ = unlock(&file);
         }
-        // 残ったlock fileは次回実行で再利用可能だが、dirを清潔に保つため削除する
-        let _ = std::fs::remove_file(&self.path);
     }
 }
 

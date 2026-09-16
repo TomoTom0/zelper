@@ -154,15 +154,20 @@ fn r26_write_is_atomic_single_complete_content() {
     let after = std::fs::read_to_string(&path).unwrap();
     // 内容は seeded_content の結果と完全に一致する（部分書込・混在がない）
     assert_eq!(after, seeded_content(Some(&stale), NODE).unwrap().unwrap());
-    // 同dirに一時fileが残留しない（temp + rename後の状態）
-    let siblings: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+    // 同dirに一時fileが残留しない（temp + rename後の状態。lock fileは削除せず
+    // 恒久的に再利用するため存在してよい）
+    let mut siblings: Vec<_> = std::fs::read_dir(path.parent().unwrap())
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
+    siblings.sort();
     assert_eq!(
         siblings,
-        vec!["permissions.kdl".to_string()],
+        vec![
+            ".zelper-seed.lock".to_string(),
+            "permissions.kdl".to_string()
+        ],
         "{siblings:?}"
     );
 }
@@ -322,23 +327,25 @@ fn c2_concurrent_seeds_serialize_via_advisory_lock() {
     assert!(after.contains(NODE), "raw: {after}");
     assert!(after.contains(node_b), "raw: {after}");
     assert!(after.contains("ReadCliPipes"), "raw: {after}");
-    // lock fileは残留しない
+    // lock fileはunlock後も残留する（unlinkするとflockの相互排除が崩れるため。
+    // PR#6指摘: 旧inode保持processと新inodelock processが並行しlost-updateが再発）
     assert!(
-        !path.parent().unwrap().join(".zelper-seed.lock").exists(),
-        "lock fileを削除する"
+        path.parent().unwrap().join(".zelper-seed.lock").exists(),
+        "lock fileは削除せず再利用する"
     );
 }
 
-// [covers:companion-seed.stale-lock-file-tolerated-and-removed]
+// [covers:companion-seed.stale-lock-file-tolerated-and-retained]
 #[test]
-fn c2_stale_lock_file_is_tolerated_and_removed() {
-    // 残留lock file（異常終了等）があってもacquireは機能し、抜けたら削除される
+fn c2_stale_lock_file_is_tolerated_and_retained() {
+    // 既存lock file（前回実行の残留・異常終了等）があってもacquireは機能する。
+    // lock fileは削除せず残す（flock+unlink競合で相互排除が崩れるため永続運用）
     let dir = tempdir("c2stale");
     let path = perm_path(&dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path.parent().unwrap().join(".zelper-seed.lock"), "stale").unwrap();
     ensure_permissions(&path, NODE, None).unwrap();
-    assert!(!path.parent().unwrap().join(".zelper-seed.lock").exists());
+    assert!(path.parent().unwrap().join(".zelper-seed.lock").exists());
     let written = std::fs::read_to_string(&path).unwrap();
     assert_eq!(written, node_block(NODE, &all_perms()));
 }
@@ -362,7 +369,7 @@ fn c4_failed_seed_write_leaves_no_partial_temp_file() {
 
     let err = ensure_permissions(&path, NODE, None).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::Preflight);
-    // 残留は事前に作ったdirectoryのみ（zelperは新規fileを作っていない）
+    // 残留は事前に作ったdirectoryと恒久lock fileのみ（zelperは新規fileを作っていない）
     let mut names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
         .unwrap()
         .filter_map(|e| e.ok())
@@ -373,6 +380,7 @@ fn c4_failed_seed_write_leaves_no_partial_temp_file() {
         names,
         vec![
             ".permissions.kdl.zelper-tmp-".to_string() + &std::process::id().to_string(),
+            ".zelper-seed.lock".to_string(),
             "permissions.kdl".to_string(),
         ],
         "{names:?}"

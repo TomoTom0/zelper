@@ -312,11 +312,15 @@ pub fn run(backend: &dyn ZellijBackend, args: &RemapArgs) -> Result<Vec<Leftover
 
     // 4. source（scope = 既定でsession全体。--tab時はそのtab。DD-10.5）
     let in_scope = |p: &PaneState| args.tab.is_none() || p.tab_id == anchor;
+    // exited/heldはis_remap_source()と同様に対象外（run一致照合できず、toggle後も
+    // membership検証に落るため元tabに残す。DD-10.5）
     let floating: Vec<PaneState> = panes_now
         .iter()
         .filter(|p| {
             p.is_floating
                 && p.is_selectable
+                && !p.exited
+                && !p.is_held
                 && matches!(p.id, PaneKindId::Terminal(_))
                 && in_scope(p)
         })

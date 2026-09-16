@@ -5,11 +5,11 @@
 feature = "companion-seed"
 source_file = "src/companion.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-09-16"
 verified_by = "claude"
 test_command = "cargo test --test companion_seed"
-source_hash = "4bc719128858e09a36adcd591f05362bb29548ed"
-note = ""
+source_hash = "446d12424def19fea8f3d3db675045affc2a1a65"
+note = "PR#6レビュー対応（2026-09-16）: SeedLockのDropでのlock file削除を廃止（flock+unlink競合で相互排除が崩れるため）。concurrent-seeds条件のlock file期待を残留へ反転し、stale-lock条件をtolerated-and-retainedへ改称。test 2件追従"
 
 [[condition]]
 id = "companion-seed.r21-missing-file-creates-fresh-node"
@@ -79,13 +79,13 @@ id = "companion-seed.r26-write-is-atomic-single-complete-content"
 source_lines = "tests/fake_backend/companion_seed.rs:141"
 target_function = "ensure_permissions"
 source = "docs/testing/test-plan.md §2.7 (c) R26（書込みは同dir temp file作成 + atomic rename（readerが途中状態を観測しない）） + docs/design/detailed-design.md DD-10.4（書込みの原子性）"
-description = "atomic書込のL2側検証: 書込結果はseeded_contentの結果と完全に一致する単一の完全な内容であり（部分書込・新旧混在がない）、同dirに一時fileが残留しない。検証限界: temp file + renameの機構自体の実機確認はL4（S-v2-1。remap-sequence.tomlのexcluded参照）"
+description = "atomic書込のL2側検証: 書込結果はseeded_contentの結果と完全に一致する単一の完全な内容であり（部分書込・新旧混在がない）、同dirに一時fileが残留しない（恒久lock file .zelper-seed.lockは例外として存在してよい）。検証限界: temp file + renameの機構自体の実機確認はL4（S-v2-1。remap-sequence.tomlのexcluded参照）"
 given = "他plugin node（古い内容）の既存fileに対しensure_permissionsを実行"
-expect_return = "Ok。書込後のfile内容がseeded_contentの期待内容と完全一致し、同dirにはpermissions.kdlのみ存在"
+expect_return = "Ok。書込後のfile内容がseeded_contentの期待内容と完全一致し、同dirには.zelper-seed.lockとpermissions.kdlのみ存在"
 
 [[condition]]
 id = "companion-seed.r27-conflicting-rewrite-is-retried-on-new-content"
-source_lines = "tests/fake_backend/companion_seed.rs:170"
+source_lines = "tests/fake_backend/companion_seed.rs:175"
 target_function = "ensure_permissions"
 source = "docs/testing/test-plan.md §2.7 (c) R27（書戻し直前の再読込で内容が変化していたら、変化後の内容に対してやり直す（bounded retry 3回）） + docs/design/detailed-design.md DD-10.4（書戻し直前の再読込・変更検知） + docs/design/design-review.md §4.6 R2"
 description = "競合時のretry: 書戻し直前の再読込でzellij他processの書換（競合）を検出したら、変化後の内容に対してseed判定をやり直す。1回の競合なら成功し、最終内容は競合後の内容に基づく（他node保持・不足権限追記）"
@@ -94,7 +94,7 @@ expect_return = "Ok。最終file内容は競合後内容への追記結果（他
 
 [[condition]]
 id = "companion-seed.r28-persistent-conflict-aborts-without-writing"
-source_lines = "tests/fake_backend/companion_seed.rs:207"
+source_lines = "tests/fake_backend/companion_seed.rs:212"
 target_function = "ensure_permissions"
 source = "docs/testing/test-plan.md §2.7 (c) R28（retry打ち切り後も競合が続く → 書込まずPreflight error（last-writer-winsで他pluginの権限を黙って失わせない）） + docs/design/detailed-design.md DD-10.4 + docs/design/design-review.md §4.6 R2"
 description = "競合継続時の中断: 再読込のたびに内容が変わり続ける（競合が続く）系列では、bounded retry打ち切り後に書込まずPreflight errorで中断する。errorには競合であることが伝わり、zelperはfileへ何も書いていない"
@@ -103,34 +103,34 @@ expect_return = "Err（ErrorClass=Preflight・messageにconflict/retryを含む�
 
 [[condition]]
 id = "companion-seed.concurrent-seeds-serialize-via-advisory-lock"
-source_lines = "tests/fake_backend/companion_seed.rs:259"
+source_lines = "tests/fake_backend/companion_seed.rs:264"
 target_function = "ensure_permissions（advisory lock）"
 source = "docs/design/design-review.md §4.7 C2（TASK-39レビュー: permissions.kdlの「再読込一致→rename」間のTOCTOU残存への (a) zelper自身の並行実行に対するadvisory lock（flock）で読込→書込区間を直列化。直列化の回帰テスト（BがAのlock解放までblockすることの所要時間固定）を追加） + docs/design/detailed-design.md DD-10.4（既知の残リスク (b)）"
-description = "zelper間書込の直列化（C2回帰）: Aがcritical section内で遅延している間に開始したBは、Aのlock解放（= Aの書込完了）までblockする。Bの所要時間で固定し、最終内容はlost-updateなし（Aの書込をBが読んで追記）。lock fileは抜けたら削除される"
+description = "zelper間書込の直列化（C2回帰）: Aがcritical section内で遅延している間に開始したBは、Aのlock解放（= Aの書込完了）までblockする。Bの所要時間で固定し、最終内容はlost-updateなし（Aの書込をBが読んで追記）。lock fileはunlock後も削除せず残留させる（flock+unlink競合により旧inode保持processと新inode lock processが並行して相互排除が崩れるため。PR#6レビュー指摘で修正）"
 given = "同一permissions.kdlへ、hook内で300ms遅延するA（companion node追記）と、Aのhook突入後に開始するB（別versionのcompanion node追記）を並行実行"
-expect_return_shape = "Bの所要時間が250ms以上（Aの残り保持時間以上）でhook実行順はA→B。最終内容に他plugin node・Aのnode・Bのnode・追記権限がすべて含まれ、lock fileは残留しない"
+expect_return_shape = "Bの所要時間が250ms以上（Aの残り保持時間以上）でhook実行順はA→B。最終内容に他plugin node・Aのnode・Bのnode・追記権限がすべて含まれ、lock fileは残留する"
 
 [[condition]]
-id = "companion-seed.stale-lock-file-tolerated-and-removed"
-source_lines = "tests/fake_backend/companion_seed.rs:332"
+id = "companion-seed.stale-lock-file-tolerated-and-retained"
+source_lines = "tests/fake_backend/companion_seed.rs:338"
 target_function = "ensure_permissions（advisory lock）"
-source = "docs/design/design-review.md §4.7 C2（残留lock fileの追試） + docs/design/detailed-design.md DD-10.4（advisory lock file（flock）・Dropでunlock+削除）"
-description = "残留lock file耐性（C2回帰）: 異常終了等で残留したlock fileがあってもacquireは機能し、抜ける時にlock fileを削除する"
+source = "docs/design/design-review.md §4.7 C2（残留lock fileの追試） + docs/design/detailed-design.md DD-10.4（advisory lock file（flock）） + PR#6レビュー指摘（lock fileのunlink廃止: flockはinodeに対してかかるためunlinkすると3プロセス同時seed時に相互排除が崩れlost-updateが再発する）"
+description = "既存lock file耐性: 前回実行の残留・異常終了等で存在するlock fileがあってもacquireは機能する。lock fileは削除せず残す（lock対象として開くのみで内容は使わない永続運用）"
 given = "lock file（.zelper-seed.lock）を事前に置いたdirのpermissions.kdl（不存在）に対しensure_permissionsを実行"
-expect_return = "Ok。lock fileは削除され、fileは必要3権限付きcompanion node blockで作成される"
+expect_return = "Ok。lock fileは残留し、fileは必要3権限付きcompanion node blockで作成される"
 
 [[condition]]
 id = "companion-seed.failed-seed-write-leaves-no-partial-temp-file"
-source_lines = "tests/fake_backend/companion_seed.rs:346"
+source_lines = "tests/fake_backend/companion_seed.rs:353"
 target_function = "ensure_permissions"
 source = "docs/design/design-review.md §4.7 C4（TASK-39レビュー: temp fileのwrite自体の失敗時に部分書込tempが残留。write失敗経路でbest-effortのremove_fileを追加。temp pathをdirectoryで塞いでwrite失敗を発生させるテスト） + docs/design/detailed-design.md DD-10.4"
-description = "seed書込失敗時のtemp残留なし（C4回帰）: temp file pathをdirectoryで塞いでwrite失敗を発生させても、zelperは新規の部分書込temp fileを残留させない（best-effort cleanup）。失敗はPreflight error"
+description = "seed書込失敗時のtemp残留なし（C4回帰）: temp file pathをdirectoryで塞いでwrite失敗を発生させても、zelperは新規の部分書込temp fileを残留させない（best-effort cleanup。恒久lock file .zelper-seed.lockは例外として存在してよい）。失敗はPreflight error"
 given = "権限1つのみのcompanion node file（書込が試みられる状態）と、temp file pathを塞ぐdirectoryを置いたdirでensure_permissionsを実行"
-expect_return = "Err（ErrorClass=Preflight）。dir内の残留は事前に作ったdirectoryとpermissions.kdlのみ（zelperは新規fileを作っていない）"
+expect_return = "Err（ErrorClass=Preflight）。dir内の残留は事前に作ったdirectory・.zelper-seed.lock・permissions.kdlのみ（zelperは新規fileを作っていない）"
 
 [[condition]]
 id = "companion-seed.failed-wasm-extract-write-leaves-no-partial-temp-file"
-source_lines = "tests/fake_backend/companion_seed.rs:382"
+source_lines = "tests/fake_backend/companion_seed.rs:390"
 target_function = "ensure_companion_wasm"
 source = "docs/design/design-review.md §4.7 C4（TASK-39レビュー: wasm extract・permissions seed両方のwrite失敗経路でbest-effortのremove_fileを追加。テスト2件） + docs/design/detailed-design.md DD-10.3（runtime配置: cache dirへextract。書込は同dirのtemp file + atomic rename）"
 description = "wasm extract失敗時のtemp残留なし（C4回帰）: companion wasm extractのtemp書込失敗でも新規fileを残留しない。XDG_CACHE_HOME隔離下でcompanion_dir()の解決から検証"
