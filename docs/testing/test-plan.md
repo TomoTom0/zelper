@@ -1,7 +1,7 @@
 # zelper Test Plan (Phase 5)
 
 作成日: 2026-08-21
-前提: detailed-design.md DD-1〜DD-12（DD-10はv2全面改訂。design-review DR-1〜DR-10・TASK-37設計レビューR1〜R9反映済み）
+前提: detailed-design.md DD-1〜DD-12（DD-10はv2全面改訂。TASK-37設計レビューR1〜R9反映済み）
 原則: 安定した純粋ロジック（selector・planner・parser）については実装前にfailするテストを書く（development-plan Phase 5）
 更新: 2026-09-13（TASK-58条件書移行第4段）: §2の条件定義本文を`tests/design/`の条件書へ移譲し対応表へ縮小。§2.8・§2.11・旧§3は§3「L4統合test」節へ集約。移行仕様は`docs/design/conditions-migration.md` §6
 

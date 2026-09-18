@@ -1,4 +1,4 @@
-# resize操作（src/app/resize.rs）の検証条件。出典: test-plan §2.6・DD-9・design-review §4.2 MR-5/MR-21
+# resize操作（src/app/resize.rs）の検証条件。出典: test-plan §2.6・DD-9
 # 対応test: tests/fake_backend/resize.rs（7件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
 [meta]
 feature = "resize"
@@ -50,7 +50,7 @@ expect_return = "Ok（完了。幾何は不問）"
 id = "resize.equalize-missing-pane-and-cross-tab-rejected"
 source_lines = "tests/fake_backend/resize.rs:83"
 target_function = "resize::run_equalize（対象検証）"
-source = "docs/testing/test-plan.md §2.6 + docs/design/design-review.md §4.2 MR-21（equalizeのpositional不在ID黙除去・異tab混在無検証・expectパニック経路の修正: NoTarget/Preflight error化・Result化） + docs/design/detailed-design.md DD-9 equalize（1. 対象（--tab または PANESPEC群）のtiled pane群のgeometryを取得）"
+source = "docs/testing/test-plan.md §2.6 + equalizeのpositional不在IDは黙除去せずNoTarget/Preflight error化（異tab混在も検証・パニック経路なしのResult化） + docs/design/detailed-design.md DD-9 equalize（1. 対象（--tab または PANESPEC群）のtiled pane群のgeometryを取得）"
 description = "equalizeの対象検証: 不在pane IDは黙って除外せずNoTarget、異tab混在は（resize操作のtab内性が保てないため）Preflight。MR-21回帰（CMR-5: 不在IDと異tab混在を1条件に統合）"
 given = "terminal_1・terminal_2が存在する状態でのrun_equalize(b, [1, 99])と、同一tabの2 paneをtab_id 0/1へ分けた状態でのrun_equalize(b, [1, 2])の各実行"
 expect_return = "前者はErr（ErrorClass=NoTarget）。後者はErr（ErrorClass=Preflight）"

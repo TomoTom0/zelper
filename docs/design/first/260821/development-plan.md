@@ -178,12 +178,6 @@ Define:
 
 Perform a formal self-review before implementation.
 
-Create:
-
-```text
-docs/design/design-review.md
-```
-
 Review against:
 
 - requirements completeness
@@ -199,7 +193,7 @@ Review against:
 
 List all identified issues and their disposition.
 
-A design-review issue cannot be considered resolved merely because implementation could work around it.
+An identified issue cannot be considered resolved merely because implementation could work around it.
 
 ## Phase 5 — Test design before implementation
 

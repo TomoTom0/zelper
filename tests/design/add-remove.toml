@@ -1,4 +1,4 @@
-# add / remove操作（src/app/remove.rs・src/app/add.rs）の検証条件。出典: requirements §2.7/2.8・DD-11・DD-1.5・design-review §4.2 MR-20
+# add / remove操作（src/app/remove.rs・src/app/add.rs）の検証条件。出典: requirements §2.7/2.8・DD-11・DD-1.5
 # 対応test: tests/fake_backend/rename_add_remove.rs（部分7件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
 [meta]
 feature = "add-remove"
@@ -41,7 +41,7 @@ expect_return = "単一はOk（3→2件）。2対象gateなしはErr（ErrorClas
 id = "add-remove.remove-empty-unknown-tab-name-is-error-not-silent-widen"
 source_lines = "tests/fake_backend/rename_add_remove.rs:137"
 target_function = "remove::run_tab（--empty: TABSPEC解決）"
-source = "docs/design/first/260821/requirements.md §2.8（空tab削除の考慮・明示的方針） + docs/design/detailed-design.md DD-11 remove --empty + docs/design/design-review.md §4.2 MR-20（remove tab --emptyのTABSPEC解決失敗を黙って捨て、削除対象が全空tabへ暗黙拡大する問題の修正。回帰test追加）"
+source = "docs/design/first/260821/requirements.md §2.8（空tab削除の考慮・明示的方針） + docs/design/detailed-design.md DD-11 remove --empty + remove tab --emptyのTABSPEC解決失敗はerror（解決失敗を黙って捨てて削除対象が全空tabへ暗黙拡大しない。回帰test）"
 description = "remove tab --emptyのTABSPEC解決失敗はerrorであり黙って捨てない（解決不能指定→全空tabへの暗黙拡大防止）。名前で一意解決できる場合はそのtabのみ対象。MR-20回帰"
 given = "tab0=空・tab1=空でない（nosuchtabは不在）のFakeBackendへの--empty+nosuchtab指定と、tab0=空でない・empty1=空tabのFakeBackendへの--empty+empty1指定"
 expect_return = "前者はErr（ErrorClass=NoTarget）。後者はOkでempty1のみ削除されtab0が残存"

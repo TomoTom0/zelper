@@ -1,4 +1,4 @@
-# remap CLI契約（src/app/remap.rs: 廃止flag・version gate・dry-run出力）の検証条件。出典: test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側・DD-12・design-review §4.7/§4.8・TASK-75設計書（remap-v3-multi-tab-task75.md §3.7・DD-10 v2.2）
+# remap CLI契約（src/app/remap.rs: 廃止flag・version gate・dry-run出力）の検証条件。出典: test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側・DD-12・TASK-75設計書（remap-v3-multi-tab-task75.md §3.7・DD-10 v2.2）
 # 対応test: tests/cli/remap.rs（10件予定: 既存8件 + TASK-75新規2件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1。TASK-75新規2件は後段のtest更新作業で追加）
 # fake zellij shimをtest実行時に生成する（実zellijに依存しない。L3）
 [meta]
@@ -15,7 +15,7 @@ note = "廃止flag・version gateは src/cli.rs・src/zellij/process.rs も検�
 id = "remap-cli.r43-removed-flags-are-usage-error-exit2"
 source_lines = "tests/cli/remap.rs:116"
 target_function = "remap CLI parse（廃止option）"
-source = "docs/testing/test-plan.md §2.7 (g) R43（--overflow nest / --overflow tabs / --session-scope はusage error（exit 2）。remap本体は実行されない） + docs/design/detailed-design.md DD-1.2/1.5・DD-10.2 #11・DD-12 + docs/design/design-review.md §4.8（TASK-43: 廃止optionの即時削除）"
+source = "docs/testing/test-plan.md §2.7 (g) R43（--overflow nest / --overflow tabs / --session-scope はusage error（exit 2）。remap本体は実行されない） + docs/design/detailed-design.md DD-1.2/1.5・DD-10.2 #11・DD-12 + 廃止optionは即時削除（no-op受理の移行期間を設けない。旧scriptの意図を無言で別意味に解釈する危険のため）"
 description = "廃止optionの拒否: v0.1.xで削除済みの --overflow nest / --overflow tabs / --session-scope の指定はusage error（exit 2）でremap本体は実行されない。stdoutには何も出ず、usage errorはstderrへ出る"
 given = "3-pane fixture（M=N=3・k=1）のfake zellij shimで、remap --inline <3-slot layout> に各廃止optionを付けて実行"
 expect_return = "いずれもexit 2・stdout空・stderrにusage error"
@@ -33,7 +33,7 @@ expect_return = "exit 2・stdout空・stderrにusage error"
 id = "remap-cli.r45-removed-flags-absent-from-help"
 source_lines = "tests/cli/remap.rs:178"
 target_function = "remap CLI help（廃止optionの非表示）"
-source = "docs/testing/test-plan.md §2.7 (g) R45（当該optionはclap helpに出現しない） + docs/design/detailed-design.md DD-1.2・DD-12 + docs/design/design-review.md §4.6 R6（clap側のhelp非表示化を固定するtest要件）"
+source = "docs/testing/test-plan.md §2.7 (g) R45（当該optionはclap helpに出現しない） + docs/design/detailed-design.md DD-1.2・DD-12 + clap側のhelp非表示化を固定するtest要件"
 description = "廃止optionのhelp非表示: remap --help に --overflow・--session-scope は出現せず、廃止対象外のoption（--embed-floating）は見える"
 given = "remap --help の実行"
 expect_return = "exit 0。helpに--overflow・--session-scopeを含まず--embed-floatingを含む"
@@ -78,7 +78,7 @@ expect_return_shape = "stdoutにcompanion・probe・break・rename・go-to・ove
 id = "remap-cli.both-removed-flags-together-still-usage-error"
 source_lines = "tests/cli/remap.rs:400"
 target_function = "remap CLI parse（廃止option同時指定）"
-source = "docs/design/design-review.md §4.7 C7（TASK-39レビュー: --session-scopeと--overflowの同時指定でwarningが2行出る → 統合。関連: docs/testing/test-plan.md §2.7 (g) R43（両flag同時指定を含む）） + docs/design/design-review.md §4.8（TASK-43: option削除によりwarning統合問題は消滅。同時指定もusage error）"
+source = "docs/testing/test-plan.md §2.7 (g) R43（両flag同時指定を含む） + 廃止option同時指定もusage error（option削除によりwarning統合問題は消滅）"
 description = "廃止option同時指定の拒否（C7回帰）: --session-scopeと--overflow tabsの同時指定（--json併用含む）も単一のusage error（exit 2）で拒否される。旧warning出力の統合問題はoption削除で消滅しており、stdoutには何も出ない"
 given = "remap --inline <layout> --session-scope --overflow tabs --json の実行"
 expect_return = "exit 2・stdout空"

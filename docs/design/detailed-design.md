@@ -308,7 +308,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 
 ## DD-10. `remap` アルゴリズム（v2）
 
-初版: 2026-08-21 / 全面改訂: 2026-09-03（TASK-34/37。E6実験によるcross-tab移動の実証を受け、basic-design 4.6の原本仕様へ復帰）/ 改訂: 2026-09-15（TASK-74。run一致照合のkeyを`terminal_command`（invoked_with序列化）へ変更・`default_tab_template`の生成KDL反映・poll中の空応答retry。改訂の根拠と証拠は`remap-v2-matching-fix-task74.md`）/ 改訂: 2026-09-15 v2.2（TASK-75。multi-tab layout全体再現: 反復単位をlayout全体へ一般化・tab名/tab focus/pane focus再現・`focus-pane-id`追加・正規形TabTemplate列へのlayout解決一元化。根拠と証拠は`remap-v3-multi-tab-task75.md`）。本節が旧DD-10（適用単位=tab、M>N既定error、fill/nest/tabs 3 mode、`--overflow tabs`のkill+command再起動、`--session-scope`のper-tab独立適用）全体を置き換える。設計レビューR1〜R7・R9（design-review.md §4.6）を反映済み。
+初版: 2026-08-21 / 全面改訂: 2026-09-03（TASK-34/37。E6実験によるcross-tab移動の実証を受け、basic-design 4.6の原本仕様へ復帰）/ 改訂: 2026-09-15（TASK-74。run一致照合のkeyを`terminal_command`（invoked_with序列化）へ変更・`default_tab_template`の生成KDL反映・poll中の空応答retry。改訂の根拠と証拠は`remap-v2-matching-fix-task74.md`）/ 改訂: 2026-09-15 v2.2（TASK-75。multi-tab layout全体再現: 反復単位をlayout全体へ一般化・tab名/tab focus/pane focus再現・`focus-pane-id`追加・正規形TabTemplate列へのlayout解決一元化。根拠と証拠は`remap-v3-multi-tab-task75.md`）。本節が旧DD-10（適用単位=tab、M>N既定error、fill/nest/tabs 3 mode、`--overflow tabs`のkill+command再起動、`--session-scope`のper-tab独立適用）全体を置き換える。設計レビューR1〜R7・R9を反映済み。
 
 **実装状態の注記（2026-09-16 E2E改修・完了時追際）**: v2系のうちv2.1（TASK-74）に加え**v2.2（TASK-75・multi-tab全体再現）も実装済み**（L1〜L3自動test 171条件green。E2E acceptance 1巡目で要因A〔pane focus対象の位置ベース化〕・要因B〔空groupのnew-tab --layout-string経路〕を検出し本節条文を改訂・改修済み。TASK-75設計書§7.1。E2E acceptance 80条件全PASS〔S-v3-1〜5・tmp/task75/acceptance/〕・コードレビューCR75-1〜3対応まで完了）。E2E再検証・requirements-traceability.mdのimplemented表記・README・usage文書（repo側）の追従も完了（2026-09-16完了時追際）。
 

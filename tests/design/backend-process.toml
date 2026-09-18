@@ -1,4 +1,4 @@
-# 実zellij実行backend（src/zellij/process.rs）の検証条件。出典: test-plan §2.3・§2.9・DD-1.5・DD-3.1/3.4/3.5・DD-5・DD-10.14・design-review §4.19・TASK-75設計書（remap-v3-multi-tab-task75.md §3.5・DD-10 v2.2）
+# 実zellij実行backend（src/zellij/process.rs）の検証条件。出典: test-plan §2.3・§2.9・DD-1.5・DD-3.1/3.4/3.5・DD-5・DD-10.14・TASK-75設計書（remap-v3-multi-tab-task75.md §3.5・DD-10 v2.2）
 # 対応test: src/zellij/process.rs内test（lib。7件予定: 既存6件 + TASK-75新規1件。1条件=1 test fnの1:1対応。TASK-75新規1件は後段のtest更新作業で追加）
 [meta]
 feature = "backend-process"
@@ -59,7 +59,7 @@ expect_return = "Err。class=OperationFailed。messageはzellij call timed out a
 id = "backend-process.current-tab-unexpected-output-operation-failed"
 source_lines = "src/zellij/process.rs:558"
 target_function = "ZellijCliBackend::current_tab（非単一tab出力）"
-source = "docs/design/detailed-design.md DD-3.4（current-tab-info --jsonをTabInfoとして直接decode・単体parse） + src/zellij/process.rs:161-168 + docs/design/design-review.md §4.19 TR59-3（移行時列挙漏れ分岐の対応決定）"
+source = "docs/design/detailed-design.md DD-3.4（current-tab-info --jsonをTabInfoとして直接decode・単体parse） + src/zellij/process.rs:161-168 + current-tab-infoの非単一tab出力はOperationFailed（error分岐は列挙漏れなく条件化する規律）"
 description = "current-tab-info --jsonの出力が単一tabに定まらない（parse結果が0件または複数件）場合はOperationFailed（unexpected current-tab-info output）。TR59-3対応: 移行時列挙漏れ分岐の条件化。in-module testからfake zellij scriptの応答を複数tab JSON配列へ固定して決定的に検証する"
 given = "fake zellij test mutex下で、staging fileへwrite/chmod後にcloseしてatomic rename公開した2件分のtab JSON（実出力相当）配列scriptをwith_programで指向したbackendのcurrent_tab()呼び出し"
 expect_return = "Err。class=OperationFailed。messageはunexpected current-tab-info outputを含む"

@@ -1,4 +1,4 @@
-# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・design-review §4.2/§4.7・TASK-74設計書（remap-v2-matching-fix-task74.md）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.1〜2.3・DD-10 v2.2）
+# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・TASK-74設計書（remap-v2-matching-fix-task74.md）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.1〜2.3・DD-10 v2.2）
 # 対応test: tests/unit/layout_planner.rs（24件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1）
 # plannerは純粋関数（fake backendなしで検証。DD-10.6）。v2.2（TASK-75）: plan_v2は正規形TabTemplate列
 # （layout::normalize_tab_templates出力）を引数に取り、blocks × groups（group = (block b, tab t)）構造の計画を返す。
@@ -107,7 +107,7 @@ expect_return = "前者はErr（ErrorClass=LayoutInvalid）・後者はErr（Err
 id = "layout-planner.r12-slot-count-uses-first-tab-subtree-excluding-plugin-leaves"
 source_lines = "tests/unit/layout_planner.rs:282"
 target_function = "layout::count_terminal_slots / normalize_tab_templates"
-source = "docs/testing/test-plan.md §2.7 (a) R12（slot数 N の算出: layout最初のtab subtreeの末端terminal slot数。plugin leaf除外（config子node持ち・bare両方=MR-32回帰。plugin配下は再帰しない）） + docs/design/design-review.md §4.2 MR-32 + docs/design/detailed-design.md DD-10.6 v2.2（n_slots: subtreeの末端terminal pane slot数〔plugin leaf除外・SKIP_NODES規則・従来通り〕）"
+source = "docs/testing/test-plan.md §2.7 (a) R12（slot数 N の算出: layout最初のtab subtreeの末端terminal slot数。plugin leaf除外（config子node持ち・bare両方=MR-32回帰。plugin配下は再帰しない）） + plugin配下の子nodeはすべてplugin configurationとして文字列化されslotを形成しない（config子node持ち・bare両方。plugin配下は再帰しない） + docs/design/detailed-design.md DD-10.6 v2.2（n_slots: subtreeの末端terminal pane slot数〔plugin leaf除外・SKIP_NODES規則・従来通り〕）"
 description = "slot数算出規則の本体: n_slots = 鋳型subtreeの末端terminal slot数（v2.2で鋳型毎のn_slotsへ一般化。T=1 layoutでは鋳型0のn_slotsが従来のNに相当）。plugin leaf（pane wrapper内・bare・config子node持ちの全形式）はslotを消費せず、plugin配下は再帰しない。container・floating_panes・templateはSKIP_NODES規則で対象外（MR-32回帰）。TASK-75更新: base_subtree廃止に伴い正規形TabTemplate列（normalize_tab_templates）経由の数え上げへ読み替え（数え上げ規則は不変）"
 given = "3-slot bare layout・pane wrapper内plugin leaf入りlayout（bare pane 2つ）・bare plugin node（config子node持ち）入りlayout（bare pane 1つ）・pane_template/floating_panes/container混在layoutの4種をparseして正規形鋳型subtreeのcount_terminal_slots"
 expect_return = "それぞれ3・2・1・2"
@@ -125,7 +125,7 @@ expect_return = "s_slots=6（S=sum(N_t)）・plan_v2のk=1（blocks長1・groups
 id = "layout-planner.r12-zellij-bare-bools-and-property-nodes-parse"
 source_lines = "tests/unit/layout_planner.rs:333"
 target_function = "layout::parse"
-source = "docs/testing/test-plan.md §2.7 (a) R12（実機KDL形式のparse頑健性） + docs/design/design-review.md §4.2 MR-16（zellij layout常用のbare boolをparse拒否する回帰） + docs/design/detailed-design.md DD-10.6"
+source = "docs/testing/test-plan.md §2.7 (a) R12（実機KDL形式のparse頑健性） + zellij layout常用のbare bool（borderless=true等）をparse拒否から回帰しない（parse前の字句正規化: 文字列外bare boolの強制quote） + docs/design/detailed-design.md DD-10.6"
 description = "実機zellij layoutが常用する形式のparse頑健性: bare bool属性（borderless=true・focus=true）・property node（cwd / start_suspended）を含むlayoutがparse時にquote正規化されslot数として数えられる（MR-16回帰）"
 given = "bare bool属性付きbar plugin layout・cwd property node付きlayout・start_suspended property node付きlayoutの3種をparseしてcount_terminal_slots"
 expect_return = "いずれもparse成功し、slot数は1・1・1"
@@ -143,7 +143,7 @@ expect_return = "第1はOk（k=1）かつwarningsにterminal_2・terminal_3を�
 id = "layout-planner.quoting-warning-covers-single-quotes-newlines-control-chars"
 source_lines = "tests/unit/layout_planner.rs:396"
 target_function = "needs_quoting_warning"
-source = "docs/design/design-review.md §4.7 C6（TASK-39レビュー。関連: docs/testing/test-plan.md §2.7 (b) R20） + docs/design/detailed-design.md DD-10.13（TASK-74改訂: 文字種拡張の対象もterminal_commandへ変更） + docs/design/remap-v2-matching-fix-task74.md §2.1"
+source = "quoting warning判定はダブルクォート・シングルクォート・バックスラッシュ・改行・制御文字を含む場合にも発火（argv破壊をwarningなしに通さない。関連: docs/testing/test-plan.md §2.7 (b) R20） + docs/design/detailed-design.md DD-10.13（TASK-74改訂: 文字種拡張の対象もterminal_commandへ変更） + docs/design/remap-v2-matching-fix-task74.md §2.1"
 description = "quoting warningの文字種拡張（C6回帰）: warning対象は **terminal_command** の `\"` / `\\` に加え `'`・改行・制御文字（split_whitespaceでargvが壊れうる文字）を含むpane。通常の引数区切り空白は対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕ではterminal_command側の該当文字を検出できない）"
 given = "terminal_commandが 単quoteを含む bash -lc 'echo a b'・改行を含む echo a（途中でLF）b・ESC制御文字（U+001B）を含む echo（ANSI escape）・通常の codex exec --plan の4 paneをN=4でplan_v2へ与える"
 expect_return = "warningsにterminal_1・terminal_2・terminal_3を含み、terminal_4（通常の引数区切り空白のみ）を含まない"

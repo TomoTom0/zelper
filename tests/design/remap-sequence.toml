@@ -1,4 +1,4 @@
-# remap v2実行sequence（src/app/remap.rs: run）の検証条件。出典: test-plan §2.7 R8・(d) R29〜R32・(e) R33〜R36・(f) R37〜R42・(i) R47/R50・DD-10 v2・design-review §4.7・TASK-74設計書（remap-v2-matching-fix-task74.md §2.3/§2.6/§4）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.4/§2.5/§3.4〜3.6・DD-10 v2.2）
+# remap v2実行sequence（src/app/remap.rs: run）の検証条件。出典: test-plan §2.7 R8・(d) R29〜R32・(e) R33〜R36・(f) R37〜R42・(i) R47/R50・DD-10 v2・TASK-74設計書（remap-v2-matching-fix-task74.md §2.3/§2.6/§4）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.4/§2.5/§3.4〜3.6・DD-10 v2.2）
 # 対応test: tests/fake_backend/remap.rs（32件予定: 既存23件 + TASK-75新規9件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1。
 # TASK-75新規9件は後段のtest更新作業で追加）
 # planner（R1〜R12）と生成KDL（R13〜R20）は L1（tests/unit/）、permissions seed（R21〜R28）は
@@ -17,7 +17,7 @@ note = "TASK-74（2026-09-15）条件書更新: 空応答retry 2条件を追加�
 id = "remap-sequence.r8-floating-pane-in-scope-blocks-or-embeds"
 source_lines = "tests/fake_backend/remap.rs:202"
 target_function = "remap::run（preflight floating検出・--embed-floating）"
-source = "docs/testing/test-plan.md §2.7 R8（floating pane存在 → Preflight error。--embed-floatingでtoggle（plan確定後の状態変更第1歩）を経てsourceに組入れ） + docs/design/detailed-design.md DD-10.5（floating pane: selectable floating terminalがあればpreflight error。--embed-floatingでtoggle-pane-embed-or-floatingによりtiled化。toggled化対象はpreflightで特定したselectable floating terminalのみ）・DD-10.2 #13 + docs/design/design-review.md §4.7 C1（toggle対象をselectable floating terminalのID集合のみに限定する回帰assert）"
+source = "docs/testing/test-plan.md §2.7 R8（floating pane存在 → Preflight error。--embed-floatingでtoggle（plan確定後の状態変更第1歩）を経てsourceに組入れ） + docs/design/detailed-design.md DD-10.5（floating pane: selectable floating terminalがあればpreflight error。--embed-floatingでtoggle-pane-embed-or-floatingによりtiled化。toggled化対象はpreflightで特定したselectable floating terminalのみ）・DD-10.2 #13 + toggle対象はpreflightで特定したselectable floating terminalのID集合のみに限定する回帰assert（plugin pane等のnon-selectable paneはtoggleしない）"
 description = "floating paneの遮断と組入れ: scope（session全体）内にselectable floating terminal paneがあれば状態変更前にPreflight error（候補列出）。--embed-floating指定時はtoggle-embedでtiled化してsourceに組入れ、companion plugin pane（non-selectable）はtoggleしない・floatingのままsourceに混入しない（C1回帰）。検証限界: toggleがplan確定後であることの順序assertはなし（DD-10.7 step 4の順序は構造上の前置き）"
 given = "4 pane / 2 tab + anchor外tabのfloating pane構成で、--embed-floatingなしのrun（エラー系）と、--embed-floatingありのrun（組入れ系: 4 tiled + 1 floating = M=5 → k=2）"
 expect_return = "なし側はErr（ErrorClass=Preflight・candidatesにterminal_9）でpipe不発生。あり側はOkでtoggle-embed terminal_9が呼ばれ（plugin_系はtoggleされない）、selectable floating paneが残らず全5 paneが配置される"
@@ -44,7 +44,7 @@ expect_return = "呼び出し列で pipe probe が pipe break- より先に現�
 id = "remap-sequence.r31-probe-timeout-aborts-before-any-state-change"
 source_lines = "tests/fake_backend/remap.rs:340"
 target_function = "remap::run（probe不成立）"
-source = "docs/testing/test-plan.md §2.7 (d) R31（probe不成立（timeout）→ 一切の状態変更前に中断。OperationFailed + 権限hint（seed未反映・dialog pending・protocol非互換をここで検知）） + docs/design/detailed-design.md DD-10.7 step 3・DD-10.4（probe失敗時のerrorの権限hint）・DD-10.12 worked example #8 + docs/design/design-review.md §4.6 R3"
+source = "docs/testing/test-plan.md §2.7 (d) R31（probe不成立（timeout）→ 一切の状態変更前に中断。OperationFailed + 権限hint（seed未反映・dialog pending・protocol非互換をここで検知）） + docs/design/detailed-design.md DD-10.7 step 3・DD-10.4（probe失敗時のerrorの権限hint）・DD-10.12 worked example #8 + probe不成立は一切の状態変更前に中断し、中断時の報告にpipe遅延実行の注意を含める"
 description = "probe不成立の安全側中断: probe（最初のpipe）がbackend timeoutする系列では、一切の状態変更前に中断する。errorはOperationFailedで権限hint（seed未反映・dialog pending・手動grant案内）を含む。break pipe・toggle・override-layout・go-to-tabは不発生"
 given = "4 pane / 2 tab構成で最初のpipe（probe）をblockさせる失敗注入（pipe block）をしたrun"
 expect_return = "Err（ErrorClass=OperationFailed・messageにpermissionhint）。呼び出し列は pipe probe のみで pipe break-・toggle-embed・override-layout・go-to-tab 不発生"
@@ -62,7 +62,7 @@ expect_return = "probe pipe呼び出しが2回で、payload（nonce）が互い�
 id = "remap-sequence.r33-break-id-moves-inbound-before-outbound"
 source_lines = "tests/fake_backend/remap.rs:403"
 target_function = "remap::run（移動phase 5-a）"
-source = "docs/testing/test-plan.md §2.7 (e) R33（group 0のanchor外paneを break-id <anchor_id> <ids> でanchorへ移動。group 0のinboundを後続groupのoutboundより先行（anchor一時空による自動closeを構造的に排除する不変条件）） + docs/design/detailed-design.md DD-10.7 5-a（v2.2: group (0,0)〔anchor group〕の不変条件の一般化。M>=1なら逐次充填によりgroup (0,0)は必ず1 pane以上を持ち、5-aのinboundを後続outboundより先に行うことでanchor自動closeを構造的に排除） + docs/design/design-review.md §4.6（不変条件は問題なし判定）"
+source = "docs/testing/test-plan.md §2.7 (e) R33（group 0のanchor外paneを break-id <anchor_id> <ids> でanchorへ移動。group 0のinboundを後続groupのoutboundより先行（anchor一時空による自動closeを構造的に排除する不変条件）） + docs/design/detailed-design.md DD-10.7 5-a（v2.2: group (0,0)〔anchor group〕の不変条件の一般化。M>=1なら逐次充填によりgroup (0,0)は必ず1 pane以上を持ち、5-aのinboundを後続outboundより先に行うことでanchor自動closeを構造的に排除） + 移動sequenceの不変条件（group 0 inbound先行によるanchor自動close防止・pane id基準の新規tab特定によるtab id再利用race防御・長寿命tab id参照の排除）に違反しない"
 description = "移動の不変条件: group (0,0)（anchor group。T=1では旧group 0に一致）のanchor外paneをbreak-id（payloadにanchor tab idと対象paneのみ）でanchorへ移動し、後続groupのbreak-newより先行する。anchor内paneは移動対象に含まれない"
 given = "5 pane / 3 tab（group 0 = pane 1,2,3（うち3がanchor外）・group 1 = pane 4,5）でのrun"
 expect_return = "呼び出し列で pipe break-id が pipe break-new より先。break-id payloadはanchor idとterminal_3を含みterminal_1/2を含まない。break-new payloadはterminal_4/5を含む"
@@ -170,7 +170,7 @@ expect_return = "dry-runはOkかつtoggle-embed不発生・floating paneはfloat
 id = "remap-sequence.poll-deadline-not-extended-by-slow-backend-call"
 source_lines = "tests/fake_backend/remap.rs:876"
 target_function = "remap::run（poll deadline）"
-source = "docs/design/design-review.md §4.7 C3（TASK-39レビュー: polling deadlineがcond()（list_panes等）の所要時間を考慮しない。deadline超過後の条件成立を成功扱いしうる → pollをbackend呼出ごとにdeadline再検査する形に修正。10.3s遅延したlist_panesがprobe title成立を返す系列では中断する回帰テスト） + docs/design/detailed-design.md DD-10.7（polling定数: 250ms間隔・10s deadline）・DD-10.7 空応答のlenient取得・fatal条件(a)（polling timeout文面にscreen繁忙の1s timeout機構への言及を含める） + TASK-74段階8コードレビューCR74-4（probe側timeout文面にF8機構注記が欠けていた。この文面は権限問題と誤診されうる）"
+source = "pollingはbackend呼出ごとにdeadlineを再検査する（deadline超過後の条件成立を成功扱いにしない。10.3s遅延したlist_panesがprobe title成立を返す系列では中断する回帰テスト） + docs/design/detailed-design.md DD-10.7（polling定数: 250ms間隔・10s deadline）・DD-10.7 空応答のlenient取得・fatal条件(a)（polling timeout文面にscreen繁忙の1s timeout機構への言及を含める） + TASK-74段階8コードレビューCR74-4（probe側timeout文面にF8機構注記が欠けていた。この文面は権限問題と誤診されうる）"
 description = "polling deadlineの厳密性（C3回帰）: deadlineはbackend呼出（poll内のlist-panes取得〔lenient〕）の所要時間を含めて保証し、deadline超過後に条件が成立していても成功扱いにしない。遅延実行を成功扱いしないため状態変更へ進まない。probe poll timeoutの文面は権限hintとともに、timeoutがscreen繁忙（screen応答1s timeoutによる一時的な空list応答）でも起こりうる旨のF8機構の注記を含む（CR74-4: 空応答を権限問題と誤診させない。fail-first: レビュー時点の実装のprobe側timeout文面は権限hintのみでscreen繁忙の注記を欠く）"
 given = "4 pane / 2 tab構成で最初のpipe（probe）後のpoll内list-panes取得（lenient）を10.3s遅延させ、probe titleが現れている状態でdeadlineを越える失敗注入をしたrun"
 expect_return = "Err（ErrorClass=OperationFailed・messageにprobeとscreen繁忙の1s list応答timeout機構の注記（screen/busy/1s/empty等の語）を含む）。pipe break-・override-layoutは不発生"
@@ -179,7 +179,7 @@ expect_return = "Err（ErrorClass=OperationFailed・messageにprobeとscreen繁�
 id = "remap-sequence.new-tab-name-verified-by-target-tab-id"
 source_lines = "tests/fake_backend/remap.rs:915"
 target_function = "remap::run（postcondition (c) の検証方法）"
-source = "docs/design/design-review.md §4.7 C5（TASK-39レビュー: 新規tab名postconditionが「同名tabの存在」のみで、target_j自身のIDと名前の対応を検証していない → tabs_afterからid == targetのtabを取得して名前比較する形式に変更。既存同名tabがあっても誤通過しない回帰テスト） + docs/design/detailed-design.md DD-10.9 (c)"
+source = "新規tab名postconditionはtabs_afterからid == targetのtabを取得して名前比較する（「同名tabの存在」のみの検証では既存同名tabがあっても誤通過しうる回帰テスト） + docs/design/detailed-design.md DD-10.9 (c)"
 description = "新規tab名検証の特定方法（C5回帰）: 同名tabが既に存在しても、target tab自身のIDと名前の対応で検証する。renameが不生效なら検証失敗とし、期待/実測差分にtarget tab自身の名前が載る"
 given = "既存の空tabがたまたま remap-2 という名を持つ構成（4 pane同一tab・anchor外の空tab追加）で、break-new後のrename-tabが成功扱いだが名を変えない失敗注入（mute_rename_tab）をしたrun"
 expect_return = "Err（ErrorClass=VerificationFailed・messageに期待名（expected remap-2）と実測名（named）を含む）"

@@ -1,4 +1,4 @@
-# read / send 操作（src/app/read.rs）の検証条件。出典: test-plan §2.4・DD-6/DD-7/DD-4.1・design-review §4.2
+# read / send 操作（src/app/read.rs）の検証条件。出典: test-plan §2.4・DD-6/DD-7/DD-4.1
 # 対応test: tests/cli/list_read_send.rs（11件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
 [meta]
 feature = "read-send"
@@ -41,7 +41,7 @@ expect_return_shape = "stdoutに === terminal_1 (agent-a, tab:0 Tab #1) === の�
 id = "read-send.read-full-passes-dump-screen-f"
 source_lines = "tests/cli/list_read_send.rs:456"
 target_function = "read::run → ZellijBackend::dump_screen（-f転送）"
-source = "docs/testing/test-plan.md §2.4（read: --fullの加工） + docs/design/detailed-design.md DD-6（request: --full（scrollback） / plan: 対象pane毎にdump-screen -p（full指定時-f）） + docs/design/design-review.md §4.2 MR-30（--tail系test不在指摘・test追加はP1）"
+source = "docs/testing/test-plan.md §2.4（read: --fullの加工） + docs/design/detailed-design.md DD-6（request: --full（scrollback） / plan: 対象pane毎にdump-screen -p（full指定時-f）） + --full加工testは当初不在のため追加（--tail系と併せtest追加要求への対応）"
 description = "--full指定時のbackend転送: readのdump-screen呼び出しに-fが付くこと。scrollback込み取得はzellij側機能のためzelperは加工せず-f引数の転送のみ行う（非--full時と対象解決・results構造は同一経路）"
 given = "fake zellij shim（dump-screenは-pのpaneにSCREEN[pane]を返し、-f検出時はFULL接尾付き。全argvはlogへ記録）に対するzelper read 1 --full --jsonの実行"
 expect_return = "exit 0かつshim logにdump-screen -p terminal_1 -fが記録され、results[0].detailは-f応答（SCREEN[terminal_1]FULL）に変わる"
@@ -50,7 +50,7 @@ expect_return = "exit 0かつshim logにdump-screen -p terminal_1 -fが記録さ
 id = "read-send.read-tail-applies-to-last-n-lines"
 source_lines = "tests/cli/list_read_send.rs:484"
 target_function = "read::run（apply_tail）"
-source = "docs/testing/test-plan.md §2.4（read: --tail Nの加工） + docs/design/detailed-design.md DD-6（request: --tail N（行末N行、zelper側加工。--tailは取得済み内容——viewport、--full指定時はscrollback込み——の末尾N行に適用） + JSON: results[]: { target, title, tab, content | error }。--tailはcontentに適用） + docs/design/design-review.md §4.2 MR-30（apply_tail経路は実装済み・tail testはP1）"
+source = "docs/testing/test-plan.md §2.4（read: --tail Nの加工） + docs/design/detailed-design.md DD-6（request: --tail N（行末N行、zelper側加工。--tailは取得済み内容——viewport、--full指定時はscrollback込み——の末尾N行に適用） + JSON: results[]: { target, title, tab, content | error }。--tailはcontentに適用） + apply_tail経路は実装済みのため、--tail N加工はtest追加により担保"
 description = "--tail Nのzelper側加工: 取得済みcontentを末尾N行へ切り詰め、JSON resultsのcontent（detail）へ格納する。適用対象は取得形態の末尾N行（viewport / --full併用時はscrollback込み）で、両形式を1条件で検証（CMR-5: --tail単体と--full併用の2形式を統合。DD-6 request節が1文で両者を規定）。Nが行数以上の場合は切り詰められず全行保持の境界を含む。加工は出力前のapply_tail単一経路のためhuman出力にも同一の加工済み内容が現れる（検証はJSONで実施）"
 given = "fake zellij shimのdump-screen応答を環境変数で複数行内容（例: 識別可能な5行）へ差し替えられるようにした上で、zelper read 1 --tail 2 --json・zelper read 1 --full --tail 2 --json・zelper read 1 --tail 99 --json（N >= 行数）の各実行"
 expect_return_shape = "各実行ともexit 0し、detailは--tail 2では末尾2行のみ（先頭側の行は含まれない）、--full --tail 2では-f付き取得内容（FULL接尾・scrollback込み相当）の末尾2行、--tail 99では全行保持（切り詰め無し）"
@@ -104,7 +104,7 @@ expect_return = "exit 6（PartialFailure）かつ、失敗paneより後の残対
 id = "read-send.send-multiline-text-single-write-chars"
 source_lines = "tests/cli/list_read_send.rs:626"
 target_function = "send::run（複数行textの送信形式）"
-source = "docs/design/detailed-design.md DD-7（実行: text → write-chars -p（複数行textはv1ではwrite-chars単呼び。pasteは未検証のためv1未使用）） + docs/design/design-review.md §4.15 CMR4-9(4)（出典走査残項目としての条件化を指示）"
+source = "docs/design/detailed-design.md DD-7（実行: text → write-chars -p（複数行textはv1ではwrite-chars単呼び。pasteは未検証のためv1未使用）） + 複数行textはwrite-chars単呼び・paste不使用〔v1契約〕"
 description = "sendの複数行textの送信形式: 改行を含むtextもwrite-chars 1回の単呼びで送信し、行単位への分割呼び出しを行わずpasteも使用しない（v1契約）。複数行textにおけるbackend呼び出し契約（既存send系条件は単語textのみで複数行を未検証）"
 given = "fake zellij shim（全argvはlogへ記録）に対するzelper send 1 -- 改行を含む複数行text（例: 2行を改行で接続したtext）の実行"
 expect_return = "exit 0かつwrite-chars呼び出しは1回のみで、改行を含むtext全体が単一argv要素として渡る。paste呼び出しと行単位の分割呼び出しは発生しない"
