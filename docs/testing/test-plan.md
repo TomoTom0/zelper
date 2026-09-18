@@ -3,7 +3,7 @@
 作成日: 2026-08-21
 前提: detailed-design.md DD-1〜DD-12（DD-10はv2全面改訂。TASK-37設計レビューR1〜R9反映済み）
 原則: 安定した純粋ロジック（selector・planner・parser）については実装前にfailするテストを書く（development-plan Phase 5）
-更新: 2026-09-13（TASK-58条件書移行第4段）: §2の条件定義本文を`tests/design/`の条件書へ移譲し対応表へ縮小。§2.8・§2.11・旧§3は§3「L4統合test」節へ集約。移行仕様は`docs/design/conditions-migration.md` §6
+更新: 2026-09-13（TASK-58条件書移行第4段）: §2の条件定義本文を`tests/design/`の条件書へ移譲し対応表へ縮小。§2.8・§2.11・旧§3は§3「L4統合test」節へ集約
 
 ## 1. テスト階層と実行環境
 
@@ -20,7 +20,7 @@ L4の実行形: Phase 1と同一のpodman構成（docs/research/zellij-capabilit
 
 領域別の検証条件の正本は `tests/design/<stem>.toml`（test-structure skill準拠）。条件id・given/expect・出典（source欄）・excluded記録は各条件書を参照。条件書一覧・R番号→条件id対応表は `tests/design/README.md`。
 
-**R番号（remap v2 matrix R1〜R50）の定義正本は条件書へ移譲された**（各条件のsource欄・given/expect。旧§2.7本文は上記更新で削除）。R番号で来た参照は`tests/design/README.md`の対応表経由で条件へ到達できる（conditions-migration §10.3）。
+**R番号（remap v2 matrix R1〜R50）の定義正本は条件書へ移譲された**（各条件のsource欄・given/expect。旧§2.7本文は上記更新で削除）。R番号で来た参照は`tests/design/README.md`の対応表経由で条件へ到達できる。
 
 TASK-74改訂（2026-09-15）: R13/R14/R15/R18/R20/R48/R49の定義はremap照合key変更（terminal_command〔invoked_with序列化〕基準・quoting warning対象変更）・default_tab_template反映・dry-run出力改訂に伴い条件書側で更新済み（該当: layout-generator.r13〜r15/r18・layout-generator.template-children-substitution・layout-planner.r20系・layout-planner.run-derives-from-invoked-with・remap-cli.r48/r49。設計書 remap-v2-matching-fix-task74.md §2/§3）。§5等の歴史的参照（fail-first履歴）は改訂前定義を指す。
 
@@ -46,7 +46,7 @@ TASK-74改訂（2026-09-15）: R13/R14/R15/R18/R20/R48/R49の定義はremap照�
 | §3 | preservation実証（L4） | （条件書なし。L4節へ集約。remap-sequence.tomlの[[excluded]]が参照） | L4（repo管理外） |
 
 - L4でしか検証しない要求（§2.8・§2.11・§3）は§3「L4統合test」節へ集約し、該当条件書の`[[excluded]]`から参照行で指す
-- 条件化しない要求（未test・test支援資産の能力等）は各条件書の`[[excluded]]`に記録（conditions-migration §8）
+- 条件化しない要求（未test・test支援資産の能力等）は各条件書の`[[excluded]]`に記録
 - test file冒頭のheader comment（`// L1: target resolver（test-plan §2.2）`等）は、参照先の節番号が対応表として存続するため更新を必須としない。新規test fileは条件書を参照するheaderとする
 
 ## 3. L4統合test（実zellij・repo管理外）

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""zelper条件書verify script（docs/design/conditions-migration.md §5）.
+"""zelper条件書verify script.
 
 tests/design/の条件書（*.toml）とcovers tag（`// [covers:<id>]`）の機械検証。
-構造規則の正本はtest-structure skill（~/.claude/skills/test-structure/SKILL.md）、
-適用仕様はdocs/design/conditions-migration.md §5。
+構造規則の正本はtest-structure skill（~/.claude/skills/test-structure/SKILL.md）。
 
 検査:
   (a) dangling tag: 全tagのidがいずれかの条件書のcondition idと一致
@@ -536,7 +535,7 @@ def file_has_stable_id(path):
 
 def render_bootstrap(rel, stem, fns, verified, today):
     lines = [
-        "# bootstrap生成（docs/design/conditions-migration.md §5.5・使い捨て土台）",
+        "# bootstrap生成（使い捨て土台）",
         f"# test file: {rel}。source/given/expect_*は出典起点へ書き直す前提（skill §5）",
         "[meta]",
         f'feature = "{stem}"',
@@ -605,10 +604,7 @@ def run_bootstrap(args):
 def main():
     p = argparse.ArgumentParser(
         prog="verify-conditions.py",
-        description=(
-            "tests/design条件書とcovers tagの機械検証"
-            "（docs/design/conditions-migration.md §5）"
-        ),
+        description="tests/design条件書とcovers tagの機械検証",
     )
     p.add_argument(
         "--strict-source",

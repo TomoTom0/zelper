@@ -2,7 +2,6 @@
 
 検証条件の正本は`tests/design/`の各条件書（`<stem>.toml`）である（test-structure skill準拠）。
 要件定義・設計から条件を執筆し、testを`// [covers:<id>]`tagで条件に紐付ける。
-移行計画・適用仕様は`docs/design/conditions-migration.md`（旧正本`docs/testing/test-plan.md` §2から段階的に正本を移譲）。
 
 機械検証（id対応・網羅・schema・source_lines自動同期・excluded構造）の実行方法:
 
