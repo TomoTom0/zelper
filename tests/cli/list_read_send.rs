@@ -44,6 +44,11 @@ if [[ "$3" == "action" ]]; then
           *) shift;;
         esac
       done
+      # FAKE_FAIL_DUMP_SCREEN（失敗させるpane idのspace区切りlist）に一致するpaneは
+      # 失敗させる。未設定時は現行挙動のまま（後方互換）
+      for fail in $FAKE_FAIL_DUMP_SCREEN; do
+        if [[ "$fail" == "$pane" ]]; then echo "boom" >&2; exit 1; fi
+      done
       # FAKE_DUMP_SCREEN設定時は応答を差し替え（末尾行へFULL接尾）。未設定時は現状通り
       if [[ -n "$FAKE_DUMP_SCREEN" ]]; then
         printf '%s%s\n' "$FAKE_DUMP_SCREEN" "$full"
@@ -51,6 +56,20 @@ if [[ "$3" == "action" ]]; then
         echo "SCREEN[$pane]$full"
       fi
       exit 0;;
+    write-chars)
+      pane=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p) pane="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      # FAKE_FAIL_WRITE_CHARS（失敗させるpane idのspace区切りlist）に一致するpaneは
+      # 失敗させる。未設定時は "ok" exit 0（従来のcatch-all応答と同一）
+      for fail in $FAKE_FAIL_WRITE_CHARS; do
+        if [[ "$fail" == "$pane" ]]; then echo "boom" >&2; exit 1; fi
+      done
+      echo "ok"; exit 0;;
     *) echo "ok"; exit 0;;
   esac
 fi
@@ -506,6 +525,121 @@ fn read_tail_applies_to_last_n_lines() {
         .clone();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["data"]["results"][0]["detail"], "L1\nL2\nL3\nL4\nL5");
+}
+
+/// 複数対象readの一部paneのみdump-screenが失敗（shim失敗注入）しても打ち切らず、
+/// 成功paneのentry（detail）と失敗paneのentry（error）がresults[]へ混在し
+/// exit 6（PartialFailure）を返す。失敗時のresults[]はerror envelopeの
+/// error.dataへ同梱される（src/output/json.rs ErrEnvelope）。失敗は
+/// visual order先頭pane（terminal_1）へ注入し、先頭失敗後に打ち切る実装は
+/// results不足（terminal_2の成功entry欠落）でfailする
+// [covers:read-send.read-partial-failure-exit6]
+#[test]
+fn read_partial_failure_exit6() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("read-partial-fail");
+    let out = cmd
+        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1")
+        .args(["read", "1", "2", "--json"])
+        .assert()
+        .failure()
+        .code(6)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "PartialFailure");
+    let results = v["error"]["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    // 失敗entry（visual order先頭）: error（shimの失敗出力を含む）を報告しdetailは省略される
+    let err_entry = &results[0];
+    assert_eq!(err_entry["target"], "terminal_1");
+    assert_eq!(err_entry["ok"], false);
+    assert!(
+        err_entry["error"].as_str().unwrap().contains("boom"),
+        "error: {:?}",
+        err_entry["error"]
+    );
+    assert!(err_entry["detail"].is_null());
+    // 成功entry: detailを持ちerror fieldは省略される
+    let ok_entry = &results[1];
+    assert_eq!(ok_entry["target"], "terminal_2");
+    assert_eq!(ok_entry["ok"], true);
+    assert_eq!(ok_entry["detail"], "SCREEN[terminal_2]\n");
+    assert!(ok_entry["error"].is_null());
+}
+
+/// 対象全paneのdump-screen失敗（shim失敗注入）はexit 5（OperationFailed）。
+/// 部分失敗（exit 6・PartialFailure）と排他な全失敗集計の分岐
+// [covers:read-send.read-all-failure-exit5]
+#[test]
+fn read_all_failure_exit5() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("read-all-fail");
+    let out = cmd
+        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1 terminal_2")
+        .args(["read", "1", "2", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+}
+
+/// sendのbroadcast性質: visual order先頭pane（terminal_1）のみwrite-charsが失敗
+/// （shim失敗注入）しても残対象（terminal_2）へ継続し、exit 6（PartialFailure）で
+/// 部分失敗を報告する。shimは呼び出しlog記録後に失敗するため、失敗paneへの
+/// 呼び出しもlogに観測される
+// [covers:read-send.send-partial-failure-continues-remaining]
+#[test]
+fn send_partial_failure_continues_remaining() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("send-partial-fail");
+    cmd.env("FAKE_FAIL_WRITE_CHARS", "terminal_1")
+        .args(["send", "1", "2", "--", "hello"])
+        .assert()
+        .failure()
+        .code(6);
+    let cs = calls(&log);
+    assert!(
+        cs.iter()
+            .any(|c| c.contains("write-chars -p terminal_1 hello")),
+        "calls: {cs:?}"
+    );
+    // 失敗paneより後の残対象への継続呼び出し
+    assert!(
+        cs.iter()
+            .any(|c| c.contains("write-chars -p terminal_2 hello")),
+        "calls: {cs:?}"
+    );
+}
+
+/// 改行を含むtextはwrite-chars 1回の単呼びで送信され、text全体が単一argv要素として
+/// 渡る（paste不使用・行単位の分割呼び出しなし）。shimのlog記録は `echo "$*` で
+/// 改行入りargv要素はlogを複数行にまたがらせるため、行分割のcalls()でなく
+/// log全体のraw文字列で検証する（log行内に改行が現れるのはargv要素内のみ）
+// [covers:read-send.send-multiline-text-single-write-chars]
+#[test]
+fn send_multiline_text_single_write_chars() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("send-multiline");
+    cmd.args(["send", "1", "--", "first line\nsecond line"])
+        .assert()
+        .success();
+    let raw = std::fs::read_to_string(&log).unwrap();
+    // write-charsは1回のみ（行分割呼び出しは2回になるため弾ける）
+    assert_eq!(raw.matches("write-chars").count(), 1, "log: {raw:?}");
+    assert!(
+        raw.contains("action write-chars -p terminal_1 first line\nsecond line"),
+        "log: {raw:?}"
+    );
+    // pasteは未使用
+    assert!(!raw.contains("paste"), "log: {raw:?}");
 }
 
 /// PANES概要: 5tab超は先頭4つ+`...`で省略。floatingは連結に含めない

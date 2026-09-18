@@ -13,7 +13,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（第4段で切替。検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（16 file・174条件。§2.2確定構成133条件 + TASK-61でselectorへ2条件追加 + TASK-59でbackend-processへ6条件追加 + TASK-74で5fileへ6条件追加 + TASK-74 E2E再現回帰でlayout-generatorへ1条件追加 + TASK-74段階8コードレビューCR74対応でremap-sequenceへ1条件追加・既存条件更新 + TASK-75で5fileへ21条件追加・既存条件更新 + TASK-75 E2E vb改修でremap-cliへ1条件追加 + PR#6レビュー対応でremap-sequenceへ1条件追加・companion-seedへ既存条件更新 + TASK-62でread-sendへ2条件追加・excluded 1件解消/1件新設）
+## 条件書一覧（16 file・178条件。§2.2確定構成133条件 + TASK-61でselectorへ2条件追加 + TASK-59でbackend-processへ6条件追加 + TASK-74で5fileへ6条件追加 + TASK-74 E2E再現回帰でlayout-generatorへ1条件追加 + TASK-74段階8コードレビューCR74対応でremap-sequenceへ1条件追加・既存条件更新 + TASK-75で5fileへ21条件追加・既存条件更新 + TASK-75 E2E vb改修でremap-cliへ1条件追加 + PR#6レビュー対応でremap-sequenceへ1条件追加・companion-seedへ既存条件更新 + TASK-62でread-sendへ2条件追加・excluded 1件解消/1件新設 + TASK-63でread-sendへ4条件追加・excluded 3件解消）
 
 設計書§2.2の確定構成（133条件）に、移行後の未test項目条件化（TASK-61: selector +2・TASK-59: backend-process +6）とTASK-74の条件書更新（remap照合key変更。6条件追加・9条件更新・excluded 4件追加）とTASK-75の条件書更新（multi-tab layout全体再現〔DD-10 v2.2〕。21条件追加・既存条件更新・excluded 5件追加〔remap-sequence 4・json-contract 1〕）とTASK-75のE2E vb改修（複数tab focus鋳型検出warningの伝達経路。remap-cliへ1条件追加）を加えた現行構成。verified列はmeta検証記録（verified = true）の実績値（TASK-75更新5fileは2026-09-16に実装・test 171/171 green・E2E acceptance 80条件PASS・CR75-1〜3対応完了を受けてtrueへ更新。TASK-74更新のbackend-parserのみsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
 
@@ -23,7 +23,7 @@ mise run verify-conditions
 | 2 | selector | src/selector.rs | selector（10件） | 10 | true（2026-09-13） |
 | 3 | backend-parser | src/zellij/parser.rs | parser（8件） | 8 | false（TASK-74更新・再検証待ち） |
 | 4 | json-contract | src/output/json.rs | error_map（4件）+ cli_list_read_send（部分2件） | 6 | true（2026-09-13） |
-| 5 | read-send | src/app/read.rs | cli_list_read_send（部分7件） | 7 | true（2026-09-17） |
+| 5 | read-send | src/app/read.rs | cli_list_read_send（部分11件） | 11 | true（2026-09-18） |
 | 6 | list-display | src/app/list.rs | cli_list_read_send（部分10件）+ lib src/app/list.rs（3件） | 13 | true（2026-09-13） |
 | 7 | rename | src/app/rename.rs | fake_rename_add_remove（部分3件） | 3 | true（2026-09-13） |
 | 8 | add-remove | src/app/remove.rs | fake_rename_add_remove（部分7件） | 7 | true（2026-09-13） |
@@ -45,9 +45,9 @@ source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
 test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）:
 
-- `tests/cli/list_read_send.rs` 25件 = cli-grammar 6 / read-send 7 / list-display 10 / json-contract 2
+- `tests/cli/list_read_send.rs` 29件 = cli-grammar 6 / read-send 11 / list-display 10 / json-contract 2
 - `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
-- lib内test 9件（src/app/list.rs 3件・src/zellij/process.rs 6件）= list-display・backend-processへ帰属
+- lib内test 10件（src/app/list.rs 3件・src/zellij/process.rs 7件）= list-display・backend-processへ帰属
 
 ## R番号→条件id対応表
 
@@ -151,6 +151,8 @@ design-review §4.7 C6（R20拡張）= layout-planner.quoting-warning-covers-sin
 
 移行後の条件追加: TASK-62（2026-09-17）: read-send.toml移行時excluded 1件（readの--tail N / --full加工）を条件化。新規2条件: read-full-passes-dump-screen-f（--full指定時のdump-screen -f転送・shim log検証）・read-tail-applies-to-last-n-lines（apply_tailの末尾N行加工。--full併用・N≧行数の境界を含む。CMR-5統合慣行）+ test fn 2件（cli_list_read_send）とshimへFAKE_DUMP_SCREEN応答差し替え（未設定時は従来応答のまま）を追加。excludedは該当1件を解消し「--tail 0の値域」（DD-6に出典規定なし・実装由来）を新設（46件で不変）。read-single-and-multi-resultsの検証限界記載（--tail/--full未検証）を参照へ書き換え。実装変更なし（apply_tail経路は実装済み・MR-30）のため新testは初回pass。条件172→174・excluded 46件（不変）。cargo test 174/174 green・verify-conditions exit 0（174条件・174tag・46excluded）。read-sendのverified_atを更新（source_hashは実装不変のため不変）。残るread/send系excluded 3件（per-pane失敗exit 6/5・send部分失敗継続・複数行text単呼び）はTASK-63が管轄。
 
+移行後の条件追加: TASK-63（2026-09-18）: read-send.toml移行時excluded 3件（read per-pane失敗exit 6/5・send部分失敗時の残対象継続・send複数行text単呼び）を条件化。新規4条件: read-partial-failure-exit6（一部paneのみdump-screen失敗でも打ち切らず成功entry〔detail〕と失敗entry〔error〕の混在results[]報告・exit 6。resultsはerror envelopeのerror.dataへ同梱）・read-all-failure-exit5（全対象失敗でexit 5。exit 6と排他な全失敗集計分岐のため別条件）・send-partial-failure-continues-remaining（visual order先頭paneのwrite-chars失敗後も残対象へ継続・exit 6）・send-multiline-text-single-write-chars（改行込みtextのwrite-chars単呼び・text全体が単一argv要素・paste不使用・行分割なし。改行入りargvでlogが複行にまたがるためraw文字列検証）+ test fn 4件（cli_list_read_send）とshimへFAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入（pane idのspace区切りlist一致で失敗。未設定時は現行挙動のまま。write-charsはcatch-allから個別armへ分離し応答は同一）を追加。excludedは該当3件を解消（46→43件）。実装変更なし（read/sendのper-pane失敗集計・text.join(" ")の単呼びは実装済み）のため新testは初回pass。条件174→178・excluded 43件。cargo test 178/178 green・verify-conditions exit 0（178条件・178tag・43excluded）。read-sendのverified_atを更新（source_hashは実装不変のため不変）。
+
 移行限定資産の役割終了: 付け漏れ検出対照表（`tmp/20260913_bootstrap_conditions_task54/`）は使い捨てであり、`--complete`（検査(f)）有効化により用途を終えた（対照表diff運用は移行中のみ。設計書§5.5）。残置のみとし削除しない。
 
 ## 範囲明示（対象外資産・特別扱い）
@@ -158,5 +160,5 @@ design-review §4.7 C6（R20拡張）= layout-planner.quoting-warning-covers-sin
 - `tests/fake_backend/fake.rs`: test支援資産（fake backend実装）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
 - `tests/fixtures/`（`tests/fixtures/zellij/*.json`等）: fixtures。scanner走査対象外
 - L4統合test harness（podman・実zellij）: repo管理外。要件・実施記録は`docs/testing/test-plan.md`のL4節へ集約（設計書§6.1）。該当要求は各条件書の`[[excluded]]`から参照行で指す
-- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の6件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
+- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の7件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
 - companion plugin実装（`plugin/src/`）: 現在test fnなし。test追加時はremap系の関連条件書へ条件化し、scanner走査対象（`plugin/src/**/*.rs`）に含まれる
