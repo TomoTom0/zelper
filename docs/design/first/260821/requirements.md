@@ -90,7 +90,7 @@ The conceptual operation is:
 Requirements:
 
 - existing terminal panes SHALL be preserved wherever Zellij permits this
-- remap SHALL NOT be implemented as killing panes and recreating their commands unless the user explicitly chooses a destructive/recreate mode introduced by future design
+- remap SHALL NOT be implemented as killing panes and recreating their commands unless the user explicitly chooses a destructive/recreate mode introduced by future design. Limited exception (clarified 2026-09-19, TASK-81): this prohibition applies to panes that existed in the pre-execution `list-panes` snapshot; duplicate panes that zelper itself spawned within the same run due to failed run-matching (absent from the pre-execution snapshot, identified after stable observation and by the position rule of DD-10.7 step 6) MAY be closed to resolve the duplication, and every such close SHALL be reported in the JSON data (`closed_duplicates`) and in the human output
 - the default layout source is a **layout name**
 - path or inline definitions are secondary/explicit alternatives, not overloaded positional syntax
 - overflow behavior SHALL be deterministic
@@ -103,7 +103,7 @@ Requirements:
 - tabs that remain after remap (containing no selected panes) SHALL NOT be closed implicitly; leftovers SHALL be reported (warning / structured output) so the user can remove them explicitly
 - tab/window naming and reuse policy must be specified in detailed design
 - pane ordering for slot assignment must be deterministic and documented
-  - Exception (clarified 2026-09-15, TASK-74 design review TR74-3; same form as the DD-10 v2 R7 determination; extended to the per-tab allocation rule by TASK-75 2026-09-15): the determinism guarantee covers (i) each pane's group (block × layout tab) membership, derived from visual order, and (ii) the slot assignment of panes whose launch run (command+args) is unique. The slot order **among panes sharing the same run, and among multiple shell panes (run=None)**, is not guaranteed — zellij's run-matching consumes run-equivalent panes in its own order (implementation limitation of zellij 0.44.3, no CLI-visible discriminator). Process preservation, pane count, and tab membership remain guaranteed for these panes.
+  - Exception (clarified 2026-09-15, TASK-74 design review TR74-3; same form as the DD-10 v2 R7 determination; extended to the per-tab allocation rule by TASK-75 2026-09-15; run definition extended 2026-09-19, TASK-81): the determinism guarantee covers (i) each pane's group (block × layout tab) membership, derived from visual order, and (ii) the slot assignment of panes whose launch run (command+args+cwd — the cwd-derived matching obstruction is resolved by cwd injection into the generated KDL per DD-10.8, while argv-whitespace reconstruction of `terminal_command` remains an implementation limitation of zellij 0.44.3 per DD-10.13) is unique. The slot order **among panes sharing the same run, and among multiple shell panes (run=None)**, is not guaranteed — zellij's run-matching consumes run-equivalent panes in its own order (implementation limitation of zellij 0.44.3, no CLI-visible discriminator). Process preservation, pane count, and tab membership remain guaranteed for these panes.
 - remap scope must support at least the current tab; session/multi-tab scope should be supported if technically sound
 - plugin panes must be treated explicitly; they must not accidentally be destroyed or silently mixed into terminal-pane semantics
 - a dry-run/plan output is strongly required before potentially large remaps

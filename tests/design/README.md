@@ -12,7 +12,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（16 file・178条件）
+## 条件書一覧（16 file・201条件）
 
 verified列はmeta検証記録（verified = true）の実績値（backend-parserのみsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
 
@@ -27,11 +27,11 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 7 | rename | src/app/rename.rs | fake_rename_add_remove（部分3件） | 3 | true |
 | 8 | add-remove | src/app/remove.rs | fake_rename_add_remove（部分7件） | 7 | true |
 | 9 | resize | src/app/resize.rs | fake_resize（7件） | 7 | true |
-| 10 | layout-planner | src/app/remap.rs | layout_planner（24件） | 24 | true |
-| 11 | layout-generator | src/layout/generator.rs | layout_generator（11件） | 11 | true |
+| 10 | layout-planner | src/app/remap.rs | layout_planner（26件） | 26 | true |
+| 11 | layout-generator | src/layout/generator.rs | layout_generator（14件） | 14 | true |
 | 12 | companion-seed | src/companion.rs | companion_seed（14件） | 14 | true |
-| 13 | remap-sequence | src/app/remap.rs | fake_remap（33件） | 33 | true |
-| 14 | remap-cli | src/app/remap.rs | cli_remap（11件） | 11 | true |
+| 13 | remap-sequence | src/app/remap.rs | fake_remap（47件） | 47 | true |
+| 14 | remap-cli | src/app/remap.rs | cli_remap（15件） | 15 | true |
 | 15 | docs-verb | src/app/docs.rs | cli_docs（7件） | 7 | true |
 | 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（7件） | 7 | true |
 
@@ -109,6 +109,8 @@ R12のmulti-tab行（layout-planner.r12-multi-tab-layout-counts-first-tab-shape-
 
 R番号条件の拡張として生じた内容kebab idの条件（設計書§3.3。source欄でR番号を関連参照）:
 quoting warningの文字種拡張（R20拡張）= layout-planner.quoting-warning-covers-single-quotes-newlines-control-chars・廃止option同時指定（R43関連）= remap-cli.both-removed-flags-together-still-usage-error。このほかレビュー指摘由来条件（toggle対象限定・TOCTOU直列化・polling deadline再検査・新規tab名postcondition・advisory lock・write失敗残留・廃止option即時削除・help非表示・bare bool parse等）はlayout-planner.toml / companion-seed.toml / remap-sequence.toml / remap-cli.tomlのsource欄で特定できる
+
+TASK-81（DD-10 2026-09-19改訂: cwd注入・reconciliation・dup close・dry-run緩和・検証(e')(e'')・error.data拡張）由来の新条件18件（R番号なし。layout-generator 3・layout-planner 2・remap-sequence 9・remap-cli 4）は各条件書のsource欄（DD-10.x〔TASK-81〕参照）で特定できる。test追従・tag付けは完了済み（2026-09-20・TASK-81コードレビューC1対応の1件追加を含む全条件でverify-conditions pass）
 
 ## 範囲明示（対象外資産・特別扱い）
 

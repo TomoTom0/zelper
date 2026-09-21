@@ -101,25 +101,25 @@ zelper docs readme | llm usage|skill|snippet
 既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置します。対象はsession全体のselectable・tiledなterminal pane（`--tab T` 指定時はそのtabのpaneに絞り込み、かつそのtabが再配置のanchorになる）。
 
 - pane数 M・slot数 N から **k = max(1, ceil(M/N))** 個のlayout instanceを生成し、layoutを反復して全paneを配置します。**M > N でもerrorになりません**
-- **kill/restartする経路は存在しません**。他tabへのpane移動はcompanion plugin（zelper binaryに埋め込んだwasm）によるプロセス保存移動で行います
+- 既存paneの**kill/restartは行いません**。run一致不成立でzelper自身がspawnした複製paneのみcloseして報告します（JSON `closed_duplicates`）。他tabへのpane移動はcompanion plugin（zelper binaryに埋め込んだwasm）によるプロセス保存移動で行います
 - instance 0は既存tab（`--tab`指定時はそのtab、省略時はactive tab。tab名は保持）。instance 1以降は新規tabに `<layout名>-2`、`<layout名>-3` …と連番で命名（`--path`はfile stem、`--inline`は `remap-2` 等がbase）
 - 割当順はvisual order（tab position → y → x）で決定的。空slot（最終instanceにのみ発生）は既定shellで埋まります。移動によって空になったtabはzellijにより自動closeされます
 - 移動が必要な場合（k > 1、または対象paneの一部がanchor tab外）のみcompanion pluginを使用し、状態変更前に応答性確認（probe）を行います。probe不成立なら一切の状態変更を行わず中断（exit 5）。移動が不要ならcompanion pluginは一切使われません
-- floating paneはremapで移動できないため、存在時はpreflight error。`--embed-floating` でtiled化（process保持）してから組入れ
-- 適用後にpane IDの生存・割当tab所属・各tabのpane数を検証し、不一致はexit 7で報告
+- floating paneはremapで移動できないため、存在時の実行はpreflight error。`--embed-floating` でtiled化（process保持）してから組入れ。`--dry-run` はfloating保有でも仮想embedの計画と警告を出してexit 0で終わります（実行は変わらずpreflight error）
+- 適用後にpane IDの生存・割当tab所属・各tabのpane数・pane focus・run一意割当の位置照合を検証し、不一致はexit 7で報告
 - atomicityは主張しない。途中失敗時は実行済み/失敗/未実行を報告
 
 ## 互換性
 
 - 要件: zellij >= 0.44.3（companion plugin駆動のため）。0.44.x系列を超えるversion（0.45.0等）は未実証としてexit 4で拒否します
-- 検証: zellij 0.44.3 + zellij-tile 0.44.3（実機統合テスト S-v2-1〜6: 9 pane → 3 instanceの全pid保存、dry-runの状態不変、移動不要時のplugin不使用、floating paneのpreflight errorと `--embed-floating` 組入れ、probe不成立時の状態変更前中断を実証）
+- 検証: zellij 0.44.3 + zellij-tile 0.44.3（実機統合テスト S-v2-1〜6: 9 pane → 3 instanceの全pid保存、dry-runの状態不変、移動不要時のplugin不使用、floating paneのpreflight errorと `--embed-floating` 組入れ、probe不成立時の状態変更前中断を実証。S-v3-1〜5: multi-tab layout全体再現。TASK-81 E2E: cwd注入によるrun一致照合・照合不成立複製paneのclose回収・dry-runのfloating保有緩和を実証）
 - companion plugin: remapで移動が必要なときのみ動作。binary埋込のwasmを `$XDG_CACHE_HOME/zelper/companion/<version>/` に展開し、`$XDG_CACHE_HOME/zellij/permissions.kdl` に権限をseed（不足分のみ追記）して権限dialogを自動化します。installは単一binaryのままで追加assetなし
 - 利用する公開interface: `zellij action`（list-panes/list-tabs --json、override-layout、pipe --plugin、new-pane/new-tab等）、`zellij list-sessions`、`zellij setup`
 
 ## 既知の制限
 
-- remapのslot割当は、group（instance/tab）所属とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証しません
-- `pane_command` に `"` `'` `\` 改行・制御文字を含むpaneは、空白分割でquotingを復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）
+- remapのslot割当は、group（instance/tab）所属とrun（command+args+cwd）が一意なpaneのslot対応に限り決定的。同一runの複数pane間・複数shell pane間のslot順は保証しません
+- `terminal_command`（JSON `invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneやshell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差があるpaneは照合を外しうる
 - `resize`は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない（step刻みはzellij側仕様）
 - `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する
 - tab IDはclose後に再利用されるため、zelperは取得したtab IDを即時使用のみに用いる

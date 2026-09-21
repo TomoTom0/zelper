@@ -14,6 +14,15 @@ list  read  send  rename  resize  remap  add  remove
 
 例外的にtop-levelに許容する非verbコマンド: `completion`（shell補完生成。`zelper completion bash|zsh|fish`）。helpの発見性目的で、文書化された例外として扱う。`docs`（agent向け配布物の出力。`zelper docs readme | llm usage|skill|snippet`）も同様の文書化された例外（配布物の取り出し経路。zellij sessionに触れない純粋出力）。
 
+verb setの拡張方針（TASK-72・2026-09-19確定）: verb setは基準付きの凍結として運用する。拡張の第一経路は既存verbのnoun/resource拡張（例: `remove session`）であり、verb数を増やさず語彙を育てる。新規top-level verbの追加は、以下の基準をすべて満たす場合のみ検討する:
+
+1. agent primitiveとして独立した価値がある
+2. 既存grammar（verb×noun構造・共通target optionとPANESPEC等の共有target grammar）に自然に載らない
+3. 対話操作の複製でない
+4. 共有契約（JSON envelope・exit status・dry-run方針）を継承する
+
+明示的除外（TASK-72棚卸しで確定）: `attach`本体・`watch`等のUI継続コマンド、scroll/theme/focus/move系等の対話的に容易な操作の一対一wrapはzelperが提供しない（agentは外部から構造化操作を行う前提。画面読み取りはread、継続監視は将来のwatch/wait semantics〔要件P1〕が担う）。zellij操作の全未カバー項目の分類と見送り理由の詳細はTASK-72（tm）に記録する。
+
 ### 1.2 構文木（全体）
 
 ```text
@@ -190,7 +199,7 @@ pub struct OverrideSpec {
     pub apply_only_to_active_tab: bool,       // zelperは常にtrue（他tab保護。実機確認済み）
     pub retain_terminal: bool,                // zelperは原則true
     pub retain_plugin: bool,
-    pub cwd: Option<PathBuf>,                 // 必要に応じ--cwd
+    pub cwd: Option<PathBuf>,                 // 不使用（TASK-81明確化: zellij 0.44.3のoverride-layoutにcwd引数が存在しないため〔route.rs Action::OverrideLayoutはcwd=None固定〕。cwdは生成KDL run nodeへ注入して一元化〔DD-10.8〕）
 }
 ```
 
@@ -308,7 +317,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 
 ## DD-10. `remap` アルゴリズム（v2）
 
-初版: 2026-08-21 / 全面改訂: 2026-09-03（TASK-34/37。E6実験によるcross-tab移動の実証を受け、basic-design 4.6の原本仕様へ復帰）/ 改訂: 2026-09-15（TASK-74。run一致照合のkeyを`terminal_command`（invoked_with序列化）へ変更・`default_tab_template`の生成KDL反映・poll中の空応答retry。改訂の根拠と証拠は`remap-v2-matching-fix-task74.md`）/ 改訂: 2026-09-15 v2.2（TASK-75。multi-tab layout全体再現: 反復単位をlayout全体へ一般化・tab名/tab focus/pane focus再現・`focus-pane-id`追加・正規形TabTemplate列へのlayout解決一元化。根拠と証拠は`remap-v3-multi-tab-task75.md`）。本節が旧DD-10（適用単位=tab、M>N既定error、fill/nest/tabs 3 mode、`--overflow tabs`のkill+command再起動、`--session-scope`のper-tab独立適用）全体を置き換える。設計レビューR1〜R7・R9を反映済み。
+初版: 2026-08-21 / 全面改訂: 2026-09-03（TASK-34/37。E6実験によるcross-tab移動の実証を受け、basic-design 4.6の原本仕様へ復帰）/ 改訂: 2026-09-15（TASK-74。run一致照合のkeyを`terminal_command`（invoked_with序列化）へ変更・`default_tab_template`の生成KDL反映・poll中の空応答retry。改訂の根拠と証拠は`remap-v2-matching-fix-task74.md`）/ 改訂: 2026-09-15 v2.2（TASK-75。multi-tab layout全体再現: 反復単位をlayout全体へ一般化・tab名/tab focus/pane focus再現・`focus-pane-id`追加・正規形TabTemplate列へのlayout解決一元化。根拠と証拠は`remap-v3-multi-tab-task75.md`）。改訂: 2026-09-19（TASK-81。`zellij run`起因paneのcwd常時Some確定〔T0実験 + zellij 0.44.3ソース解析〕に伴う照合修正: occupied slotへのcwd注入・shell slotのadaptive反転・自spawn複製paneのclose・dry-run floating緩和・検証(e')(e'')追加）。改訂: 2026-09-20（TASK-81第1回E2E判明不具合F1/F2。reconciliationのdup/slot対応付けを位置規則から多段規則〔属性・数突合・一意性判定・安全側fallback〕へ全面置換〔幾何前提の全廃〕・過剰検出gateのexited/held拡張・短命command dupのheld化回収・検証(e'')の対象集合拡張・10.1事実5へE2E確定事項〔押し出し位置非整合・起源別invoked_with分類〕追記）。改訂: 2026-09-20後半（TASK-81再E2E判明 R1/R2/R3: bare dup対応づけのvisual order補助を追加辺から**属性辺と両立するマッチングへ絞り込むtie-break**へ変更〔R1・10.7 step 6〕・対象tab内に残留するsource外held paneの`source_excluded_panes`報告〔R2・10.9〕・10.13へ幾何検証対象外〔bare pane群のswap・配置とsource外held paneの巻き込み〕を追記〔R3〕）。本節が旧DD-10（適用単位=tab、M>N既定error、fill/nest/tabs 3 mode、`--overflow tabs`のkill+command再起動、`--session-scope`のper-tab独立適用）全体を置き換える。設計レビューR1〜R7・R9を反映済み。
 
 **実装状態の注記（2026-09-16 E2E改修・完了時追際）**: v2系のうちv2.1（TASK-74）に加え**v2.2（TASK-75・multi-tab全体再現）も実装済み**（L1〜L3自動test 171条件green。E2E acceptance 1巡目で要因A〔pane focus対象の位置ベース化〕・要因B〔空groupのnew-tab --layout-string経路〕を検出し本節条文を改訂・改修済み。TASK-75設計書§7.1。E2E acceptance 80条件全PASS〔S-v3-1〜5・tmp/task75/acceptance/〕・コードレビューCR75-1〜3対応まで完了）。E2E再検証・requirements-traceability.mdのimplemented表記・README・usage文書（repo側）の追従も完了（2026-09-16完了時追際）。
 
@@ -328,8 +337,14 @@ E6確定事実（一次記録: capabilities §4.1、`tmp/e6_plugin/`・`tmp/2609
 3. CLI駆動: `zellij --session S action pipe --plugin file:<path>.wasm --name <name> -- <payload>`（payloadは単一文字列）。`ZellijPlugin::pipe`で受信。未稼働なら自動launch（floating pane）。plugin→CLI応答（`cli_pipe_output`）はserver内1s timeoutで不達のため**設計に使わない**。権限が通っていればpipeは即座にexit 0。権限dialogがpendingする状況ではpipe CLI自体がblockする（E6 run2/run4で観測）→ backend呼び出しtimeoutで検知可能
 4. 権限: `<XDG_CACHE_HOME>/zellij/permissions.kdl`（Linux ProjectDirs cache）に、plugin location（`file:` schemeを除いた絶対path）をquoted KDL node名として権限（ReadApplicationState / ChangeApplicationState / ReadCliPipes）とともに事前記述すると対話dialogなしでgrant（**session起動前のseedで実証**。0.44.3にこの自動化経路は他に存在しない。grant時zellij自身もこのfileを書き換える）
 5. override-layoutは、layout KDLのpane nodeに既存paneと同一の`command`+`args`を書くとrun一致照合（`find_already_running_panes`）で**決定論的にslot配置**される（spawn 0・kill 0を実証）。bare `pane`はshell pane（invoked_with=None）のみ一致。`--layout-string`は改行区切り形式・値quote必須
-   - TASK-74精密化（spike S実証・2026-09-15）: 照合keyのdata sourceは`list-panes`の**`terminal_command`**（= paneの`invoked_with()`〔起動時Run〕の序列化）である。**`pane_command`はPTYの現在の前景process**（/proc由來）であってinvoked_withとは無関係（shell paneでは常にshell自身）。bare `pane` / `new-pane` / layout bare slot 起動のpane（既定shell）はinvoked_with=Noneでありbare slotと完全一致する
-   - `Run::Command`の等価比較はcwdを含む全field一致である（起動時cwd明示〔layout `cwd=`・`zellij run --cwd`〕のpaneは無cwdslotと照合しない。`zellij run`の--cwdなし起動はinvoked_withのcwd=Noneのため無cwdslotと照合する）。plugin leaf slotは既存plugin pane（Run::Plugin）と照合し宣言位置へ配置される
+   - TASK-74精密化（spike S実証・2026-09-15）: 照合keyのdata sourceは`list-panes`の**`terminal_command`**（= paneの`invoked_with()`〔起動時Run〕の序列化）である。**`pane_command`はPTYの現在の前景process**（/proc由來）であってinvoked_withとは無関係（shell paneでは常にshell自身）。bare `pane` / `new-pane` 起動のpane（既定shell）はinvoked_with=Noneでありbare slotと完全一致する（layout bare slot起動は経路依存: session開始layout由来はNone、CLI new-tab経由はRun::Cwd化する。下記TASK-81訂正）
+   - **TASK-81訂正（2026-09-19・T0実験 + zellij 0.44.3ソース解析）**: `Run::Command`の等価比較はcwdを含む全field一致である。**`zellij run`は--cwdなし起動でもinvoked_withのcwd=Some(クライアントcwd)である**（zellij-utils cli.rs / actions_from_cliが`cwd.map(join).or_else(|| Some(current_dir))`で常に付与。TASK-74の「--cwdなしはcwd=Noneのため無cwdslotと照合する」は誤りであり、T0でquote無しargvのrun paneも重複spawnした実測と整合する）。**hold属性は既定で一致する**: -cなし`zellij run`のhold_on_close=true（cli.rs `--close-on-exit` default false）== KDL未指定command slotのhold_on_close=true（kdl parser `unwrap_or(true)`）、hold_on_start=false・use_terminal_title=falseも両者一致——**通常の`zellij run`起因paneではcwdが唯一の照合差分**（差分が残るのは`-c`/`-s`/originating_plugin付き等のみ。10.13）。plugin leaf slotは既存plugin pane（Run::Plugin）と照合し宣言位置へ配置される
+   - **`pane_cwd`（list-panes）は/proc由来の「現在の」cwd**であり、起動時cwd（invoked_with.cwd）そのものを得るCLI経路は存在しない。プロセスがchdirしない限り両者は一致するため、cwd注入の情報源として使う（10.8。chdir・正規化差の残差は10.13）
+   - **CLI `new-tab`（action）の既定paneはinvoked_with=Some(Run::Cwd(クライアントcwd))**である（actions_from_cliが常にcwd=Someを添付 → plugins NewTabのadd_cwd_to_layoutがbare slotをRun::Cwd化 → ptyはshellをspawnし、paneのinvoked_with=layout.run）。KDLの`pane cwd="X"`（commandなし）はRun::Cwdを表現可能。shell paneのinvoked_withクラス（None系: session開始layout/new-pane/keyboard new-tab由来 vs Run::Cwd系: CLI new-tab由来〔zelper自身の空group生成tabを含む〕）はlist-panes上で判別不能なため、shell slotは10.7 step 6のreconciliationでadaptiveに判定する
+   - **TASK-81 E2E確定（2026-09-20・第1回E2E〔T0'/T0p/T0q/T0k。一次記録: `tmp/tasks/tm-81/`〕）**:
+     - **起源別invoked_with実測分類の確定（従来の未確定事項を解消）**: None系 = session layout起点 / `new-pane` / keyboard new-tab（T0k実測）・Run::Cwd系 = CLI `new-tab`既定pane（T0'/T0k実測）・Run::Command系 = `zellij run`（T0実測）。list-panes上で起源を直接判別する手段は変わらず存在しない（分類はE2E観測による裏付けであり、実行時の判定は10.7 step 6 reconciliationがadaptiveに行う）
+     - **押し出し位置の非整合**: run一致照合でslotに入った既存paneの介在によりslot外へ押し出されたpaneの位置は**slot参照幾何と一致せず、visual order（pane_y, pane_x昇順）とslot順の一致を壊す**（実測: t0p (100,0)・t0q (0,15)）。旧reconciliation位置規則「visual order s番目 == slot s」がこの介在で破綻したことが第1回E2E不具合F1の根拠であり、10.7 step 6の対応規則を多段規則（属性・数突合中心）へ全面置換した理由である（10.7 step 6・10.13）
+     - **短命command paneのdupのheld化**: 照合不成立slotから再spawnされた複製paneが即座にexitしhold（exited / is_held）化する系列が実在する（t0q qp8実測）。held化したdupは生きpane集合（`is_remap_source`相当）から外れるため、dup close・pane数検証から逃避し残留する。10.7 step 6のgate条件拡張・検査対象集合拡張（exited/held込み。10.9 (e'')）で回収する
 
 6. TASK-75実験事実（2026-09-15・podman sandbox・一次記録: `tmp/task75/`）:
    - multi-tab layout起動時、名前ありtabは名前を保持し、名無しtabはzellij自動名「Tab #N」で具体化される。`default_tab_template`は**全tab**に展開され各tab subtree末尾にbar leafとして現れる。`new_tab_template`はdump-layout末尾に残存する
@@ -367,6 +382,9 @@ E6確定事実（一次記録: capabilities §4.1、`tmp/e6_plugin/`・`tmp/2609
 | 11 | `--overflow` | 廃止。即時削除し指定はusage error（公開直後のv0.1.xのため。旧`--overflow tabs`は破壊的再構成を期待する指定がno-opで別意味に解釈される危険を避ける。v0.1.xで削除済み） | 意味を変えて残す（旧指定の意図を無言で再解釈する）/ 当面hidden no-opで受理（旧scriptが黙って異なる挙動に載せ替わる移行期間が残る） |
 | 12 | zellij version要件 | 最小0.44.3に引き上げ（DD-3.1・compatibility policyはDD-3.5） | 0.44.1維持（実機検証はすべて0.44.3のみ。0.44.1/0.44.2の単体検証実績がなく、pluginはzellij-tile =0.44.3 buildでserverとの組は同versionのみ実証）/ remapのみ0.44.3を要求するfeature gate（二重gateの複雑化に対し実利がpatch版差程度） |
 | 13 | floating pane | 移動対象外。従来どおりpreflight error / `--embed-floating`でtiled化して組入れ | break系での移動（floating paneの移動挙動はE6未検証） |
+| 14 | shell slotのrun表現（TASK-81） | pass1はbare。reconciliation（10.7 step 6）で当該slotの不一致を検出した場合のみ`pane cwd="<当該paneのpane_cwd>"`へ反転（高々1回） | 常にbare（CLI new-tab由来shell〔zeller自身の空group生成tabを含む〕で常に重複spawn。T0実測）/ 常にcwd node固定（None系shell〔session開始layout・new-pane・keyboard new-tab由来〕で常に重複spawn。shellのinvoked_withクラスはlist-panesで判別不能のため、単一encodingではT0のような混合sessionを解けない） |
+| 15 | 照合不成立でspawnした複製paneの扱い（TASK-81） | **closeする**（対象は当該実行開始前snapshotに存在しないid・安定観測後・**対応規則特定（exited/held化したdupを含む。10.7 step 6多段規則）**のもののみ。close実績は成功/失敗双方で報告〔10.9〕。要件2.6の限定条項） | closeしない（重複プロセスが恒久二重実行し続ける。T0でheartbeat書込が約2倍に加速した実測） |
+| 16 | 生成KDLのhold属性併記（TASK-81） | **併記しない**（-cなし`zellij run`のhold_on_close=true == KDL未指定既定〔10.1事実5〕。T0'実証後確定） | `close_on_exit=true`併記（hold_on_close=falseとなり正常系paneと逆に不一致を生む。実測で必要性が示されるまで禁止） |
 
 ### 10.3 companion plugin（配布・build・起動・protocol）
 
@@ -422,7 +440,7 @@ break-new <pane_id_csv>                 -> break_panes_to_new_tab(panes, None, t
   ただしexit hold中（`exited` / `is_held`）のpaneは実行runを持たずrun一致照合の対象にならないためsource外とし、元tabに残す（paneはkillされず生存。TASK-39コードレビュー観点2補足で確定）
 - scope: 既定 = **session全体（全tab）**。`--tab TABSPEC` 指定時 = そのtabのpaneのみをsourceとし、anchorもそのtabとする。**`--tab`時のlayout適用はlayout最初のtab鋳型による単tab適用**（正規形TabTemplate列の鋳型0のみ・T=1経路。multi-tab layoutを指定しても2番目以降のtabは適用しない。v2.2）
 - 順序: `list-panes`の (tab_position, pane_y, pane_x) 昇順（visual order）。文書化されtestで固定（従来通り）
-- floating pane: scope内にselectable floating terminal paneがあればpreflight error（既定）。`--embed-floating`で`toggle-pane-embed-or-floating -p`（プロセス保存・実証済み）によりtiled化してsourceに組入れる。tiled化はlayout解決・plan確定**後**の状態変更第1歩とし、dry-runでは実行しない（計画はtoggle前snapshotから仮想的にfloating paneを含めるためdry-runと実行の計画が一致する。PR#1対応の維持）。tiled化の対象はpreflightで特定したselectable floating terminal paneのみ（probe自動launchで現れるcompanion plugin pane（floating・non-selectable）はtoggleしない。10.3）。companion plugin paneはsourceに現れない（10.3）
+- floating pane: scope内にselectable floating terminal paneがあればpreflight error（既定。**実行時のみ**。dry-runは10.10の緩和規定〔仮想embed計画+警告+exit 0〕。TASK-81）。`--embed-floating`で`toggle-pane-embed-or-floating -p`（プロセス保存・実証済み）によりtiled化してsourceに組入れる。tiled化はlayout解決・plan確定**後**の状態変更第1歩とし、dry-runでは実行しない（計画はtoggle前snapshotから仮想的にfloating paneを含めるためdry-runと実行の計画が一致する。PR#1対応の維持）。tiled化の対象はpreflightで特定したselectable floating terminal paneのみ（probe自動launchで現れるcompanion plugin pane（floating・non-selectable）はtoggleしない。10.3）。companion plugin paneはsourceに現れない（10.3）
 
 ### 10.6 配置アルゴリズム（plan）（v2.2全面改訂: TASK-75）
 
@@ -443,7 +461,7 @@ break-new <pane_id_csv>                 -> break_panes_to_new_tab(panes, None, t
 - **T=1後方互換（割当・k・命名・tab focus復帰の式レベル一致。v2.2の後方互換保証）**: T=1では S=N_0=N であるため、割当式は b=floor(i/N)・s=i%N（現行instance j・slot式と一致）、k = max(1, ceil(M/N))、命名は幹=baseにより (0,0)=anchor・b>=1=`<base>-<b+1>`（現行`<base>-<j+1>`と一致）、focus復帰はfocus=true鋳型がblock 0 tab 0=anchorを指すため無指定時と同一のanchor復帰になる——**保証範囲はこれら計画レベル（割当式・k式・命名・tab focus復帰先）の一致のみ**であり、実行操作列全体の一致ではない（pane focus再現〔focus-pane-id〕はT=1でも新たに実行され、fake backend testの期待値にfocus-pane-id呼出が加わる。TASK-75設計書§2.7・TR75-3）。上記の一致を回帰testで固定する
 - **決定論性の保証範囲**（要件2.6「pane ordering for slot assignment must be deterministic and documented」の解釈確定。設計レビューR7。v2.2でgroup定義を一般化）:
   - (i) 各paneのgroup（=所属するblock×tab）はvisual orderから決定論的に定まる
-  - (ii) slot対応は**run（command+args）に一意なpane**について決定論的に定まる（run一致照合）
+  - (ii) slot対応は**run（command+args+cwd。hold属性は既定値一致〔10.1事実5〕）に一意なpane**について決定論的に定まる（run一致照合。TASK-81: 照合keyにcwdを含む）
   - (iii) **同一runの複数pane間・複数shell pane（run=None）間のslot順は保証しない**——zellijのrun一致照合がrun等価なpaneを互いに区別しないため（実装上の限界であり、要件の決定論性からの明示的な例外。要件側にもrequirements.md §2.6に同一例外を明記済み〔TASK-74設計レビューTR74-3。2026-09-15〕。10.13参照）。これらのpane間でプロセス保存・pane数・所属tabが保証されることに変わりはない
 
 ### 10.7 実行sequence
@@ -468,6 +486,12 @@ break-new <pane_id_csv>                 -> break_panes_to_new_tab(panes, None, t
      - 直後に`rename-tab-by-id <target> <生成tab名>`（生成tab名は10.6命名規則。(0,0)はanchorのためrename対象外）。**new-tab由来idはこのrenameで「取得直後に消費」する**（DD-2運用。以降の同実行内参照はtargets配列〔下記data flow〕）
    - polling timeout（pipe効果が現れない）はOperationFailed + 10.4の権限hint + 移動済み/未移動groupの報告。**pipeはCLI失敗後もserver側で遅延実行されうる**ため、中断時の報告には「状態が遅れて変化しうる」旨の注意を含める（R3。probeによる事前検知でこの経路に到達する可能性は抑制されているが排除はできない）
 6. layout適用phase（v2.2: focus-pane-id追加・E2E要因A/B改訂）: 全group (b,t)をblock昇順・tab昇順の順に `go-to-tab-by-id <target>` → `override-layout --layout-string <生成KDL_{b,t}> --apply-only-to-active-tab --retain-existing-terminal-panes --retain-existing-plugin-panes`（retain 2 flag常時・他tab保護。従来規則の維持。**空groupはnew-tab --layout-stringで作成時点で生成KDL適用済みのためoverride-layoutをskip**〔E2E要因B〕）→ **`focus-pane-id terminal_<id>`**（tab毎focus paneの再現: 対象slot s = 鋳型pane_focus_slot、無ければslot 0。**対象pane idは適用後のlist-panes〔lenient〕で当該tabのterminal paneをvisual order〔geometry y,x昇順〕に並べたs番目から決定する**——mapping pane id基準はbare pane群のrun一致配置が割当順と一致しないため実幾何とずれる〔E2E要因A・TASK-75設計書§2.4〕。空slot〔spawn pane〕も位置から特定可能なため全生成tabで実行。呼出失敗はwarning・検証(d)で検知。「already focused」のexit 2はfocus状態が実際に成立しているため成功扱い）
+   - **照合不成立のreconciliation（TASK-81。2026-09-20 E2E改訂: dup/slot対応付けを位置規則から多段規則〔属性・数突合中心〕へ全面置換。幾何前提の全廃）**: step 6の各groupへのoverride-layout後に**安定観測**を行う——当該tabのselectable tiled terminal pane id集合（**exited / is_heldのpaneを含む。E2E改訂F2**）がpolling（250ms間隔・10s deadlineは既存と同一）で**2回連続で同一、かつ要素数 >= N_t**（spawnは追加単調なため安定=反映完了。1回きりのlist-panesでは判定しない。**TASK-81レビューC2注記**: 実装の安定観測完了条件はid集合の2回連続同一のみとする——「>=N_t」相当の過不足検知はreconciliation発動条件〔生きpane数超過・snapshot非存在のexited/held pane存在のgate〕とpass 2後過剰判定・残余close〔下記5.〕が時系列的に後に担っており、安定観測の完了条件に要素数下限を重ねる必要はない。gate通過後の呼び出しであるため実害は限定的であり、実装は不変とする）。**発動条件**: 生きpane数（exited/held除く）> N_t、**または生きpane数 == N_tでも当該tab内に実行開始前snapshot非存在のexited/held paneが存在する**（短命command dupのheld化回収。E2E改訂F2。正規spawn〔空slot由来〕のheld化との弁別は下記規則で行い、空slot相当の新規paneはclose対象外）。発動した場合:
+     1. **自spawn候補の定義**: 当該tab内のterminal pane全体（exited/held含む）かつ実行開始前snapshot非存在id。dup特定・close・残余close・検査の対象集合をこの候補に揃える（`is_remap_source`は生きpaneのrun照合候補という本来用途に戻し、exited/heldの除外はsource選定のみに適用）
+     2. **command dup（argv一致逆引き・位置不問）**: command slot割当（run=Some）ごとに、候補中の`terminal_command` == 当該slot argv `join(" ")` であるpaneを逆引きしてcloseする（reason=command dup）。押し出し介在やheld化の影響を受けない属性一致特定であり、command dupはcwd反転の対象表現を持たないためcloseのみとし検証失敗経路へ合流する
+     3. **bare dup（数突合+消去法）**: 候補中`terminal_command=None`群（D個）と空slot数（E個）を突合し、超過分 U = D - E を不成立shell slot由来のdupとみなす。不成立shell slot（割当ありshell slotのうち割当paneのpane_cwdがSomeのもの）との対応を**属性照合**（dup paneのpane_cwd == 割当paneのpane_cwd）による対応候補と**一意対応判定**（完全マッチングがちょうど1通り）で特定する。shell slot 1つのtabでは対応は一意。shell slot複数で属性のみ一意にならない場合（同一cwd shell slot複数+dupの曖昧構成を含む）は補助規則としてvisual order位置（exited/held込みの順位 == slot s。従来の位置規則）を**属性辺と両立する（全pairが補助辺を満たす）マッチングへ絞り込むtie-break**として使用し（2026-09-20再E2E R1改訂: 追加辺〔属性or補助〕では属性辺の曖昧さを解消できないため絞り込みに用いる。実測ではdupはslot参照位置にspawnされる〔t0p2 terminal_7・t0q2 terminal_14〕ため補助辺の精度は十分。属性辺で完全マッチングが立たない系列は従来どおり追加辺として使用）、残りがちょうど1通りなら採用する。それでも一意にならない場合は**安全側fallback（当該tabのbare dupを反転もcloseもせず検証失敗経路へ。誤close・誤反転回避）**とする
+     4. **close + pass 2（再override）**: 対応づいたbare dupをcloseし、対応shell slotのみ`pane cwd="<当該割当paneのpane_cwd>"`に置き換えた生成KDLでoverride-layoutを再実行する（**close単独で完了扱いにしない**——closeだけではslot充填が起こらないため、closeは必ず再overrideとセット）。反転は高々1回・**複数slotの同時反転可**・**command dup close（2.）も同一passに載せる**（close群→pass 2 overrideの順）
+     5. **残余close**: pass 2後も過剰（生きpane数 > N_t、またはsnapshot非存在のexited/held pane残存）なら以降の反転を行わず、残った新規spawn paneを**属性・数突合版**（空slot正規spawn相当〔terminal_command=None群のうち空slot数に相当する分〕をclose対象から除く。command dup相当はargv一致でclose）でcloseして検証失敗（10.9）へ合流する（無限反復の構造的排除）。close試みができなかった・対応づかなかった新規id pane（exited/held含む）は検証失敗で報告する（誤close回避の安全側）
 7. 検証（10.9）→ **最終go-to**（best-effort。v2.2）: layoutにfocus=true鋳型があれば文書順最初のfocus=true鋳型 t* のblock 0 tab (0, t*)へ、無ければanchorへ復帰（T=1では前者も (0,0)=anchor と一致し現行挙動と同一）。**複数のfocus=true鋳型がある場合は文書順最初を採用しwarningを出す**（E2E要因改修・2026-09-16明文化: zellijはdump上常にactive tabへfocus=trueを付けるため複数指定を機械的に判別できず、zelper側規則として文書順最初に確定し採用を利用者へ通知。10.10のwarning伝達経路）
 
 各phaseで状態を再取得し、長寿命のtab id参照を持たない（DD-2）。**DD-2原則の適用範囲（v2.2明確化・TR75-4）**: 「長寿命」とは実行を超えた保持（構造体field・global・file等への残置）の禁止であり、**単一execute実行scope内のtargets配列（`targets[b*T+t]`・現行から同じ運用）での逐次参照は許容**する。tab idはclose後再利用される不安定キーであるため、実行内でも参照のたびに存在確認を行う: **step 6の各group処理直前にlist-tabs（lenient）でtargets[j]の存在を確認し、不在なら再解決する**——割当ありgroupはpane所属基準（10.7 5-bと同一のmembership特定）・空groupはrename済み生成tab名基準（list-tabsのname一致。go-to-tab-name〔20260915_doc_task75_go_to_tab_name_help.txt〕は同名tab曖昧性のため補助にしか使わない）。再解決不能は`OperationFailed`（中断時報告）。自己作成tabは自実行内にcloseされない限りid再利用の競合sourceが存在しないため、この保持・確認で十分である。
@@ -480,9 +504,9 @@ break-new <pane_id_csv>                 -> break_panes_to_new_tab(panes, None, t
 
 - 全生成tab (b,t)（M<=S単一block含む）で共通の統一規則。生成KDLは**tab nodeなしの`layout { subtree }`形式**（per-tab個別適用。tab属性〔name・focus〕は生成KDLに載せずrename-tab-by-id・go-to-tab・focus-pane-idで再現）:
   - base = 当該tab鋳型の**正規形subtree**（default_tab_templateのchildren置換済み・tab属性除去済み。v2.2で置換を10.6 layout解決へ一元化し、generatorは置換済みsubtreeのみを受取る）。改行区切り形式・値quote必須（DD-3.3）。`override-layout`へはargvで直接渡す
-  - occupied slot: 当該paneの**`terminal_command`（invoked_with序列化）**を注入する。`command` = terminal_command空白分割のargv[0]、`args` = 残り。**cwdは注入しない**（TASK-74改訂。旧規則「pane_commandがSomeなら注入する」は、pane_command=PTY前景process〔shell paneでは常にshell自身〕とinvoked_with=Noneの不一致でbare slotとの照合を壊すため廃止）
-  - `terminal_command` = None（bare・既定shell起動pane）: bare pane slotのまま（run=None一致。pane_commandの値は参照しない）
-  - 空slot: 常にbare pane（10.2 #9）。**cwd注入は全廃**（再作成paneが存在しなくなったため。occupied slotはspawnしない・空slotは既定shell）
+  - occupied slot: 当該paneの**`terminal_command`（invoked_with序列化）**を注入する。`command` = terminal_command空白分割のargv[0]、`args` = 残り。**`cwd` = 当該paneの`pane_cwd`を注入する**（TASK-81改訂: `zellij run`起因paneはcwd=Someが常に成立し無cwdslotと照合しないため〔10.1事実5〕。pane_cwdは/proc由来の現在cwdで起動時cwdの近似〔10.1〕。**pane_cwd=None〔enrich 100ms timeout欠落等〕はwarningを出して注入をskip**〔10.13〕。TASK-74の旧規則「pane_commandがSomeなら注入する」はpane_command=PTY前景processであるため廃止したまま）。hold属性（close_on_exit/start_suspended）は併記しない（10.2 #16）
+  - `terminal_command` = None（bare・既定shell起動pane）: **既定はbare pane slotのまま**（pane_commandの値は参照しない）。10.7 step 6のreconciliationで当該slotが反転対象と判定された場合のみ、再適用時の生成KDLで`pane cwd="<当該paneのpane_cwd>"`（Run::Cwd表現。10.1）へ置き換える
+  - 空slot: 常にbare pane（10.2 #9）。**空slotへのcwd注入は行わない**（再作成paneが存在しなくなったため。occupied slotはspawnしない・空slotは既定shell。TASK-81: occupied slotへのcwd注入〔上記〕と区別）
   - **default_tab_template反映（TASK-74。v2.2で一元化）**: template由来のbar leaf等は正規形subtreeに含まれたまま生成KDLへ出力される（template内plugin leaf〔compact-bar等〕はslotを消費せず維持され、既存plugin paneとRun::Plugin照合して宣言位置へ配置される。10.1 事実5。新規tabにbar paneが既にあれば照合で消費され、無ければ新規spawnされる——いずれもbar 1件）。`children` node不在・置換後leaf数不一致の`LayoutInvalid`判定は10.6正規形化（layout解決時点）で行う
   - それ以外のnode属性（size / split_direction / name等）はlayout宣言をそのまま維持する。plugin leafはslotを消費せず維持（MR-32規則）
 - 既知制限（10.13）: terminal_command空白分割は引数のquoteを復元できない。同一commandのpane群どうしのslot割当順はzellijのrun一致順に依存する
@@ -495,10 +519,13 @@ layout適用phase完了後にlist-panes / list-tabsを再取得し:
 - (b) **各生成tab (b,t) のselectable tiled terminal pane数 == N_t**（**anchor (0,0)を含む全生成tab**が対象。anchor例外は名前・位置のみであり形状・slot数の例外ではない。command照合missによる重複spawn・未照合paneの入れ子残留を検出。「pane数不一致も検証失敗」のPR#1規則を継承）
 - (c) 生成tab名が10.6命名規則どおり（**(0,0)=anchorは名前検証から除外**——anchor tab名保持の唯一の例外。10.2 #6注記）。tab一覧にanchorが残存
 - (d) **pane focus（v2.2・E2E要因A改訂: 位置ベース）**: 各生成tab (b,t)で、当該tabのterminal paneをvisual order（geometry y,x昇順）に並べた**s番目（s = 鋳型pane_focus_slot、無ければslot 0）のpane**の`is_focused == true`（list-panes経由。非active tabもis_focusedを持つ。10.1 事実6）。10.7 step 6のfocus対象決定と同一の位置基準であり、**全生成tabが対象**（空slot tab除外は撤廃）
+- (e') **run一意割当の位置照合（TASK-81）**: 当該tab内でrun（command+args+cwd）が一意な割当に限り、適用後の当該tab visual order（geometry y,x昇順）s番目のpane id == 割当pane idであることを検証する（決定論性保証範囲(ii)の対象のみ。同一run間・shell pane間は(iii)例外のまま位置検証対象外〔E2E幾何比較で担保〕。reconciliation後の「元paneがslotから押し出されたまま」をcount検証では検出できないための追加）
+- (e'') **割当slot位置の新規id残存検査（TASK-81。2026-09-20 E2E改訂: 対象集合拡張）**: 割当ありslot位置（visual order s番目。**順位付けはexited/held paneを含む当該tabのterminal pane全体**）に、当該実行でspawnした新規id pane（実行開始前snapshotに存在しないid・**exited/held含む**）が残存していないことを検証する（dup close漏れ・反転不成立・**短命command dupのheld化残留〔t0q qp8〕**の検出）。加えてreconciliation（10.7 step 6）で対応づけ・closeできなかった新規id pane（exited/held含む）は検証失敗で報告する（誤close回避の安全側）。**(b)との補完関係**: (b)の生きpane数検証はexited/held paneを数えないため、held化dupの残留は(b)では検出されず、本検査とreconciliationの安全側fallback（10.7 step 6 安全側fallback・残余close）が検出する
 - **leftover_tabs報告（v2.2）**: tabs_afterのうちtargetsに含まれないtab（source外paneのみのtab・companion plugin host tab等）を`leftover_tabs`（id/name/position/selectable pane数）として報告する（humanはwarning行・JSONはdata field）。**closeしない**（閉じる場合はremove verbの明示利用。要件2.6）
+- **対象tab内source外pane報告（TASK-81再E2E R2・2026-09-20）**: 対象tab（targets内）に残留する「実行開始前snapshotに存在するがexited/heldのためsource選定から外れたterminal pane」（10.5の対象外規則により元tabに残すpane。対象tab再利用時は対象tab内に残留）は、`leftover_tabs`（targets外tabの列挙）にも生きpane数検証（(b)の`is_remap_source` filter）にも現れないため、`source_excluded_panes`（pane id・tab id・title・exited/held）として報告する（humanはwarning行・JSONは成功`data`と失敗`error.data`の双方。t0s sl1実測）。**closeしない**（snapshot存在paneはkill制約の対象。DD-12）・検証失敗にもしない（幾何への巻き込みは10.13対象外）
 - **検証の観測経路とdump-layoutの扱い（v2.2・TR75-8）**: 検証はlist-panes/list-tabs経由で行い、**dump-layoutとの完全一致は保証・検証対象外**である。E2E比較における比較対象は「tab毎slot数・幾何・bar存在・検証可能focus（is_focused・active tab）」に限定し、dumpの正規化表現（size="33%"等）・noise（new_tab_template残存・hide_floating_panes・zellij:link pane・active tabへ常に付くfocus=true等）・保証外項目（tab自動名・pane title・pane id）の除外対応表はTASK-75設計書§4.3に定める
-- 失敗時: class=`VerificationFailed`（exit 7）+ 期待/実測差分 + 実行済み/失敗/未実行の区分 +（pipe効果が皆無だった場合）10.4の権限hint。`--json`時は成功envelopeを出さず、mapping/missingを`error.data`に載せた**単一の**error envelopeをmainから出す（PR#1規則の維持）
-- 成功時のJSON `data`: `mapping[]`（pane → block/tab/slot/TabId。全件preserved）・作成tabのidとposition・`snapshot_len`（従来fieldの継続）・`t`/`s`/`n_slots`（v2.2追加）
+- 失敗時: class=`VerificationFailed`（exit 7）+ 期待/実測差分 + 実行済み/失敗/未実行の区分 +（pipe効果が皆無だった場合）10.4の権限hint。`--json`時は成功envelopeを出さず、mapping/missingと`leftover_tabs`（Z-5・TASK-81）と`closed_duplicates`と`source_excluded_panes`（TASK-81再E2E R2）を`error.data`に載せた**単一の**error envelopeをmainから出す（PR#1規則の維持）。error文面は10.13の文面規則（cwd差異・hold flag差の可能性案内）に従う
+- 成功時のJSON `data`: `mapping[]`（pane → block/tab/slot/TabId。全件preserved）・作成tabのidとposition・`snapshot_len`（従来fieldの継続）・`t`/`s`/`n_slots`（v2.2追加）・**`closed_duplicates[]`**（TASK-81: 当該実行でspawnしcloseした複製paneのid/slot/reason。成功・失敗双方で報告する報告義務。10.2 #15/DD-12）・**`source_excluded_panes[]`**（TASK-81再E2E R2: 対象tab内に残留するsource外exited/held paneの報告。成功・失敗双方）
 - 最終go-to（focus復帰）失敗は操作失敗に加えない（best-effort。従来通り）
 
 ### 10.10 dry-run（v2.2拡張）
@@ -507,6 +534,7 @@ layout適用phase完了後にlist-panes / list-tabsを再取得し:
 - JSONの`n` fieldには**S（layout全体slot数）**を格納する（T=1では従来値Nと同一。stable fields〔DD-4.2〕外のdata内部構成拡張のため契約変更にならない）。新規に`t`・`s`・`n_slots`（N_t列）・鋳型のname/focusを追加
 - **preflight warningの伝達経路（E2E改修・2026-09-16明文化）**: 複数focus=true鋳型/pane検出・quoting等のpreflight warningは、human実行・--json実行・dry-runの全経路で**stderrの`warning:`行**へ出力する（--json実行時もstdoutのenvelope契約を壊さない）。加えて機械可読経路としてdry-run/成功時のJSON dataへ**`warnings`（文字列列）**を格納する
 - 状態変更は一切なし: tab切替・pipe・wasm extract・permissions.kdl書換・focus-pane-idを行わない（DD-12）
+- **floating保有scopeの緩和（TASK-81・破壊的変更）**: `--embed-floating`なしのdry-runは、scopeにselectable floating terminal paneがあってもpreflight errorにしない（従来はexit 7で計画が見えなかった）。**仮想embed**（MR-1/MR-34の`--embed-floating` dry-runと同一logic）で計算した計画を表示し、`warnings`配列へ「実行には`--embed-floating`が必要（floating paneはtiled化して組入れられる）」警告を出し、**exit 0**で終了する（changelogに破壊的変更として明記。実行〔dry-run以外〕は10.5のとおりpreflight errorのまま）
 
 ### 10.11 途中失敗と復旧
 
@@ -533,15 +561,19 @@ layout適用phase完了後にlist-panes / list-tabsを再取得し:
 
 ### 10.13 既知制限と防御
 
-- terminal_command空白分割: 引数のquote・埋め込み空白は復元不可 → 該当paneのrun一致が外れ、(b)検証（pane数 == N_t〔tab毎〕。v2.2）が重複spawnとして検出する。preflightでterminal_commandに`"`や`\`等を含むpaneがあればwarning出力（実行は可。恒久対応はzellij側のargv列API待ち）（TASK-74改訂: 対象をpane_commandからterminal_commandへ変更）
-- **起動時cwd明示paneのrun一致不可**（TASK-74）: invoked_withのcwd=Some（layout `cwd=`付きcommand slot・`zellij run --cwd`起動）のpaneは無cwdslotと照合せず（10.1 事実5の等価仕様）、複製spawn+grid内挿入となり(b)検証で`VerificationFailed`として検知する。CLI表面にinvoked_withのcwdを区別するdataが存在しないため設計上の受容。error文面に当該原因の可能性を含める。検証状況: 絶対path cwd明示のみspike Sで実証済み。相対cwd・layout継承cwd・`zellij run --cwd`の正規化差異は未検証だが、起動時cwdがRunCommandのcwd fieldへ載る以上同じ照合外れ経路と推定する（TASK-74設計レビューTR74-7）。preflightでcwd=Someであること自体は検出不可（terminal_commandはcommand+argsのみの序列化）
-- **hold flag・EditFile pane**（TASK-74）: `hold_on_start`/`hold_on_close`付き起動pane・`zellij edit` pane（Run::EditFileはterminal_commandに現れない）も同様に照合から外れ(b)検証で検知する。`exited`/`is_held`のpaneは従来どおりsource外
+- terminal_command空白分割: **arg境界はjoinで消失しており、quote文字の有無にかかわらず空白を含むargは全ケースで復元不能**（例: `bash -c "echo hello world"` はquote文字を含まないのに誤argv化する）。該当paneのrun一致が外れ、(b)検証（pane数 == N_t〔tab毎〕。v2.2）が重複spawnとして検出する。preflight warningは (1) terminal_commandに`"`/`'`/`\`/制御文字を含む (2) 空白分割argv[0]がshell系（*sh/bash/zsh/fish等）かつargv[1]が`-c`（高疑いheuristics）のいずれかで出力（実行は可。検出は完全でない）。恒久対応はzellij側のargv列API待ち（TASK-74→TASK-81拡張）
+- **cwd起因の照合阻害は10.8のcwd注入で解消**（TASK-81）。残る照合外れ要因: (1) プロセスが起動後にchdirした（pane_cwd≠起動時cwd） (2) bind mount・path正規化差（pane_cwdは/procの正規化path、invoked_with.cwdはクライアント側文字列） (3) 生成KDLのcwd値に`$`を含む（zellij側でshellexpandされる）。これらは救済なし。**検証(b)失敗のerror文面規則**: 「pane count mismatchはcwd差異（chdir・正規化・bind mount）とhold flag差（`-c`/`-s`起因）の可能性によりrun一致が外れたことによる」旨を案内する（TASK-81。従来のstartup cwd一文を拡張）
+- **pane_cwd欠落**: list-panesのcwd enrichは100ms timeoutでpane_cwdが欠けうる（T0 r2afterで実在）→ 該当occupied slotはwarning+注入skip（10.8）となり照合が外れうる。(b)検証で検知。E2Eでの欠落注入は任意の検証項目
+- **hold flag・use_terminal_title・originating_plugin・EditFile pane**（TASK-74→TASK-81拡張）: `hold_on_close=false`（`zellij run -c`）・`hold_on_start=true`（`-s`履歴）起動pane、`use_terminal_title=true`・`originating_plugin=Some`起動pane（ともにKDL run nodeから表現不能）、`zellij edit` pane（Run::EditFileはterminal_commandに現れない）は照合から外れ(b)検証で検知する（10.2 #16のとおりhold属性の挽回併記は行わない）。`exited`/`is_held`のpaneは従来どおりsource外
 - 同一commandの複数pane: それらの間のslot割当順はzellijのrun一致順依存（順序は保証しない——10.6決定論性保証範囲(iii)の要件例外。**requirements.md §2.6にも同一の例外を明記済み**〔TASK-74設計レビューTR74-3〕）。プロセス保存・pane数・所属tabは保証
 - shell pane（terminal_command None）: bare slotとのみ一致。複数shell pane間の順序は保証しない（同(iii)の要件例外）
 - tab id再利用: 「list-tabs直前取得・直後に消費」（DD-2）+ 新規tab特定はpane所属基準（10.7 5-b）+ index系API不使用、で防御
-- 並行client操作: remap実行中の他client操作（pane追加等）は競合して検証失敗になり得る（再実行で解消）。排他機構は提供しない
+- 並行client操作: remap実行中の他client操作（pane追加等）は競合して検証失敗になり得る（再実行で解消）。排他機構は提供しない。TASK-81追加: dup close（10.2 #15）は「実行開始前snapshot非存在id ∧ 対応規則特定（10.7 step 6多段規則）∧ 過剰数==反転対象数の整合」の条件下でも、実行中に他clientが追加したpaneがたまたま対応候補の属性（argv一致・pane_cwd一致）を満たす場合の誤close競合が原理的に残る。報告された`closed_duplicates`のidを利用者が確認できる経路で緩和する
 - swap layout / template: SKIP_NODES規則でslot数から除外（MR-32）。remap後のswap自動切替の挙動は保証しない（従来通り対象外）。`new_tab_template`は対象外のまま（zellijが新規tab生成時に使う予約領域。dumpへの残存は実機挙動で、remapの再現対象外。TASK-75）
 - **multi-tab再現の対象外（TASK-75・v2.2）**: (1) pane nodeの`name`属性→pane titleは保証外・観察のみ（実測ではtitleへ反映されるが、remapはtitleを設定せずrun一致照合とも無関係） (2) 名無しtab鋳型のzellij自動名「Tab #N」は再現しない（採番がCLIから制御不能のためzelper側命名に置換。10.6） (3) ~~focus-pane-id対象が空slotのtabはfocus設定・検証から除外~~ **撤廃（E2E要因A改訂）**: focus対象を適用後のlist-panes位置から決定する設計へ変更し、空slot（spawn pane）も位置から特定する（10.7 step 6） (4) anchor tabの位置はlayout最初のtab位置と一致する保証がない（anchor再利用・10.2 #6の帰結。名前と同様に例外扱い。**形状・slot数は例外ではない**——10.9 (b)はanchorを含む全生成tabへ適用） (5) 過剰tab（targets外の残存tab）は放置し報告のみ（10.9）。**要件側にも(1)(2)を含む同一の例外を明記済み**〔TASK-75設計レビューTR75-1。2026-09-16。requirements.md §2.6〕
+- **短命command paneのremap再spawn dupのheld化（TASK-81 E2E改訂・一般制限）**: 短命command（即座にexitする`zellij run`起因pane等）をslotに持つremapでは、run一致不成立で再spawnした複製paneが即座にexitしexited/held化する系列が一般に存在する（t0q qp8実測）。held化dupは生きpane集合から外れるため、reconciliationの対象集合・gate条件・検証(e'')をexited/held込みに拡張して回収する（10.7 step 6・10.9 (e'')）。close試みができなかった・対応づかなかったheld新規id paneは検証失敗で報告する（誤close回避の安全側）
+- **reconciliation対応規則の既知限界（TASK-81 E2E改訂）**: shell slot複数のtabで不成立slot特定は属性（pane_cwd一致）のみでは一意にならない場合がある（t0p trio実測: 割当shell pane・dupとも同一cwd）。visual order補助は実績1例（work tab 2-pane）に依存する位置基準であり、押し出しpaneの介在で順位==slot対応が崩れるため（10.1事実5 E2E確定）、一意性が得られる場合のみの補助に格下げした（2026-09-20再E2E R1: 補助の用法を追加辺から属性辺と両立するマッチングへ絞り込むtie-breakへ変更。同一cwd shell slot複数+dupの曖昧構成〔t0p2 terminal_7・t0q2 terminal_14〕で追加辺では曖昧さが解消できずdup残留でexit 7となっていた系列を解消）。いずれでも一意にならない場合は安全側fallback（反転もcloseもせず検証失敗）とし、誤反転（成立済みslotのpane追い出し）・誤closeを回避する。将来の拡張点として、list-panes幾何をslot参照幾何（生成KDLのsize/splitから計算した期待矩形）と直接照合する方式が挙げられる（押し出しpaneの位置を幾何的に弁別できる可能性。本改訂では実装しない）
+- **幾何検証の対象外（TASK-81再E2E R3・2026-09-20）**: (e')の位置照合が検査するのはrun（command+args+cwd）一意な割当のみのため、run paneの視覚swap・宣言`split_direction`の非実現は検証missingとして捕捉される一方、**bare pane群（shell pane・空slot正規spawn）のswap・配置は検査対象外**である（同一run間・shell pane間は決定論性保証範囲(iii)の例外。10.6。E2E幾何比較でのみ観察可能）。また**対象tab内に残留するsource外held pane（snapshot存在・source選定外。10.9 `source_excluded_panes`報告の対象）は当該tabの幾何を巻き込み**、slot参照幾何（生成KDLのsize/splitから計算した期待矩形）との不一致が生じうる（t0s sl1実測）が、kill制約のためcloseせず報告のみ行う（巻き込み自体の検証対象外）
 - permissions.kdlはcompanionのversion別pathのnodeを蓄積し得る（旧versionのnodeは残る。無害・手動削除可）
 
 ### 10.14 error経路（v2で残るもの）
@@ -553,7 +585,7 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 - `Preflight`: floating pane存在（--embed-floatingなし）/ companion setup失敗（wasm書込不可・permissions.kdl parse/書込不可）/ `--tab`解決不能は`NoTarget`
 - `ZellijUnavailable` / `UnsupportedVersion`: DD-3.1（最小0.44.3）
 - `OperationFailed`: pipe CLI失敗（blockによるtimeoutを含む）・polling timeout・go-to/override/rename失敗
-- `VerificationFailed`: 10.9 (a)(b)(c)の不一致
+- `VerificationFailed`: 10.9 (a)(b)(c)(d)(e')(e'')の不一致（TASK-81: (e')(e'')追加。失敗時のerror.dataへleftover_tabs・closed_duplicatesを載せる〔10.9〕）
 
 ## DD-11. `add` / `remove` 操作設計
 
@@ -576,9 +608,10 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 
 - preflight: 全mutating verbで (1) version判定 (2) 対象解決 (3) plan生成 の順。remapはこれに (4) companion setup（移動が必要な場合のみ。wasm extract・permissions seed。DD-10.3/10.4）が続き、いずれも失敗は状態変更前に停止
 - snapshot: remap / bulk remove は実行前に `list-panes -a --json` と `dump-layout` を取得し、JSON出力時に`_snapshot`として添付可能（障害診断用。dry-run表示にも利用）
-- dry-run: v1は `remap` / `remove`（複数対象・`--empty`）が対応。planのみ出力しbackendのmutating呼び出しを一切行わない。remapのdry-runはcompanion setup（wasm extract・permissions.kdl書換）も行わない（DD-10.10）。`resize equalize` / `add` のdry-runはP1（要件3.7はSHOULD。MR-7で確定）
+- dry-run: v1は `remap` / `remove`（複数対象・`--empty`）が対応。planのみ出力しbackendのmutating呼び出しを一切行わない。remapのdry-runはcompanion setup（wasm extract・permissions.kdl書換）も行わない（DD-10.10）。floating保有scopeのremap dry-runは警告+仮想embed計画表示で緩和する（DD-10.5/10.10・TASK-81。実行はpreflight errorのまま）。`resize equalize` / `add` のdry-runはP1（要件3.7はSHOULD。MR-7で確定）
 - atomicity: 主張しない。部分失敗時は (a) 実行済み操作の一覧 (b) 未実行の一覧 (c) 推奨復旧操作（例: 再度remap、またはdump-layoutからの再構成）を報告
 - remap実行中失敗の扱い: 移動・layout適用のどこで失敗しても、既に適用済みの変更は保持（戻さない）。失敗手順以降を未実行として報告（DD-10.11）。resurrection（session serialize）が保険として機能する旨を文書化
+- **自spawn複製paneのclose（TASK-81）**: 要件2.6 kill/recreate禁止（L93相当項）の適用対象は「remap実行開始前のlist-panesに存在したpane」であり、**zelperが当該実行内にrun一致不成立でspawnした複製pane（実行開始前snapshotに存在しないid・安定観測後・対応規則〔exited/held化したdupを含む。DD-10.7 step 6多段規則〕でdupと特定されたもの）のcloseは自己副作用の除去としてkill制約の対象外**と定義する。closeしたpane id・対応slot・理由は成功・失敗双方のJSON data（`closed_duplicates[]`）とhuman出力で報告する（報告義務。DD-10.9）
 - 廃止optionのtest固定（設計レビューR6。TASK-43で即時削除に方針変更）: `--session-scope` / `--overflow nest|tabs` はv0.1.xで削除済み。指定はusage error（exit 2・clap経由のstderr出力。`--json`併用時もstdoutには何も出ない）であることと、clap helpに出現しないことをtestで固定する
 
 ## 実装モジュール構成（basic-design §9を踏襲、DD-10 v2に伴い更新）

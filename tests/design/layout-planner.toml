@@ -1,5 +1,5 @@
-# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・TASK-74設計書（remap-v2-matching-fix-task74.md）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.1〜2.3・DD-10 v2.2）
-# 対応test: tests/unit/layout_planner.rs（24件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1）
+# remap v2 planner grouping（src/app/remap.rs: plan_v2）の検証条件。出典: test-plan §2.7 (a) R1〜R12・(b) R20・DD-10.5/10.6・TASK-74設計書（remap-v2-matching-fix-task74.md）・TASK-75設計書（remap-v3-multi-tab-task75.md §2.1〜2.3・DD-10 v2.2）・TASK-81（DD-10.6 (ii) run定義のcwd拡張・DD-10.8 occupied slotへのpane_cwd注入〔pane_cwd欠落skip+warning〕・DD-10.13 shell -c高疑いheuristics warning）
+# 対応test: tests/unit/layout_planner.rs（26件: 既存24件 + TASK-81新規2件。1条件=1 test fnの1:1対応。設計書§2.3/3.4・TASK-75設計書§5.1）
 # plannerは純粋関数（fake backendなしで検証。DD-10.6）。v2.2（TASK-75）: plan_v2は正規形TabTemplate列
 # （layout::normalize_tab_templates出力）を引数に取り、blocks × groups（group = (block b, tab t)）構造の計画を返す。
 # r1〜r10の期待値はT=1後方互換（式レベル一致・設計§2.7）により不変（回帰固定）。
@@ -11,7 +11,7 @@ verified_at = "2026-09-16"
 verified_by = "claude"
 test_command = "cargo test --test layout_planner"
 source_hash = "5aa7140ffbc1079871a56411f611ee48ee36e363"
-note = "TASK-74（2026-09-15）条件書更新: run-derives-from-invoked-withを追加しr20系2条件（quoting warning）の対象をterminal_commandへ更新——（当時記録。その後の実装・test追従で解消済み・cargo test --test layout_planner は全pass。CR74-8補正）。TASK-75（2026-09-15）条件書更新: v2.2（multi-tab layout全体再現）のtest-first前段として8条件を追加（normalize-tab-templates-doc-order-and-tab-attributes・multi-tab-allocation-cumulative-slots・k-uses-total-slots・tab-names-from-templates-and-block-suffix・zero-slot-tab-template-invalid・pane-focus-slot-first-focused-leaf・empty-group-planned-for-all-blocks-tabs・t1-formula-level-backward-compat）。r12-multi-tab-layout-counts-first-tab-shape-onlyはv2.2で期待値を反転（先頭tab形状N基準からlayout全体S=sum(N_t)基準へ。stable id維持・R12対応表の安定参照）。r1〜r11は正規形TabTemplate列入力とblocks/groups用語へ読み替え（T=1後方互換により期待値不変）。新条件は当時未実装のためfail-first状態（テストコード・実装は後段の追従待ち）——（当時記録。TASK-75実装・test追従・E2E acceptance 80条件PASS（S-v3-1〜5・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応まで完了〔2026-09-16〕。cargo test --test layout_planner は全pass）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新"
+note = "TASK-74（2026-09-15）条件書更新: run-derives-from-invoked-withを追加しr20系2条件（quoting warning）の対象をterminal_commandへ更新——（当時記録。その後の実装・test追従で解消済み・cargo test --test layout_planner は全pass。CR74-8補正）。TASK-75（2026-09-15）条件書更新: v2.2（multi-tab layout全体再現）のtest-first前段として8条件を追加（normalize-tab-templates-doc-order-and-tab-attributes・multi-tab-allocation-cumulative-slots・k-uses-total-slots・tab-names-from-templates-and-block-suffix・zero-slot-tab-template-invalid・pane-focus-slot-first-focused-leaf・empty-group-planned-for-all-blocks-tabs・t1-formula-level-backward-compat）。r12-multi-tab-layout-counts-first-tab-shape-onlyはv2.2で期待値を反転（先頭tab形状N基準からlayout全体S=sum(N_t)基準へ。stable id維持・R12対応表の安定参照）。r1〜r11は正規形TabTemplate列入力とblocks/groups用語へ読み替え（T=1後方互換により期待値不変）。新条件は当時未実装のためfail-first状態（テストコード・実装は後段の追従待ち）——（当時記録。TASK-75実装・test追従・E2E acceptance 80条件PASS（S-v3-1〜5・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応まで完了〔2026-09-16〕。cargo test --test layout_planner は全pass）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新。TASK-81（2026-09-19）条件書更新（test-first前段）: run-derives-from-invoked-withをRunSpec{argv, cwd}拡張へ更新（argv=terminal_command分割・cwd=pane_cwd由來。DD-10.6 (ii)照合keyのcwd拡張）、r20系2条件へTASK-81のargv破壊文言（arg境界はjoinで消失・quote文字有無にかかわらず空白を含むargは全ケース復元不能）を追記。新規2条件（pane-cwd-missing-skips-cwd-with-warning・shell-c-heuristic-quoting-warning）はRunSpec拡張前のためfail-first状態（テストコード・実装は後段の追従待ち）。verified等の検証記録はTASK-75実装時点のまま（TASK-81実装・test追従後に更新）"
 
 [[condition]]
 id = "layout-planner.r1-one-pane-into-three-slots-k1-empty-two"
@@ -135,7 +135,7 @@ id = "layout-planner.r20-quoted-chars-in-pane-command-warn-but-do-not-fail"
 source_lines = "tests/unit/layout_planner.rs:351"
 target_function = "plan_v2（preflight warning）"
 source = "docs/testing/test-plan.md §2.7 (b) R20 + docs/design/detailed-design.md DD-10.13（TASK-74改訂: warning対象をpane_commandからterminal_commandへ変更） + docs/design/remap-v2-matching-fix-task74.md §2.1（quoting warning: 対象をpane.commandからpane.terminal_commandへ変更（表示textも読み替え）。理由は同一——空白分割でquoteが復元できずrun一致が外れうる）"
-description = "quoting warningの基本条件: **terminal_command**（invoked_with序列化。idのpane-commandは歴史的名称であり対象はTASK-74で変更済み）に `\"` / `\\` を含むpaneがあればpreflight warningを出し実行は可（errorにしない）。対象paneがいなければwarningなし。pane_command（前景process）にquoteがあってもterminal_commandがNoneならwarning対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕では quote入りpane_commandかつterminal_command=Noneのpaneに誤warningを出し、quote入りterminal_commandを検出できない）"
+description = "quoting warningの基本条件: **terminal_command**（invoked_with序列化。idのpane-commandは歴史的名称であり対象はTASK-74で変更済み）に `\"` / `\\` を含むpaneがあればpreflight warningを出し実行は可（errorにしない）。対象paneがいなければwarningなし。pane_command（前景process）にquoteがあってもterminal_commandがNoneならwarning対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕では quote入りpane_commandかつterminal_command=Noneのpaneに誤warningを出し、quote入りterminal_commandを検出できない）。TASK-81文言追記: 空白分割不可逆性の根拠は「arg境界はjoinで消失しており、quote文字の有無にかかわらず空白を含むargは全ケースで復元不能」に確定（DD-10.13。quote文字を含まない文字種検出のみでは拾えないケースをshell-c-heuristic-quoting-warningが補完）"
 given = "terminal_commandが codex exec（通常）・echo \"x\"（double quote入り）・echo C:［backslash］path（backslash 1文字入り）の3 paneをN=3でplan_v2へ与える場合、通常3 paneのみを与える場合、およびquote入りpane_command（echo \"y\"）かつterminal_command=Noneのpaneを与える場合"
 expect_return = "第1はOk（k=1）かつwarningsにterminal_2・terminal_3を含みterminal_1を含まない。第2はwarningsが空。第3のpaneはwarningsに現れない"
 
@@ -144,7 +144,7 @@ id = "layout-planner.quoting-warning-covers-single-quotes-newlines-control-chars
 source_lines = "tests/unit/layout_planner.rs:396"
 target_function = "needs_quoting_warning"
 source = "quoting warning判定はダブルクォート・シングルクォート・バックスラッシュ・改行・制御文字を含む場合にも発火（argv破壊をwarningなしに通さない。関連: docs/testing/test-plan.md §2.7 (b) R20） + docs/design/detailed-design.md DD-10.13（TASK-74改訂: 文字種拡張の対象もterminal_commandへ変更） + docs/design/remap-v2-matching-fix-task74.md §2.1"
-description = "quoting warningの文字種拡張（C6回帰）: warning対象は **terminal_command** の `\"` / `\\` に加え `'`・改行・制御文字（split_whitespaceでargvが壊れうる文字）を含むpane。通常の引数区切り空白は対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕ではterminal_command側の該当文字を検出できない）"
+description = "quoting warningの文字種拡張（C6回帰）: warning対象は **terminal_command** の `\"` / `\\` に加え `'`・改行・制御文字（split_whitespaceでargvが壊れうる文字）を含むpane。通常の引数区切り空白は対象外。TASK-74更新（fail-first: 旧実装〔pane_command対象〕ではterminal_command側の該当文字を検出できない）。TASK-81文言追記: 文字種検出はquote文字を含むケースのみ拾え、quote文字なしのargv破壊（arg境界消失）はshell-c-heuristic-quoting-warningの高疑いheuristicsが補完（検出は完全でないことを設計上受容——DD-10.13）"
 given = "terminal_commandが 単quoteを含む bash -lc 'echo a b'・改行を含む echo a（途中でLF）b・ESC制御文字（U+001B）を含む echo（ANSI escape）・通常の codex exec --plan の4 paneをN=4でplan_v2へ与える"
 expect_return = "warningsにterminal_1・terminal_2・terminal_3を含み、terminal_4（通常の引数区切り空白のみ）を含まない"
 
@@ -152,10 +152,10 @@ expect_return = "warningsにterminal_1・terminal_2・terminal_3を含み、term
 id = "layout-planner.run-derives-from-invoked-with"
 source_lines = "tests/unit/layout_planner.rs:431"
 target_function = "plan_v2（V2Assignment.run算出）"
-source = "docs/design/remap-v2-matching-fix-task74.md §2.1（照合keyをterminal_command〔invoked_with序列化〕へ変更。pane_command〔前景process〕は参照しない） + docs/design/detailed-design.md DD-10.8（occupied slot: terminal_commandを注入。command = 空白分割のargv[0]、args = 残り。cwdは注入しない。terminal_command = None はbare pane slotのまま）・DD-10.1 事実5（F1/F2/F3: terminal_command = invoked_with序列化・pane_command = PTY前景process・bare起動paneはinvoked_with=None）"
-description = "run算出のdata source（TASK-74主因A修正の核）: V2Assignment.runはpane.terminal_command基準で算出する。terminal_command=None（bare・既定shell起動pane）→run=None（生成KDLはbare slotのまま。pane_command〔前景process〕の値は参照しない）・terminal_command=Some(s)→run=Some(s.split_whitespace())（command=argv[0]・args=残り・cwdは注入しない）。TR74-4直交2 paneを含み、旧実装（pane_command依存のrun算出）が必ずFAILするfail-first条件: P-shell-proc（terminal_command=None+pane_command=Some）は旧実装ではcommand注入されるが新実装ではrun=None／P-cmd-pane（terminal_command=Some+pane_command欠損）は旧実装ではrun=None（bare化）だが新実装ではrun=Some(argv)"
-given = "P-shell-proc（terminal_command=None・pane_command=Some(\"vim src/main.rs\")）・P-cmd-pane（terminal_command=Some(\"claude --model x\")・pane_command=None）・通常pane（両方None）の3 paneと正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
-expect_return = "k=1・P-shell-procのrun=None・P-cmd-paneのrun=Some([\"claude\", \"--model\", \"x\"])・通常paneのrun=None。pane_commandの値（vim src/main.rs）はrunに一切反映されない"
+source = "docs/design/remap-v2-matching-fix-task74.md §2.1（照合keyをterminal_command〔invoked_with序列化〕へ変更。pane_command〔前景process〕は参照しない） + docs/design/detailed-design.md DD-10.8（occupied slot: terminal_commandを注入。command = 空白分割のargv[0]、args = 残り。TASK-81: cwd = 当該paneのpane_cwdを注入〔照合keyにcwdを含む〕。terminal_command = None はbare pane slotのまま）・DD-10.1 事実5（F1/F2/F3: terminal_command = invoked_with序列化・pane_command = PTY前景process・bare起動paneはinvoked_with=None + TASK-81訂正: zellij runは--cwdなし起動でもinvoked_withのcwd=Some〔クライアントcwd〕のためcwdを注入しない生成KDLとは照合しない。pane_cwdは/proc由来の現在cwdで起動時cwdの近似）・DD-10.6 (ii)（slot対応はrun（command+args+cwd）に一意なpaneについて決定論的）"
+description = "run算出のdata source（TASK-74主因A修正の核 + TASK-81 cwd拡張）: V2Assignment.runはRunSpec{argv, cwd}であり、argvはpane.terminal_command基準（terminal_command=None→run=None〔bare slot〕・Some(s)→argv=s.split_whitespace()でcommand=argv[0]・args=残り）、cwdはpane.cwd（pane_cwd）由來で算出する（TASK-81: 照合keyにcwdを含む。pane_cwd=None〔enrich欠落等〕はcwd=Noneで注入skip+warning——pane-cwd-missing-skips-cwd-with-warning）。pane_command（前景process）の値は参照しない。TR74-4直交2 paneを含み、旧実装（pane_command依存のrun算出）が必ずFAILするfail-first条件: P-shell-proc（terminal_command=None+pane_command=Some）は旧実装ではcommand注入されるが新実装ではrun=None／P-cmd-pane（terminal_command=Some+pane_command欠損）は旧実装ではrun=None（bare化）だが新実装ではrun=Some(argv)。TASK-81追記（fail-first）: TASK-75時点の実装のrunはargvのみでcwdを含まないため、pane_cwd=Someを与えた構成でfail-first（RunSpec拡張待ち）"
+given = "P-shell-proc（terminal_command=None・pane_command=Some(\"vim src/main.rs\")・pane_cwd=None）・P-cmd-pane（terminal_command=Some(\"claude --model x\")・pane_command=None・pane_cwd=Some(\"/w\")）・通常pane（terminal_command=None・pane_command=None・pane_cwd=None）の3 paneと正規形TabTemplate列（T=1・N_0=3）・anchor tab 0をplan_v2へ与える"
+expect_return = "k=1・P-shell-procのrun=None・P-cmd-paneのrun=Some(RunSpec{argv: [\"claude\", \"--model\", \"x\"], cwd: Some(\"/w\")})・通常paneのrun=None。pane_commandの値（vim src/main.rs）はrunに一切反映されない"
 
 [[condition]]
 id = "layout-planner.normalize-tab-templates-doc-order-and-tab-attributes"
@@ -228,3 +228,21 @@ source = "docs/design/remap-v3-multi-tab-task75.md §2.7（T=1後方互換: 割�
 description = "T=1式レベル後方互換の回帰固定: T=1（単tab layout・tab無しlayout・--inline）ではS=N_0=Nであり、割当式b=floor(i/N)・s=i%N、k=max(1,ceil(M/N))、命名は幹=baseで(0,0)=anchor・b>=1は<base>-<b+1>、tab focus復帰先はfocus=true鋳型が(0,0)=anchorを指すため無指定時と同一のanchor——計画レベル（割当式・k式・命名・tab focus復帰先）がv2.1と厳密一致する。既存r1〜r7・r39系がT=1 fixtureで期待値不変のままこの一致を固定する。保証範囲外（TR75-3明記）: 実行操作列全体の一致ではなく、focus-pane-id呼出はT=1でも新たに実行される（remap-sequence.focus-pane-id-after-override-per-tab。破壊的変更としてCHANGELOGへ記載予定）"
 given = "単tab node layout（name属性付き・N=3）とtab無しlayout（N=3）の各正規形TabTemplate列に、同一の4 pane source（M=4）と同一baseをplan_v2へ与える"
 expect_return = "両者ともk=2・割当はb=floor(i/3)・s=i%3（v2.1のinstance j式・slot式と同一）・(0,0)はname=None（anchor）・block 1はbase幹の<base>-2・最終go-to先（tab_focus_target）はanchor。単tab layoutの鋳型nameはT=1のため命名幹に使われない（幹=base）"
+
+[[condition]]
+id = "layout-planner.pane-cwd-missing-skips-cwd-with-warning"
+source_lines = "tests/unit/layout_planner.rs:753"
+target_function = "plan_v2（RunSpec.cwd算出・preflight warning）"
+source = "docs/design/detailed-design.md DD-10.8（pane_cwd=None〔enrich 100ms timeout欠落等〕はwarningを出して注入をskip〔10.13〕）・DD-10.13 pane_cwd欠落（list-panesのcwd enrichは100ms timeoutでpane_cwdが欠けうる〔T0 r2afterで実在〕→ 該当occupied slotはwarning+注入skipとなり照合が外れうる。(b)検証で検知）"
+description = "pane_cwd欠落時の注入skip+warning: terminal_command=Someかつpane_cwd=Noneのoccupied paneは、runのcwd=Noneとして注入をskipし（生成KDLはcwd属性なし——旧挙動と同一の出力）、pane特定付きのpreflight warningを出す（実行は可。照合が外れうることは(b)検証でVerificationFailedとして検知される設計。errorにしない）。T0実測のenrich欠落（100ms timeout）への防御。fail-first: TASK-75時点の実装はrun算出にcwdを含まないため欠落検出自体が存在しない"
+given = "terminal_command=Some(\"htop\")・pane_cwd=Noneのpane（terminal_1）と、terminal_command=Some(\"vim\")・pane_cwd=Some(\"/w\")のpane（terminal_2）の2 paneと正規形TabTemplate列（T=1・N_0=2）・anchor tab 0をplan_v2へ与える"
+expect_return = "Ok（k=1）でterminal_1のrun=Some(RunSpec{argv: [\"htop\"], cwd: None})・terminal_2のrun=Some(RunSpec{argv: [\"vim\"], cwd: Some(\"/w\")})。warningsにterminal_1を特定する表示（pane id表記）を含みterminal_2を含まない"
+
+[[condition]]
+id = "layout-planner.shell-c-heuristic-quoting-warning"
+source_lines = "tests/unit/layout_planner.rs:805"
+target_function = "plan_v2（preflight warning・shell -c高疑いheuristics）"
+source = "docs/design/detailed-design.md DD-10.13（TASK-81拡張: preflight warningは (1) terminal_commandに\"/'/\\/制御文字を含む (2) 空白分割argv[0]がshell系（*sh/bash/zsh/fish等）かつargv[1]が-c（高疑いheuristics）のいずれかで出力。実行は可。検出は完全でない）"
+description = "shell -c高疑いheuristics warning（TASK-81追加）: terminal_commandの空白分割argv[0]がshell系コマンド名（*sh/bash/zsh/fish等）かつargv[1]が-cの場合、quote文字を含まなくてもargv破壊の高疑いとしてpreflight warningを出す（DD-10.13: arg境界はjoinで消失しており、bash -c \"echo hello world\"のような引数はquote文字なしでも誤argv化するため文字種検出〔r20系〕だけでは拾えない）。検出は完全でないことを設計上受容（実行は可・errorにしない）。shell名単独（argv[1]なし）・通常commandは対象外。fail-first: TASK-75時点の実装のquoting warningは文字種検出のみ"
+given = "terminal_commandが bash -c echo hello world（quote文字なし・shell系argv[0]+argv[1]=-c）・bash（shell名のみ・argv[1]なし）・codex exec --plan（通常）の3 pane（terminal_1/2/3）と正規形TabTemplate列（T=1・N_0=3）をplan_v2へ与える"
+expect_return = "Ok（k=1）かつwarningsにterminal_1を含み、terminal_2・terminal_3を含まない"

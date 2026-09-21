@@ -82,6 +82,13 @@ TASK-74改訂（2026-09-15）: R13/R14/R15/R18/R20/R48/R49の定義はremap照�
   - 改修経緯（§7.1）: 1巡目は55 PASS/18 FAIL。要因A（focus-pane-id対象をmapping pane idから適用後のlist-panes位置〔visual order s番目〕ベースへ変更・occupied限定撤廃・already focused exit 2は成功扱い）と要因B（空groupをnew-tab --layout-string経路へ変更・step 6のoverride-layout skip。実験4で経路確定）を改修し全PASS。vb系列は複数tab focus鋳型検出warningが未実装の退化（1巡目vb PASSはalready focused警告の偶発的担い）で、normalize_tab_templatesへの複数focus warning追加+stderr/JSON data.warnings伝達で解消（条件: remap-cli.preflight-warning-paths-stderr-and-json）
   - harness: acceptance.sh（5系列・judge採点。TASK-74 harnessと同一構成）・musl static buildのzelper binary・geom75.awk（list-panes JSON→TSV幾何抽出）・tabs.awk・reference幾何file（ref_geom_*）
   - 既知の検証限界: dump-layoutとの完全一致は検証対象外（比較はtab毎slot数・幾何・bar存在・is_focused/activeに限定。dump除外項目対応表は設計書§4.3）・anchor tab名は保持例外（layout最初のtab名と一致しないことを確認するのが条件）・pane title（name属性→title）は保証外・pane idは検証の手段であって比較対象でない（生存検証はremap前後のid集合一致で実施）
+- **TASK-81 remap照合修正E2E 3巡全項目合格**（2026-09-19〜20。cwd注入・reconciliation多段規則・dry-run floating緩和・closed_duplicates/source_excluded_panes報告の実機実証。一次記録: `tmp/tasks/tm-81/`〔t0p3_/t0q3_/t0s3_/t0k3_/t0s3b_〕。第1回でF1/F2、第2回でR1〜R3を検出し修正、第3回で全項目合格・新規不具合なし。podman sandbox〔§1構成〕）:
+  - t0p3 = 同一cwd shell pair構成（R1実証）: anchor dup close+cwd反転でexit 0達成・新規id pane残存ゼロ・heartbeat単速（二重稼働なし）・幾何一致・closed_duplicates 2件（slot/reason付き）
+  - t0q3 = quote pane・短命command混在構成: held化短命command dupのclose回収（gate拡張+argv一致逆引き）・anchor解消・closed_duplicates 5件・幾何一致
+  - t0s3 = 短命command新規系列（R2実証）: 対象tab内source外held paneの`source_excluded_panes`報告（成功data・error.data・human warning 3経路）・closeなし（kill制約どおり）・2回remap通過で当該pane id不変
+  - t0k3 = 回帰系列: k>=2・reconciliation不発動・exit 0・幾何一致の完全維持
+  - 全巡でdry-run緩和（floating保有でもexit 0・仮想embed計画・状態不変）と`--embed-floating`なし実行のPreflight error維持を確認
+  - 既知の検証限界（TASK-81で確定。DD-10.13幾何検証の対象外）: bare pane群（shell pane・空slot正規spawn）のswap・配置は検証(e')の位置照合対象外（run一意割当のみ検査。E2E幾何比較でのみ観察可能）・対象tab内に残留するsource外held pane（`source_excluded_panes`報告対象）は当該tabの幾何を巻き込みうるが、巻き込み自体は検証対象外
 - 既知の検証限界: zellij 0.44.3では空tabを作成できない（new-tabが必ずpaneを作る）ため、`remove tab --empty`の実削除は代替検証（dry-run計画・非空tab保護・error契約）のみ
 
 ## 4. tests/構成（tests/README.mdで管理。MR-8で実態に合わせ更新）
