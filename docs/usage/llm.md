@@ -29,8 +29,11 @@ zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...] [--json]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...] [--json]
+zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab [TAB...] [--empty] [--yes] [--dry-run] [--json]
+zelper [--session NAME] attach [--json]
+zelper [--session NAME] detach [--json]
 zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
 zelper completion bash|zsh|fish
 zelper docs readme | llm usage|skill|snippet
@@ -50,6 +53,12 @@ zelper docs readme | llm usage|skill|snippet
 既定値: `add pane/tab --count 1`、`resize pane STEPS 1`、`watch --interval 1.0 --max 30`。
 
 `watch` の意味論: 対象pane（複数可・any-hit）の出力を`--interval`秒間隔でpolling（`dump-screen`反復）し、`-- PATTERN`を含む行が出現したら即hit（exit 0）。attempt 1はsleepなし即時実行のため開始前の既出テキストもhit（`--full`でscrollback込み）。照合はdump-screen生テキストの行単位（既定は固定substring・`--regex`で正規表現。ANSI正規化なし）。hit paneはvisual order最初の1件。`--max`回到達でno hitなら失敗。
+
+`attach` / `detach` / `add session` の意味論（session lifecycle・DD-14）:
+
+- `attach`: 対話client起動。**stdin・stdoutの両方がTTYであること必須**（非TTYはzellij起動前に `Preflight` exit 7で拒否。agent/script実行からは使えない）。対話終了後のみ報告（human `attach session 'NAME' ended` / JSON `data.session`）。zellij非zero終了（不在session名のSession not found + 稼働session候補表示を含む）は `OperationFailed` exit 5
+- `detach`: 対象sessionのattach clientをdetach。client不在でも成功（no-op）扱い（human `detached clients from session 'NAME'` / JSON `data.session`）。複数clientがattach中の場合、detachはzellijの仕様として最新clientのみ切断し先発clientは画面凍結のまま残る（全client切断には複数回のdetach）
+- `add session NAME`: detached session作成（`attach -b NAME` 相当の非対話経路）。session 0件環境でも動作（対象session解決を経ない例外dispatch）。同名running session既存は `Preflight` exit 7（fail-fast）・作成呼出失敗は `OperationFailed` exit 5・作成後のlist-sessions出現確認は `VerificationFailed` exit 7。成功は human `created session 'NAME' (detached)` / JSON `data.session`・`data.created=true`。作成直後は空session（tab 1・pane 0件）でfirst attach時にdefault layoutが具現化する。layout適用は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行う
 
 ## JSON出力契約（`--json`）
 
@@ -78,6 +87,7 @@ zelper docs readme | llm usage|skill|snippet
 - `list sessions` のみJSONをzellijが提供しないためテキストparse。name / created（zellijの相対表記）/ current / panes_per_tab（tab毎tiled pane数。取得失敗時null）を返す。EXITED（dead session）は表示・session解決から除外される
 - `list layouts` の `layouts` は `{name, size, modified_epoch}` の配列（stat失敗時はsize/modified_epochがnull）
 - `watch` のhit時 `data` は `{ target, pattern, regex, attempts_used, elapsed_secs, matched_lines, pane_errors }`（DD-15）。**multi-targetでもresults[]でなくhit pane単一のobject**（DD-4.2一般規定の例外）。回数切れの `error.data` は `{ attempts_used, elapsed_secs, pattern }`（一部pane消失を伴うPartialFailure時は失敗paneのみの `results[]`）
+- `attach` / `detach` の成功 `data` は `{ "session": "NAME" }`。`add session` の成功 `data` は `{ "session": "NAME", "created": true }`（DD-14）
 
 ## exit codeとerror class対応
 
@@ -122,6 +132,7 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 | `zelper remap three --inline '...'` | layout名と `--inline` は排他。どちらか一方 |
 | `zelper send --keys Enter -- y` | `--keys` とtextは排他 |
 | `zelper watch 3 READY` / `zelper watch 3 -- READY --json` | PATTERNは `--` 以降のためoptionは `--` の前へ: `zelper watch 3 --json -- READY` |
+| 非TTY環境（script/agent実行）での `zelper attach` | `Preflight` exit 7で拒否される。session作成は `zelper add session NAME`（非対話）を使い、attachは実TTYで行う |
 | 対象名が曖昧なまま再試行 | errorの `candidates` のIDを使う |
 
 ## 既知の制限（agentが前提にしてはならないこと）
@@ -130,5 +141,6 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 - `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpane・shell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差によりpane_cwd≠起動時cwdとなったpaneは照合を外しうる
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
 - `watch` はpolling実装（`dump-screen`反復・既定1s間隔）。最小intervalは1sのため高速pollは不可能。対象解決は開始時1回のみ（監視中に追加されたpaneは対象外）。照合はdump-screen生テキストの行単位でANSI escapeの正規化は行わない
+- `attach` は対話clientのため実TTY前提（stdin・stdout両方）。複数clientがattach中のsessionへの `detach` はzellijの仕様として最新clientのみ切断し、先発clientは画面凍結のまま残る（全client切断には複数回のdetach）。`add session` で作成直後のsessionは空（tab 1・pane 0件）で、first attach時にdefault layoutが具現化する。作成直後に `remap` する場合は空session（M=0）への適用になる点に注意
 - tab IDはclose後に再利用される。取得したtab IDは即時使用のみ
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。config.kdlの `layout_dir` は読まない

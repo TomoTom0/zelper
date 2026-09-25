@@ -625,7 +625,7 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
   - 注記（M3 (c)実測）: **複数attach client存在時のdetachはzellijが最新clientのみdetachし、先発clientは描画凍結のまま残留する**（2回目のdetachでも先発client残存）。zellij側のclient選択挙動でありzelperにclient数依存の分岐はなく、rc=0を成功として報告するのみ。全client切断にはclient数分のdetach実行またはclient側での終了が必要
 - **add session**: 事前確認（list_sessionsに同名running存在 → `Preflight` exit 7「session already exists」。作成を試みないfail-fast。EXITED行はrunningとみなさずzellijへ委ねる。0-session環境ではlist-sessions自体がrc=1で失敗する〔M5 (0)実測〕ため、その失敗は「0件」として扱い作成へ進む——同名衝突はzellij本体のattach -bがrc=1「Session already exists」で拒むため安全側）→ `create_session_detached(name)`（argvは `attach -b NAME`。**global --session形式は禁止**: M5 run2実測でrandom別名sessionを作るため。positional形式必須）→ postcondition: list_sessionsにNAMEがrunning出現（DD-11 addの存在確認規則に準拠。作成成否をexit codeのみで信用しない。不在は`VerificationFailed` exit 7）→ 報告: human `created session 'X' (detached)` / JSON `data.session`・`data.created=true`。作成呼出の非zero終了（EXITED同名衝突・race等）は`OperationFailed` exit 5（EXITED同名の実際の挙動は実測不能〔M5 run2/run3〕のためzellij委ね・結果報告の設計）
   - 作成直後のsessionは空skelton（tab 1・pane 0件。M5実測）で、**first attach時にdefault layoutが具現化する**。v1は素の作成のみ（layout等の作成optionなし——`attach -b`にlayout引数が存在しない。M5 (0)実測）。layout適用は作成後の`remap`合成（`zelper add session work && zelper --session work remap three`）で担う
-  - **add session×remap合成の注意**: 作成直後のpane 0件・空sessionに対するremapになる（remapのM=0系挙作——`remap-sequence.new-tab-only-needs-no-companion`（M=0・k=1・companion不使用）・`layout-planner.r7-empty-session-all-slots-empty`（M=0: k=1・全tab全slot空）——のとおり、k=1・全slotが既定shellの適用になる）。first attach後の具現化paneをsourceにしたい場合はattach後にremapすること
+  - **add session×remap合成の注意**: 作成直後のpane 0件・空sessionに対するremapになる（remapのM=0系条件——`remap-sequence.new-tab-only-needs-no-companion`（M=0・k=1・companion不使用）・`layout-planner.r7-empty-session-all-slots-empty`（M=0: k=1・全tab全slot空）——のとおり、k=1・全slotが既定shellの適用になる）。first attach後の具現化paneをsourceにしたい場合はattach後にremapすること
 - dry-run対象外（DD-12）。attach/detach/add sessionともに状態変更前のfail-fast（TTY検証・同名事前確認）を除けば単一backend呼び出しで、snapshotは取得しない
 
 ## DD-15. `watch` 操作設計（TASK-86・2026-09-25追加。TASK-87設計書が元）
@@ -654,7 +654,7 @@ plugin/                            # cargo workspace member zelper-companion-plu
                                    # bin crate・zellij-tile =0.44.3・wasm32-wasip1 release buildを
                                    # zelperのbuild.rsがbinaryへ埋込
 src/
-  main.rs  cli/  app/{list,read,send,rename,resize,remap,add,remove,watch}.rs
+  main.rs  cli/  app/{list,read,send,rename,resize,remap,add,remove,attach,watch}.rs
   companion.rs                     # wasm extract・permissions.kdl seed（DD-10.3/10.4）
   domain/  zellij/{process,parser,capabilities}.rs
   layout/{resolver,generator}.rs   # generator: KDL生成（改行区切り・slot正規化。DD-10.8）

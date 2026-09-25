@@ -83,6 +83,9 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper [--session NAME] attach [--json]     （対話attach。TTY必須: 非TTYはexit 7）
+zelper [--session NAME] detach [--json]     （対象sessionのattach clientをdetach）
+zelper add session NAME [--json]            （detached session作成。session 0件環境でも動作）
 zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
                                         （pane出力のpattern監視。polling: 1s間隔・最大30回で
                                          hitならexit 0、回数切れはexit 5。PATTERNは1件）
@@ -107,7 +110,13 @@ zelper docs readme | llm usage|skill|snippet
 - 最大試行回数`--max`（既定30）に到達すると失敗（exit 5。監視中のpane消失を一部に伴う場合はexit 6）。pollingは`dump-screen`の反復で、対象解決は開始時1回のみ（新規paneの追加は対象外）
 - 照合は`dump-screen`生テキストの行単位（ANSI escapeの正規化は行わない）
 
-## remapの意味論
+## session lifecycle（attach / detach / add session）
+
+- `attach` は対話clientの起動です。stdin・stdoutの両方がTTYであることを要求し、非TTY（script・agent実行等）ではzellijを起動する前にexit 7で拒否します（非TTYの素attachはzellij側でpanicするため）。対話終了後に `attach session 'NAME' ended` の1行（`--json` は `data.session`）を報告します。不在session名はzellij側の失敗（Session not found + 稼働session候補表示）をmessageに載せてexit 5になります
+- `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。複数clientがattachしている場合、zellijの仕様としてdetachは最新clientのみ切断し、先発clientは画面凍結のまま残る点に注意してください（全client切断には複数回のdetachが必要）
+- `add session NAME` はdetached sessionを作成します（`zellij attach -b NAME` 相当）。sessionが1つも存在しない環境でも動作し、同名running sessionが既にあれば作成前にexit 7で拒否、作成後のlist-sessions出現を検証してから `created session 'NAME' (detached)` を報告します。作成直後は空session（tab 1・pane 0件）で、最初のattach時にdefault layoutが具現化します。layoutを適用したい場合は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行います
+
+
 
 既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置します。対象はsession全体のselectable・tiledなterminal pane（`--tab T` 指定時はそのtabのpaneに絞り込み、かつそのtabが再配置のanchorになる）。
 

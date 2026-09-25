@@ -18,8 +18,11 @@ zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
+zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper [--session NAME] attach [--json]      （対話attach。TTY必須）
+zelper [--session NAME] detach [--json]
 zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
 ```
 
@@ -27,6 +30,7 @@ zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] 
 
 - `send` のtextは `--` 区切り必須: `zelper send --command codex -- y`
 - `watch` のPATTERNも `--` 区切り必須（1件・optionは `--` の前）: `zelper watch --command codex -- READY`（polling: 既定1s間隔・最大30回。hitでexit 0）
+- session lifecycle: `zelper add session NAME` はdetached sessionの非対話作成（session 0件環境でも動作）。`attach` は実TTY前提（非TTYはexit 7）。`detach` はclient不在でもno-op成功（複数client中のdetachは最新clientのみ切断）
 - `remap` は既存paneのprocessをすべて保持してlayoutへ再配置（既存paneのkill/restartなし。照合不成立でzelperがspawnした複製paneのみcloseし報告。pane数 > slot数でもlayout反復で全paneを配置）
 - exit status: 0 成功 / 2 usage / 3 対象解決失敗 / 4 zellij不在|未サポートversion / 5 操作失敗 / 6 部分失敗 / 7 preflight・layout不正・検証失敗
 - `--json` は `schema_version:1` / `ok` / `data`（または `error.class`）。multi-targetは `results[]` に部分失敗も含む。`watch` のhit時は例外でhit pane単一のobject（`target` / `matched_lines` 等。障害paneは `pane_errors`）

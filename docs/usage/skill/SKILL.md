@@ -34,8 +34,11 @@ zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
+zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper [--session NAME] attach [--json]      （対話attach。TTY必須）
+zelper [--session NAME] detach [--json]
 zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
 zelper completion bash|zsh|fish
 zelper docs readme | llm usage|skill|snippet
@@ -49,6 +52,7 @@ zelper docs readme | llm usage|skill|snippet
 - `resize` は方向まで指定: `zelper resize pane 3 grow right 2`
 - `remap` のlayout指定は名前 / `--path` / `--inline` の3source相互排他。併用はusage error
 - `watch` のPATTERNは `--` 区切り必須で1件（`zelper watch --command codex -- READY`）。optionは `--` の前に置く。 pollingは既定1s間隔・最大30回で、開始前の既出テキストもhitする
+- session lifecycle: `add session NAME` はdetached sessionの非対話作成（session 0件環境でも動作・同名runningはexit 7）。`attach` は実TTY前提（stdin・stdout両方がTTYでないとexit 7。agent実行からは使えない）。`detach` はclient不在でもno-op成功。複数clientがattach中のdetachは最新clientのみ切断される（先発clientは残る）
 - `--tab agents` のような名前指定は一意な名前のみ。同名tabが複数あればtab IDを使う
 
 ## 出力とexit status
@@ -87,6 +91,8 @@ zelper list panes --json                      # 構造把握（最初の一歩�
 zelper read --tab agents                      # agents tabの全pane画面を読む
 zelper send --command codex -- y              # codex稼働pane全てにyを送る
 zelper watch --command codex -- READY         # いずれかのcodex paneにREADY出現まで待つ
+zelper add session work                       # detached session作成（非対話・0件環境可）
+zelper --session work add pane --name build   # 作成したsessionへのpane追加
 zelper remap three --dry-run --json           # 3分割layout再配置の計画確認
 zelper add pane --name build -- cargo build   # build用paneを追加してコマンド実行
 zelper remove pane 12                         # pane削除（2対象以上で--yes確認要求）
