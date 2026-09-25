@@ -12,9 +12,9 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（18 file・229条件）
+## 条件書一覧（19 file・251条件）
 
-verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
+verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。moveはTASK-88 test-first前段・test未実装のためfalse）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -36,6 +36,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（7件） | 7 | true |
 | 17 | watch | src/app/watch.rs | fake_watch（loop系6件）+ cli_list_read_send（部分10件） | 16 | true |
 | 18 | attach-detach | src/app/attach.rs | fake_attach（L2・2件）+ cli_list_read_send（部分8件）+ lib src/zellij/process.rs（部分2件） | 12 | true |
+| 19 | move | src/app/move_.rs | fake_move（22件・TASK-88後段で実装予定。L2中心） | 22 | false |
 
 source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
@@ -44,6 +45,7 @@ source_fileの代表とnote欄記載の対応（設計書§2.2）:
 - add-remove: note = 「src/app/add.rs も検証対象」
 - remap-cli: note = 「廃止flag・version gateは src/cli.rs・src/zellij/process.rs も検証対象」
 - attach-detach: note = 「src/app/add.rs run_session・src/zellij/process.rs run_interactive（traitはsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象」
+- move: note = 「src/zellij/process.rs（move_pane / move_tab・MovePaneOp・TabMoveDirection）・src/companion.rs（remap.rsから切り出しのcompanion helper。TASK-88 §2.8）も検証対象」
 
 test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）:
 
