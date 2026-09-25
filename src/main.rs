@@ -40,11 +40,14 @@ fn wants_json(cli: &Cli) -> bool {
         Verb::Add { target } => match target {
             AddTarget::Pane { json, .. } => *json,
             AddTarget::Tab { json, .. } => *json,
+            AddTarget::Session { json, .. } => *json,
         },
         Verb::Remove { target } => match target {
             RemoveTarget::Pane { json, .. } => *json,
             RemoveTarget::Tab { json, .. } => *json,
         },
+        Verb::Attach { json, .. } => *json,
+        Verb::Detach { json, .. } => *json,
         Verb::Watch { json, .. } => *json,
         Verb::Completion { .. } => false,
         Verb::Docs { .. } => false,
@@ -115,6 +118,15 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
             }
         }
         Verb::Add { target } => {
+            // AddTarget::Sessionのみ例外dispatch（設計§2.2・DD-14）: add sessionは
+            // sessionが1つも存在しない環境（主要ユースケース）で動く必要があるため
+            // mk_backend（session解決）を経ず、ListResource::Sessionsと同一のprobe
+            // backend（capability checkのみ）を直接構築する
+            if let zelper::cli::AddTarget::Session { name, json } = target {
+                let probe = ZellijCliBackend::new("zelper-probe-unused");
+                check_capability(&probe)?;
+                return zelper::app::add::run_session(&probe, name, *json);
+            }
             let backend = mk_backend(&cli)?;
             match target {
                 zelper::cli::AddTarget::Pane {
@@ -217,6 +229,16 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                 }
             }
         }
+        Verb::Attach { json } => {
+            // 報告文面にsession名が必要なため、解決済みsession名をmk_backendから
+            // 受け取る（attach/detachともsession解決自体は既存共通経路）
+            let (backend, session) = mk_backend_named(&cli)?;
+            zelper::app::attach::run_attach(backend.as_ref(), &session, *json)
+        }
+        Verb::Detach { json } => {
+            let (backend, session) = mk_backend_named(&cli)?;
+            zelper::app::attach::run_detach(backend.as_ref(), &session, *json)
+        }
         Verb::Watch {
             panes,
             filter,
@@ -266,11 +288,17 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
 }
 
 fn mk_backend(cli: &Cli) -> Result<Box<dyn ZellijBackend>, ZelperError> {
+    Ok(mk_backend_named(cli)?.0)
+}
+
+/// mk_backendに解決済みsession名を加えた変種（attach/detachの報告文面用。
+/// backend構築の手順・挙動はmk_backendと同一）
+fn mk_backend_named(cli: &Cli) -> Result<(Box<dyn ZellijBackend>, String), ZelperError> {
     // session解決にlist-sessionsが必要な場合があるため、先に一時backendで解決する
     let probe = ZellijCliBackend::new("zelper-probe-unused");
     check_capability(&probe)?;
     let session = zelper::app::resolve_session(cli.session.as_deref(), &probe)?;
-    Ok(Box::new(ZellijCliBackend::new(session)))
+    Ok((Box::new(ZellijCliBackend::new(&session)), session))
 }
 
 fn generate_completion(shell: clap_complete::Shell) {

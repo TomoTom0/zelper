@@ -150,6 +150,9 @@ pub struct FakeBackend {
     /// watch用: full=true（dump-screen -f）検出時のみ返す応答（--full時の
     /// scrollback行の再現）。未設定paneはdump_frames/従来応答と同一
     pub dump_full_frames: RefCell<HashMap<PaneKindId, String>>,
+    /// add session用（TASK-89）: create_session_detachedをOkのままlist-sessions
+    /// 状態へ反映しない（rc=0・postcondition不在模擬）
+    pub mute_create_session: Cell<bool>,
 }
 
 pub struct FakeState {
@@ -161,6 +164,9 @@ pub struct FakeState {
     /// paneのinvoked_with（起動時Run）side-table（TASK-81）。未登録paneは
     /// PaneState.terminal_command/cwdからderive（derive互換）
     pub invoked_with: HashMap<PaneKindId, FakeRun>,
+    /// session一覧（TASK-89・add session用。従来のlist_sessions応答と同一内容を
+    /// 既定とし、create_session_detachedでNAMEを追加する状態管理）
+    pub sessions: Vec<SessionRef>,
 }
 
 impl FakeBackend {
@@ -190,6 +196,12 @@ impl FakeBackend {
                 next_tab_id: max_tab + 1,
                 next_plugin_id: max_plugin + 1,
                 invoked_with: HashMap::new(),
+                sessions: vec![SessionRef {
+                    name: "fake".into(),
+                    created: Some("1m ago".into()),
+                    current: true,
+                    exited: false,
+                }],
             }),
             calls: RefCell::new(Vec::new()),
             fail_op: RefCell::new(Vec::new()),
@@ -221,6 +233,7 @@ impl FakeBackend {
             dump_frames: RefCell::new(HashMap::new()),
             dump_fail_after: RefCell::new(HashMap::new()),
             dump_full_frames: RefCell::new(HashMap::new()),
+            mute_create_session: Cell::new(false),
         }
     }
 
@@ -419,6 +432,13 @@ impl FakeBackend {
     #[allow(dead_code)]
     pub fn set_dump_full(&self, pane: PaneKindId, content: String) {
         self.dump_full_frames.borrow_mut().insert(pane, content);
+    }
+
+    /// add session用: create_session_detachedをOkのままlist-sessions状態へ反映
+    /// しない（rc=0・postcondition不在模擬。TASK-89）
+    #[allow(dead_code)]
+    pub fn mute_create_session(&self) {
+        self.mute_create_session.set(true);
     }
 
     /// watch用: paneへのdump_screen呼び出し回数（記録から計上。-f付き呼び出しを
@@ -630,12 +650,7 @@ impl ZellijBackend for FakeBackend {
 
     fn list_sessions(&self) -> Result<Vec<SessionRef>, ZelperError> {
         self.record("list-sessions")?;
-        Ok(vec![SessionRef {
-            name: "fake".into(),
-            created: Some("1m ago".into()),
-            current: true,
-            exited: false,
-        }])
+        Ok(self.state.borrow().sessions.clone())
     }
 
     fn list_tabs(&self) -> Result<Vec<TabState>, ZelperError> {
@@ -1318,6 +1333,36 @@ impl ZellijBackend for FakeBackend {
             // 未知のnameは何もしない（旧binary混在時の安全側挙動。DD-10.3）
             _ => {}
         }
+        Ok(())
+    }
+
+    /// TASK-89（DD-14）: attach/detach/create_session_detachedは呼出記録のみの
+    /// 薄い実装。attachは対話clientの実挙動（stdio inherit等）ではなくapp層の
+    /// 報告契約の検証用（run_interactive経路の検証はsrc/zellij/process.rs内test）
+    fn attach_session(&self) -> Result<(), ZelperError> {
+        self.record("attach")?;
+        Ok(())
+    }
+
+    fn detach_session(&self) -> Result<(), ZelperError> {
+        self.record("detach")?;
+        Ok(())
+    }
+
+    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError> {
+        self.record(&format!("attach -b {name}"))?;
+        if self.mute_create_session.get() {
+            // 呼び出し自体は成功扱いだがlist-sessions状態へ反映しない
+            // （rc=0・postcondition不在模擬）
+            return Ok(());
+        }
+        let mut s = self.state.borrow_mut();
+        s.sessions.push(SessionRef {
+            name: name.into(),
+            created: Some("1m ago".into()),
+            current: false,
+            exited: false,
+        });
         Ok(())
     }
 }

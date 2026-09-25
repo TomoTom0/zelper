@@ -25,10 +25,44 @@ fn setup_fake_zellij(tag: &str) -> (PathBuf, PathBuf) {
 echo "$*" >> "$FAKE_LOG"
 if [[ "$1" == "--version" ]]; then echo "zellij 0.44.3"; exit 0; fi
 if [[ "$1" == "list-sessions" ]]; then
+  # TASK-89: FAKE_SESSIONS_EMPTY設定時は0-session環境（list-sessions自体がrc=1で
+  # 失敗する実環境・M5 (0)実測）を再現。attach -bでの作成NAME反映
+  # （${FAKE_LOG}.sessions）があれば通常応答へ戻る（FAKE_SESSIONS_CREATE=okの状態管理）
+  state="${FAKE_LOG}.sessions"
+  if [[ -n "$FAKE_SESSIONS_EMPTY" && ! -s "$state" ]]; then
+    echo "No active zellij sessions found."; exit 1
+  fi
   if [[ -n "$FAKE_SESSIONS" ]]; then printf '%s\n' "$FAKE_SESSIONS"; else echo "fake-sess [Created 1m ago] (current)"; fi
+  [[ -s "$state" ]] && cat "$state"
+  exit 0
+fi
+if [[ "$1" == "attach" ]]; then
+  # TASK-89: `zellij attach ...`（positional形式のtop-level argv。--session接頭なし）
+  if [[ "$2" == "-b" ]]; then
+    # FAKE_SESSIONS_CREATE: attach -b応答制御（作成ok / ok-mute〔list-sessions応答へ
+    # 反映しない〕/ already-exists〔M5 (e1)実測のrc=1・stderr再現〕）
+    case "$FAKE_SESSIONS_CREATE" in
+      already-exists) echo "Session already exists" >&2; exit 1;;
+      ok-mute) exit 0;;
+      *) echo "$3 [Created 1m ago] (current)" >> "${FAKE_LOG}.sessions"; exit 0;;
+    esac
+  fi
   exit 0
 fi
 if [[ "$3" == "action" ]]; then
+  # TASK-89: 不在session名へのactionは実zellijと同じ rc=1・Session not found +
+  # 稼働session候補表示で応答（M3 (b2)実測）。稼働session = FAKE_SESSIONS
+  # （未設定時は既定のfake-sess）+ attach -b作成分（${FAKE_LOG}.sessions）
+  sess="$2"
+  state="${FAKE_LOG}.sessions"
+  lines=""
+  [[ -s "$state" ]] && lines="$(cat "$state")"
+  if [[ -n "$FAKE_SESSIONS" ]]; then lines="$lines"$'\n'"$FAKE_SESSIONS"; else lines="$lines"$'\n'"fake-sess [Created 1m ago] (current)"; fi
+  if ! printf '%s\n' "$lines" | awk -v s="$sess" 'NF && $1 == s { found = 1 } END { exit found ? 0 : 1 }'; then
+    echo "Session '$sess' not found. The following sessions are active:" >&2
+    printf '%s\n' "$lines" | awk 'NF { print $1 }' >&2
+    exit 1
+  fi
   shift 3
   action="$1"; shift
   case "$action" in
@@ -95,6 +129,11 @@ if [[ "$3" == "action" ]]; then
       for fail in $FAKE_FAIL_WRITE_CHARS; do
         if [[ "$fail" == "$pane" ]]; then echo "boom" >&2; exit 1; fi
       done
+      echo "ok"; exit 0;;
+    # TASK-89: FAKE_DETACH_FAIL設定時はaction detachを非zero終了させる。
+    # 未設定時は rc=0 silent no-op成功（client不在の実zellij挙動・M3 (b)と同一）
+    detach)
+      if [[ -n "$FAKE_DETACH_FAIL" ]]; then echo "boom" >&2; exit 1; fi
       echo "ok"; exit 0;;
     *) echo "ok"; exit 0;;
   esac
@@ -1080,4 +1119,270 @@ fn watch_exhaust_all_pane_failure_is_exit5() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["ok"], false);
     assert_eq!(v["error"]["class"], "OperationFailed");
+}
+
+// ---------------------------------------------------------------------------
+// attach / detach / add session（TASK-89・attach-detach.tomlのL3層8条件。
+// run_interactive経路系2条件はsrc/zellij/process.rs内test・L2層2条件は
+// tests/fake_backend/attach.rs。層帰属は設計§5.2/§5.3・低-9修正）
+
+/// attachのTTY検査fail-fast: 実binaryはtest環境ではstdin・stdoutとも非TTYの
+/// ためPreflight（exit 7）で拒否される。M4実測（非TTY素attachはzellij panic
+/// exit 101・stdout汚染 / stdout片側pipeではUI出力先不在でblock）に到達させる
+/// 前に止めることが目的。誘導文で非対話作成（add session）への迂回を案内する
+// [covers:attach-detach.attach-non-tty-preflight]
+#[test]
+fn attach_non_tty_is_preflight_exit7_fail_fast() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("attach-nontty");
+    let out = cmd
+        .args(["--session", "fake-sess", "attach", "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "Preflight");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("attach requires a TTY"), "message: {msg}");
+    assert!(msg.contains("add session"), "message: {msg}");
+    // fail-fast: zellij attach呼出は発生しない（FAKE_LOGにattach行なし）
+    let cs = calls(&log);
+    assert!(
+        !cs.iter().any(|c| c.starts_with("attach")),
+        "calls: {cs:?}"
+    );
+}
+
+/// detachのbackend argv契約: session解決済みのsession名で
+/// `zellij --session NAME action detach` を実行する（既存run_actionの枠のwrap）
+// [covers:attach-detach.detach-argv]
+#[test]
+fn detach_records_session_action_detach_argv() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("detach-argv");
+    cmd.args(["--session", "fake-sess", "detach"])
+        .assert()
+        .success()
+        .stdout("detached clients from session 'fake-sess'\n");
+    let cs = calls(&log);
+    assert!(
+        cs.iter().any(|c| c == "--session fake-sess action detach"),
+        "calls: {cs:?}"
+    );
+}
+
+/// detachのzellij非zero終了mapping: (a) FAKE_DETACH_FAILによる汎用失敗と
+/// (b) 不在session名（shimはrc=1・Session not found + 稼働session候補表示）の
+/// 双方がOperationFailed（exit 5）へ変換され、messageへstderr本文が埋め込まれる
+/// （候補表示がmessage経由で届く）。Session not foundをNoTargetへ切り替えない
+// [covers:attach-detach.detach-fail]
+#[test]
+fn detach_fail_is_operation_failed_with_stderr() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    // (a) FAKE_DETACH_FAIL: action detachが非zero終了
+    let (mut cmd, _) = zelper("detach-fail-generic");
+    let out = cmd
+        .env("FAKE_DETACH_FAIL", "1")
+        .args(["--session", "fake-sess", "detach", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("boom"),
+        "message: {}",
+        v["error"]["message"]
+    );
+
+    // (b) 不在session名: rc=1・Session not found + 稼働session候補表示
+    let (mut cmd, _) = zelper("detach-fail-notfound");
+    let out = cmd
+        .args(["--session", "ghost-sess", "detach", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("Session 'ghost-sess' not found"),
+        "message: {msg}"
+    );
+    assert!(msg.contains("fake-sess"), "message: {msg}");
+}
+
+/// add session成功経路: 事前確認（同名なし）→ positional形式 `attach -b NAME`
+/// （--session接頭なしのtop-level argv）→ postcondition（作成後のlist-sessionsに
+/// NAMEがrunning出現）→ 報告。shimのFAKE_SESSIONS_CREATE=okは作成NAMEを
+/// list-sessions応答へ反映する（statelessだとpostconditionが常に不成立になるため）
+// [covers:attach-detach.add-session-argv-postcondition]
+#[test]
+fn add_session_creates_detached_and_reports() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    // human: `created session 'NAME' (detached)` の1行
+    let (mut cmd, log) = zelper("add-session-human");
+    cmd.env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "work"])
+        .assert()
+        .success()
+        .stdout("created session 'work' (detached)\n");
+    let cs = calls(&log);
+    assert!(cs.iter().any(|c| c == "attach -b work"), "calls: {cs:?}");
+    // 例外dispatch: 対象session解決（mk_backend）を経ないため--session接頭のargv無し
+    assert!(
+        !cs.iter().any(|c| c.starts_with("--session")),
+        "calls: {cs:?}"
+    );
+
+    // JSON: envelope 1通でdata.session=NAME・data.created=true
+    let (mut cmd, log) = zelper("add-session-json");
+    let out = cmd
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "work2", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["session"], "work2");
+    assert_eq!(v["data"]["created"], true);
+    assert!(
+        calls(&log).iter().any(|c| c == "attach -b work2"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// add sessionの同名事前確認: list_sessionsに同名running sessionが存在する場合は
+/// 作成を試みずPreflight（exit 7）で拒否する（zellij側rc=1を待たないfail-fast）
+// [covers:attach-detach.add-session-already-exists]
+#[test]
+fn add_session_existing_running_name_is_preflight() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("add-session-exists");
+    let out = cmd
+        .env("FAKE_SESSIONS", "work [Created 2m ago] (current)")
+        .args(["add", "session", "work", "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "Preflight");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("session already exists"),
+        "message: {}",
+        v["error"]["message"]
+    );
+    // fail-fast: attach -b argvは発生しない
+    let cs = calls(&log);
+    assert!(
+        !cs.iter().any(|c| c.starts_with("attach -b")),
+        "calls: {cs:?}"
+    );
+}
+
+/// add sessionの0-session環境動作: 対象session解決を経ない例外dispatchにより、
+/// list-sessions応答が0件（shimは0-session実環境どおりrc=1で失敗）の環境でも
+/// 作成が成立する。共通経路（mk_backend）のまま実装するとresolve_sessionが
+/// NoTargetで失敗する回帰の検出。成功にはpostconditionの通過を含む
+// [covers:attach-detach.add-session-no-session-env]
+#[test]
+fn add_session_works_in_zero_session_environment() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("add-session-zeroenv");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "work", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["session"], "work");
+    assert_eq!(v["data"]["created"], true);
+    // positional形式 `attach -b NAME`（--session接頭なし）
+    assert!(
+        calls(&log).iter().any(|c| c == "attach -b work"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// add sessionの作成失敗mapping: 事前確認を通過した後のattach -b非zero終了
+/// （EXITED同名衝突・race等）はOperationFailed（exit 5）へ変換され、messageへ
+/// stderr本文（Session already exists）が埋め込まれる（M5 (e1)実測の再現）
+// [covers:attach-detach.add-session-create-fail-operation-failed]
+#[test]
+fn add_session_create_fail_is_operation_failed() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("add-session-createfail");
+    let out = cmd
+        .env("FAKE_SESSIONS_CREATE", "already-exists")
+        .args(["add", "session", "work", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Session already exists"),
+        "message: {}",
+        v["error"]["message"]
+    );
+}
+
+/// add sessionのpostcondition検証: attach -bがrc=0でも作成後のlist_sessionsに
+/// NAMEがrunning出現しない場合はVerificationFailed（exit 7）で失敗報告する
+/// （作成成否をexit codeのみで信用しない。shimはFAKE_SESSIONS_CREATE=ok-muteで
+/// rc=0・list-sessions応答不変の系列を再現）
+// [covers:attach-detach.add-session-postcondition-missing-verification-failed]
+#[test]
+fn add_session_postcondition_missing_is_verification_failed() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("add-session-postmiss");
+    let out = cmd
+        .env("FAKE_SESSIONS_CREATE", "ok-mute")
+        .args(["add", "session", "work", "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "VerificationFailed");
+    // attach -b自体は発行済み（rc=0・list-sessions不変の系列）
+    assert!(
+        calls(&log).iter().any(|c| c == "attach -b work"),
+        "calls: {:?}",
+        calls(&log)
+    );
 }

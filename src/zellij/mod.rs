@@ -118,6 +118,16 @@ pub trait ZellijBackend {
     fn focus_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
     fn dump_layout(&self) -> Result<String, ZelperError>;
     fn toggle_embed_floating(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
+    /// 対話attach（DD-14）。run_interactive経由（stdio inherit×3・timeout無効。
+    /// DD-3.1例外）。argvは `attach <session>` positional形式
+    fn attach_session(&self) -> Result<(), ZelperError>;
+    /// 対象sessionのattach clientをdetach（DD-14）。`--session NAME action detach`
+    /// wrap（現行run_actionの枠）
+    fn detach_session(&self) -> Result<(), ZelperError>;
+    /// detached session作成（DD-14）。argvは `attach -b NAME`（positional形式。
+    /// global --session形式はrandom別名sessionを作るため禁止——M5実測）。
+    /// session解決に依存しないtop-level argv
+    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError>;
     fn pipe_plugin(
         &self,
         path: &std::path::Path,

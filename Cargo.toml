@@ -75,6 +75,10 @@ name = "fake_watch"
 path = "tests/fake_backend/watch.rs"
 
 [[test]]
+name = "fake_attach"
+path = "tests/fake_backend/attach.rs"
+
+[[test]]
 name = "companion_seed"
 path = "tests/fake_backend/companion_seed.rs"
 

@@ -2,10 +2,18 @@ use super::parser;
 use super::{MIN_SUPPORTED, NewPaneSpec, NewTabSpec, OverrideSpec, ResizeOp, ZellijBackend};
 use crate::domain::{PaneKindId, SessionRef, TabId, TabState};
 use crate::error::{ErrorClass, ZelperError};
-use std::io::Read;
+use std::io::{Read, Seek, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+// stdはfd複製（dup）・差し替え（dup2）を公開していないため、zelperが既にlink
+// 済みのシステムlibcの該当関数を直接宣言する（依存追加を避ける。TASK-89）
+unsafe extern "C" {
+    fn dup(oldfd: std::os::fd::RawFd) -> std::os::fd::RawFd;
+    fn dup2(oldfd: std::os::fd::RawFd, newfd: std::os::fd::RawFd) -> std::os::fd::RawFd;
+}
 
 /// 実zellij実行backend（DD-3.1）: 常に `zellij --session NAME action ...` 形式。
 /// argv配列で実行し（shellを経由しない）、1呼び出しのtimeoutを持つ。
@@ -32,6 +40,79 @@ impl ZellijCliBackend {
     }
     // 注: with_programはfake zellij program差し替えの拡張点。src内#[cfg(test)]（backend-process条件書）が使用
 
+    /// spawn失敗のclass変換（run()/run_interactive共通。挙動は従来のrun()と同一）
+    fn map_spawn_err(e: std::io::Error) -> ZelperError {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            ZelperError::new(
+                ErrorClass::ZellijUnavailable,
+                "zellij executable not found in PATH",
+            )
+        } else {
+            ZelperError::new(
+                ErrorClass::ZellijUnavailable,
+                format!("failed to start zellij: {e}"),
+            )
+        }
+    }
+
+    /// 対話実行（attach専用。DD-3.1例外・DD-14）: stdioはinherit×3でspawnし、
+    /// timeout無効（`self.timeout`を参照しない。対話sessionは時間無制限が本質で
+    /// run()のtimeoutで打ち切られるべきでない）で子の終了まで待つ。
+    ///
+    /// stderrのみ、起動前に親自身のfd 2を一時的なcapture fileへ差し替えた上で
+    /// 継承する（StdioCapture）。これにより (1) 子のfd 0/1/2は親の対応fdと同一
+    /// targetのまま（inherit×3の維持） (2) 子のstderr出力をcaptureでき、終了後に
+    /// 本来のstderrへ転写するとともに非zero終了時のerror messageへ埋め込む
+    /// （backend-process.nonzero-exit-operation-failedと同一規則。zellij attachの
+    /// 不在session error〔Session not found + 稼働session候補〕をJSON経路にも届ける）
+    fn run_interactive(&self, args: &[String]) -> Result<(), ZelperError> {
+        let mut cap = StderrCapture::new()?;
+        let mut cmd = Command::new(&self.program);
+        cmd.args(args)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let e = Self::map_spawn_err(e);
+                cap.restore();
+                return Err(e);
+            }
+        };
+        // timeout無効: child.wait()のblocking待機のみ（poll/killなし）
+        let status = match child.wait() {
+            Ok(s) => s,
+            Err(e) => {
+                let e = ZelperError::new(
+                    ErrorClass::OperationFailed,
+                    format!("failed to wait for zellij: {e}"),
+                );
+                cap.restore();
+                return Err(e);
+            }
+        };
+        cap.restore();
+        let stderr = cap.read();
+        if !stderr.trim().is_empty() {
+            // captureしたstderrを本来のstderrへ転写（inherit相当の可視性の維持。
+            // 改行終端していなければ補う）
+            if stderr.ends_with('\n') {
+                eprint!("{stderr}");
+            } else {
+                eprintln!("{stderr}");
+            }
+        }
+        if status.success() {
+            Ok(())
+        } else {
+            Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!("zellij exited with {}: {}", status, stderr.trim()),
+            ))
+        }
+    }
+
     /// 生のaction呼び出し
     fn run_action(&self, args: &[&str]) -> Result<String, ZelperError> {
         self.run_action_as(&self.session, args)
@@ -56,19 +137,7 @@ impl ZellijCliBackend {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                ZelperError::new(
-                    ErrorClass::ZellijUnavailable,
-                    "zellij executable not found in PATH",
-                )
-            } else {
-                ZelperError::new(
-                    ErrorClass::ZellijUnavailable,
-                    format!("failed to start zellij: {e}"),
-                )
-            }
-        })?;
+        let mut child = cmd.spawn().map_err(Self::map_spawn_err)?;
 
         let mut stdout_pipe = child.stdout.take().expect("stdout piped");
         let mut stderr_pipe = child.stderr.take().expect("stderr piped");
@@ -368,6 +437,129 @@ impl ZellijBackend for ZellijCliBackend {
         self.run_action(&["pipe", "--plugin", &plugin, "--name", name, "--", payload])?;
         Ok(())
     }
+
+    fn attach_session(&self) -> Result<(), ZelperError> {
+        // positional形式 `zellij attach <session>`（DD-14。global --session形式は
+        // M5実測で意図しない挙動になるため不使用）
+        self.run_interactive(&["attach".to_string(), self.session.clone()])
+    }
+
+    fn detach_session(&self) -> Result<(), ZelperError> {
+        // 現行run_actionの枠のwrap（`zellij --session NAME action detach`）
+        self.run_action(&["detach"])?;
+        Ok(())
+    }
+
+    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError> {
+        // 非対話作成（M5実測: one-shot・rc=0・silent）。session解決に依存しない
+        // top-level argv（run_actionの--session接頭なし）
+        self.run(&[
+            "attach".to_string(),
+            "-b".to_string(),
+            name.to_string(),
+        ])?;
+        Ok(())
+    }
+}
+
+/// run_interactive用のstderr capture（DD-14）。親自身のfd 2を一時的なcapture
+/// fileへ差し替え、子spawn中は親子で同一fd targetを保つ（stdio inherit×3の
+/// 維持）。restore後にcapture内容を読み出せる。Dropで確実にfd 2を復帰し
+/// 一時fileを掃除する
+struct StderrCapture {
+    /// 差し替え前のfd 2の退避先（None = 未差し替え）
+    saved: Option<std::os::fd::RawFd>,
+    file: Option<std::fs::File>,
+    path: PathBuf,
+    dir: PathBuf,
+}
+
+impl StderrCapture {
+    fn new() -> Result<Self, ZelperError> {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("zelper-attach-stderr-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!("failed to prepare stderr capture: {e}"),
+            )
+        })?;
+        let path = dir.join("stderr.log");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .map_err(|e| {
+                ZelperError::new(
+                    ErrorClass::OperationFailed,
+                    format!("failed to prepare stderr capture: {e}"),
+                )
+            })?;
+        let mut cap = StderrCapture {
+            saved: None,
+            file: Some(file),
+            path,
+            dir,
+        };
+        // SAFETY: fd 2はこの時点で有効な stderr。dupは退避用の複製を作るだけで
+        // fd 2を変更しない。dup2でfd 2をcapture fileへ差し替える（失敗時はfd 2は
+        // 不変のため退避分を閉じて元の状態へ戻す）
+        unsafe {
+            let saved = dup(2);
+            if saved < 0 {
+                return Err(ZelperError::new(
+                    ErrorClass::OperationFailed,
+                    "failed to prepare stderr capture: dup failed",
+                ));
+            }
+            let file_fd = cap.file.as_ref().expect("file opened").as_raw_fd();
+            if dup2(file_fd, 2) < 0 {
+                drop(std::os::fd::OwnedFd::from_raw_fd(saved));
+                return Err(ZelperError::new(
+                    ErrorClass::OperationFailed,
+                    "failed to prepare stderr capture: dup2 failed",
+                ));
+            }
+            cap.saved = Some(saved);
+        }
+        Ok(cap)
+    }
+
+    /// fd 2を本来のstderrへ戻す（冪等）
+    fn restore(&mut self) {
+        if let Some(saved) = self.saved.take() {
+            // SAFETY: savedはdup(2)で作った有効なfd。dup2でfd 2へ戻した後に閉じる
+            unsafe {
+                let _ = dup2(saved, 2);
+                drop(std::os::fd::OwnedFd::from_raw_fd(saved));
+            }
+        }
+    }
+
+    /// captureしたstderr内容の読み出し（restore後）
+    fn read(&mut self) -> String {
+        let Some(f) = self.file.as_mut() else {
+            return String::new();
+        };
+        let _ = f.flush();
+        let mut buf = String::new();
+        if f.seek(std::io::SeekFrom::Start(0)).is_ok() {
+            let _ = f.read_to_string(&mut buf);
+        }
+        buf
+    }
+}
+
+impl Drop for StderrCapture {
+    fn drop(&mut self) {
+        self.restore();
+        self.file = None;
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.dir);
+    }
 }
 
 /// 起動時のversion/可用性チェック（DD-3.5 compatibility policy）。
@@ -617,5 +809,90 @@ exit 0
             "message: {}",
             err.message()
         );
+    }
+
+    /// TASK-89（DD-14・設計§2.3/§5.2）: attachのbackend経路（run_interactive）は
+    /// stdioをinherit×3でspawnし（fd 0/1/2とも子は親の対応fdと同一targetを継承。
+    /// stderrは一時的captureへ差し替えた上での継承）、run()のtimeout機構を適用
+    /// しない（対話sessionは時間無制限が本質）。(a)は子がfd 0/1/2の参照先を親
+    /// （getppid）と比較し報告fileへ書くfake programでinheritを検出、(b)はbackend
+    /// のtimeout値を超えてsleepするfake programがtimeout errorにならずOkで完結
+    /// することでtimeout無効を検証する
+    // [covers:attach-detach.attach-run-interactive-stdio-inherit-no-timeout]
+    #[test]
+    fn attach_run_interactive_inherits_stdio_and_skips_timeout() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        // (a) stdio inherit検出: 子のfd 0/1/2の参照先を親と比較し報告fileへ書く
+        let dir = std::env::temp_dir().join(format!(
+            "zelper-fake-process-attachfd-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let report = dir.join("fd_report.txt");
+        let script = format!(
+            r#"#!/usr/bin/env bash
+p=$PPID
+: > "{report}"
+for n in 0 1 2; do
+  a=$(readlink /proc/self/fd/$n)
+  b=$(readlink /proc/$p/fd/$n)
+  if [[ "$a" == "$b" ]]; then
+    echo "fd$n=same" >> "{report}"
+  else
+    echo "fd$n=DIFF" >> "{report}"
+  fi
+done
+exit 0
+"#,
+            report = report.display()
+        );
+        let program = setup_fake_zellij("attach-fd", &script);
+        let backend = ZellijCliBackend::new("sess89").with_program(program);
+        backend.attach_session().unwrap();
+        let recorded = std::fs::read_to_string(&report).unwrap();
+        assert_eq!(
+            recorded.trim(),
+            "fd0=same\nfd1=same\nfd2=same",
+            "fd report: {recorded}"
+        );
+
+        // (b) timeout無効: backend.timeout（数百ms）を超えてsleepしてもtimeout
+        // error（zellij call timed out）にならずOkで完結する
+        let program = setup_fake_zellij("attach-slow", "#!/usr/bin/env bash\nsleep 1\nexit 0\n");
+        let mut backend = ZellijCliBackend::new("sess89").with_program(program);
+        backend.timeout = Duration::from_millis(300);
+        backend.attach_session().unwrap();
+    }
+
+    /// TASK-89（DD-14）: attachのzellij非zero終了はOperationFailed（exit 5相当）へ
+    /// 変換され、messageへexit statusとtrim済みstderr本文（不在sessionのSession
+    /// not found + 稼働session候補表示）が埋め込まれる。Session not foundを
+    /// NoTarget（exit 3）へ切り替えない（stderr内容によるclass切替は設計上存在
+    /// しない——backend-process.nonzero-exit-operation-failedと同一規則。
+    /// --session明示時はresolve_sessionが存在確認せずpass-throughのため不在名の
+    /// 検出はzellij側になる）
+    // [covers:attach-detach.attach-zellij-fail]
+    #[test]
+    fn attach_nonzero_exit_becomes_operation_failed_with_stderr() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let script = "#!/usr/bin/env bash\n\
+            echo \"Session 'ghost' not found. The following sessions are active:\" >&2\n\
+            echo \"sess-a\" >&2\n\
+            echo \"sess-b\" >&2\n\
+            exit 1\n";
+        let program = setup_fake_zellij("attach-fail", script);
+        let backend = ZellijCliBackend::new("ghost").with_program(program);
+        let err = backend.attach_session().unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::OperationFailed,
+            "message: {}",
+            err.message()
+        );
+        let msg = err.message();
+        assert!(msg.contains("exit status: 1"), "message: {msg}");
+        assert!(msg.contains("Session 'ghost' not found"), "message: {msg}");
+        assert!(msg.contains("sess-a"), "message: {msg}");
+        assert!(msg.contains("sess-b"), "message: {msg}");
     }
 }

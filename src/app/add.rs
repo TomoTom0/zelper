@@ -140,3 +140,48 @@ pub fn run_tab(
     }
     Ok(())
 }
+
+/// add session NAME: detached session作成（DD-14・TASK-89）。main.rsからは
+/// 0-session環境で動く前提のprobe backend（session解決なし）が渡される
+/// （AddTarget::Session例外dispatch。設計§2.2）
+pub fn run_session(
+    backend: &dyn ZellijBackend,
+    name: &str,
+    json: bool,
+) -> Result<(), ZelperError> {
+    // 事前確認: 同名running sessionの存在はPreflightでfail-fast拒否する
+    // （zellijのrc=1「Session already exists」を待たない）。EXITED行はrunningと
+    // みなさない（EXITED同名はzellijへ委ねる）。0-session環境ではlist-sessions
+    // 自体がrc=1で失敗する（M5 (0)実測）ため、その失敗は「0件」として扱い作成へ
+    // 進む——同名衝突はzellij本体のattach -bがrc=1で拒むため安全側
+    let sessions = backend.list_sessions().unwrap_or_default();
+    if sessions.iter().any(|s| !s.exited && s.name == name) {
+        return Err(ZelperError::new(
+            ErrorClass::Preflight,
+            format!("session already exists: '{name}'"),
+        ));
+    }
+    backend.create_session_detached(name)?;
+    // postcondition: 作成後のlist_sessionsにNAMEがrunning出現（DD-11 addの存在
+    // 確認規則に準拠。作成成否をexit codeのみで信用しない）
+    let sessions = backend.list_sessions()?;
+    if sessions.iter().any(|s| !s.exited && s.name == name) {
+        println!("{}", session_report(name, json));
+        Ok(())
+    } else {
+        Err(ZelperError::new(
+            ErrorClass::VerificationFailed,
+            format!("session '{name}' not found in list-sessions after creation"),
+        ))
+    }
+}
+
+/// add session成功の報告文。humanは `created session '<NAME>' (detached)` の1行・
+/// JSONはenvelope 1通（data.session=NAME・data.created=true。DD-14）
+pub fn session_report(name: &str, json: bool) -> String {
+    if json {
+        output::json::ok(serde_json::json!({ "session": name, "created": true }))
+    } else {
+        format!("created session '{name}' (detached)")
+    }
+}

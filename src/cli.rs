@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 Panels are addressed by pane id (terminal_3, plugin_1, or a bare number).\n\
 Targets: positional pane ids plus filter options (--tab/--name/--command/--cwd/--all).\n\
 \n\
-Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run\n  zelper watch --command codex -- READY",
+Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run\n  zelper watch --command codex -- READY\n  zelper add session work",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -108,6 +108,16 @@ pub enum Verb {
     Remove {
         #[command(subcommand)]
         target: RemoveTarget,
+    },
+    /// 対話attach（TTY必須。非TTYはexit 7）
+    Attach {
+        #[arg(long)]
+        json: bool,
+    },
+    /// 対象sessionのattach clientをdetach
+    Detach {
+        #[arg(long)]
+        json: bool,
     },
     /// pane出力のpattern監視（polling。hitまたは最大試行回数到達まで）
     Watch {
@@ -228,6 +238,12 @@ pub enum Direction {
 
 #[derive(Subcommand, Debug)]
 pub enum AddTarget {
+    /// detached session作成: zelper add session NAME（session 0件環境でも動作）
+    Session {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
     Pane {
         #[arg(long)]
         tab: Option<String>,
