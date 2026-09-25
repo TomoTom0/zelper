@@ -12,9 +12,9 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（17 file・217条件）
+## 条件書一覧（18 file・229条件）
 
-verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
+verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。attach-detachは実装前test-firstのfail-first状態〔TASK-89・test/実装は後段追従〕）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -35,6 +35,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 15 | docs-verb | src/app/docs.rs | cli_docs（7件） | 7 | true |
 | 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（7件） | 7 | true |
 | 17 | watch | src/app/watch.rs | fake_watch（loop系6件）+ cli_list_read_send（部分10件） | 16 | true |
+| 18 | attach-detach | src/app/attach.rs | fake_attach（L2・予定）+ tests/cli L3 shim（FAKE_DETACH_FAIL/FAKE_SESSIONS_CREATE・予定）+ src/zellij/process.rs内test（run_interactive系・予定） | 12 | false（実装前test-first） |
 
 source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
@@ -42,6 +43,7 @@ source_fileの代表とnote欄記載の対応（設計書§2.2）:
 - read-send: note = 「src/app/send.rs も検証対象」
 - add-remove: note = 「src/app/add.rs も検証対象」
 - remap-cli: note = 「廃止flag・version gateは src/cli.rs・src/zellij/process.rs も検証対象」
+- attach-detach: note = 「src/app/add.rs run_session・src/zellij/process.rs run_interactive（traitはsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象」
 
 test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）:
 
@@ -49,6 +51,7 @@ test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）
 - `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
 - `tests/fake_backend/watch.rs` 6件 = watch（loop系: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。設計§5.2/§5.3の層帰属）
 - lib内test 10件（src/app/list.rs 3件・src/zellij/process.rs 7件）= list-display・backend-processへ帰属
+- `tests/fake_backend/attach.rs`（fake_attach）+ tests/cli L3 shim + src/zellij/process.rs内test（いずれもTASK-89予定・test fn未追加）= attach-detach 12件（層帰属は設計書§5.2/§5.3・低-9修正: FAKE_ATTACH_EXITはsrc内でL3実binaryは非TTY exit 7 envelope検証のみ。detach/add sessionはL2 fake backend + L3 shim）
 
 ## R番号→条件id対応表
 
