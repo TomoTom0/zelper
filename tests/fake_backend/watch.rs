@@ -36,16 +36,18 @@ fn term(n: u32) -> PaneKindId {
     PaneKindId::Terminal(n)
 }
 
-/// watch::executeの呼び出しhelper（filterなし・pattern 1件）。intervalは実sleep
-/// ため、実行時間抑制のため呼び出し側で--maxを最小に寄せる（設計§5.3・R6）
-fn run_watch(
+/// watch::executeの呼び出しhelper（filterなし・pattern 1件・intervalは全testが
+/// 1.0で検証するため固定）。attempt間のsleepは引数で注入（REVIEW-1: prodは
+/// std::thread::sleep・testは記録用/即時クロージャ。intervalはsleep経路でのみ
+/// 消費されるため、記録系クロージャでは実時間を要しない）
+fn run_watch<S: FnMut(std::time::Duration)>(
     b: &FakeBackend,
     panes: &[&str],
     pattern: &str,
     regex: bool,
     full: bool,
-    interval: f64,
     max: u32,
+    sleep: S,
 ) -> Result<zelper::app::watch::WatchHit, zelper::error::ZelperError> {
     let panes: Vec<String> = panes.iter().map(|s| s.to_string()).collect();
     let pattern = vec![pattern.to_string()];
@@ -54,17 +56,18 @@ fn run_watch(
         filter: &FilterArgs::default(),
         regex,
         full,
-        interval,
+        interval: 1.0,
         max,
         pattern: &pattern,
         json: false,
     };
-    execute(b, &args)
+    execute(b, &args, sleep)
 }
 
 /// attempt 1は初期sleepなしの即時実行で、watch開始前から存在する既出テキストで
-/// 即hitする（attempts_used=1・dump呼び出し1回）。照合は行単位のcontains
-/// （行全体一致でなく部分一致: 行の途中にpatternを含む行がhitし、行全体を報告）
+/// 即hitする（attempts_used=1・dump呼び出し1回・sleep呼び出し0回〔REVIEW-1〕）。
+/// 照合は行単位のcontains（行全体一致でなく部分一致: 行の途中にpatternを含む行が
+/// hitし、行全体を報告）
 // [covers:watch.t0-immediate-first-poll]
 #[test]
 fn t0_immediate_first_poll_hits_on_existing_text() {
@@ -73,11 +76,18 @@ fn t0_immediate_first_poll_hits_on_existing_text() {
         term(1),
         vec!["booting...\nagent is READY now\ndone\n".into()],
     );
-    let hit = run_watch(&b, &["1"], "READY", false, false, 1.0, 3).unwrap();
+    let slept = std::cell::RefCell::new(Vec::new());
+    let recorder = |d: std::time::Duration| slept.borrow_mut().push(d);
+    let hit = run_watch(&b, &["1"], "READY", false, false, 3, recorder).unwrap();
     assert_eq!(hit.attempts_used, 1);
     assert_eq!(hit.matched_lines, vec!["agent is READY now".to_string()]);
-    // 初期sleepなし: dump_screenは1回のみ
+    // 初期sleepなし: dump_screenは1回のみ・sleep呼び出しは0回
     assert_eq!(b.dump_calls(&term(1)), 1);
+    assert!(
+        slept.borrow().is_empty(),
+        "sleep calls: {:?}",
+        slept.borrow()
+    );
 }
 
 /// 複数対象のany-hit契約: 後続attemptで2 pane目のみhitする系列は当該paneを報告
@@ -90,7 +100,7 @@ fn any_hit_multi_pane_reports_hit_pane() {
     let b = FakeBackend::new(vec![pane(1, "a", 0, 0), pane(2, "b", 0, 100)], vec![]);
     b.set_dump_frames(term(1), vec!["idle".into(), "still idle".into()]);
     b.set_dump_frames(term(2), vec!["working".into(), "READY agent online".into()]);
-    let hit = run_watch(&b, &["1", "2"], "READY", false, false, 1.0, 3).unwrap();
+    let hit = run_watch(&b, &["1", "2"], "READY", false, false, 3, |_| {}).unwrap();
     assert_eq!(hit.pane.id, term(2));
     assert_eq!(hit.attempts_used, 2);
     assert_eq!(hit.matched_lines, vec!["READY agent online".to_string()]);
@@ -100,7 +110,7 @@ fn any_hit_multi_pane_reports_hit_pane() {
     let b = FakeBackend::new(vec![pane(1, "a", 0, 0), pane(2, "b", 0, 100)], vec![]);
     b.set_dump_frames(term(1), vec!["READY here".into()]);
     b.set_dump_frames(term(2), vec!["READY there".into()]);
-    let hit = run_watch(&b, &["2", "1"], "READY", false, false, 1.0, 3).unwrap();
+    let hit = run_watch(&b, &["2", "1"], "READY", false, false, 3, |_| {}).unwrap();
     assert_eq!(hit.pane.id, term(1));
 }
 
@@ -113,11 +123,11 @@ fn regex_is_opt_in_substring_by_default() {
     b.set_dump_frames(term(1), vec!["READY".into()]);
 
     // 無指定: substring照合は大文字小文字を区別 → hitせず回数切れ（exit 5相当）
-    let err = run_watch(&b, &["1"], "ready", false, false, 1.0, 2).unwrap_err();
+    let err = run_watch(&b, &["1"], "ready", false, false, 2, |_| {}).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::OperationFailed);
 
     // --regex '(?i)ready': 大文字小文字無視は(?i)表現のみ → hit
-    let hit = run_watch(&b, &["1"], "(?i)ready", true, false, 1.0, 2).unwrap();
+    let hit = run_watch(&b, &["1"], "(?i)ready", true, false, 2, |_| {}).unwrap();
     assert_eq!(hit.matched_lines, vec!["READY".to_string()]);
 }
 
@@ -132,11 +142,11 @@ fn full_flag_passes_dump_screen_f_and_hits_full_only_line() {
     b.set_dump_full(term(1), "old READY in scrollback\n".into());
 
     // full=false: hitせず（max 1で即回数切れ）
-    let err = run_watch(&b, &["1"], "READY", false, false, 1.0, 1).unwrap_err();
+    let err = run_watch(&b, &["1"], "READY", false, false, 1, |_| {}).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::OperationFailed);
 
     // full=true: -f付き呼び出しでscrollback由来行にhit
-    let hit = run_watch(&b, &["1"], "READY", false, true, 1.0, 1).unwrap();
+    let hit = run_watch(&b, &["1"], "READY", false, true, 1, |_| {}).unwrap();
     assert_eq!(
         hit.matched_lines,
         vec!["old READY in scrollback".to_string()]
@@ -149,14 +159,21 @@ fn full_flag_passes_dump_screen_f_and_hits_full_only_line() {
 }
 
 /// polling loopの構造: attempt間にintervalのsleepを挟み、最終attempt後には
-/// sleepしない。試行回数はdump_screen呼び出し回数として計上され
-/// error.data.attempts_usedへ現れる（過不足pollなし）
+/// sleepしない（sleep呼び出し回数・値を注入クロージャで計上。REVIEW-1）。
+/// 試行回数はdump_screen呼び出し回数として計上されerror.data.attempts_usedへ
+/// 現れる（過不足pollなし）
 // [covers:watch.interval-sleep-and-attempt-count]
 #[test]
 fn interval_sleep_and_attempt_count() {
     let b = FakeBackend::new(vec![pane(1, "a", 0, 0), pane(2, "b", 0, 100)], vec![]);
-    // 未設定frame（SCREEN[...]固定）= 常にno hit
-    let err = run_watch(&b, &["1", "2"], "READY", false, false, 1.0, 2).unwrap_err();
+    // 未設定frame（SCREEN[...]固定）= 常にno hit。sleepは記録しつつ実sleepする
+    // （elapsed_secs >= intervalの検証のため）
+    let slept = std::cell::RefCell::new(Vec::new());
+    let recorder = |d: std::time::Duration| {
+        slept.borrow_mut().push(d);
+        std::thread::sleep(d);
+    };
+    let err = run_watch(&b, &["1", "2"], "READY", false, false, 2, recorder).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::OperationFailed);
     let data = err.data().expect("exhaust error data");
     assert_eq!(data["attempts_used"], 2);
@@ -166,6 +183,13 @@ fn interval_sleep_and_attempt_count() {
     // （interval x max = 2.0を大きくは超えない）
     assert!(elapsed >= 1.0, "elapsed: {elapsed}");
     assert!(elapsed < 3.0, "elapsed: {elapsed}");
+    // sleep呼び出しはattempt 1と2の間の1回のみ（値はintervalそのもの。
+    // 最終attempt後の過剰sleepなし）
+    assert_eq!(
+        slept.into_inner(),
+        vec![std::time::Duration::from_secs_f64(1.0)],
+        "sleep calls"
+    );
     // 各paneのdump呼び出しは2回（= max。最終attempt後の過剰pollなし）
     assert_eq!(b.dump_calls(&term(1)), 2);
     assert_eq!(b.dump_calls(&term(2)), 2);
@@ -187,7 +211,7 @@ fn pane_vanish_excluded_and_others_continue() {
         term(2),
         vec!["not yet".into(), "no".into(), "finally READY".into()],
     );
-    let hit = run_watch(&b, &["1", "2"], "READY", false, false, 1.0, 3).unwrap();
+    let hit = run_watch(&b, &["1", "2"], "READY", false, false, 3, |_| {}).unwrap();
     assert_eq!(hit.pane.id, term(2));
     assert_eq!(hit.attempts_used, 3);
     assert_eq!(

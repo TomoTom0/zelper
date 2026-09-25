@@ -620,7 +620,7 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 
 - grammar: `zelper watch [PANESPEC...] [--tab T] [--name N] [--command C] [--cwd D] [--all] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN`。PATTERNは`--`以降（`last = true`。sendの`-- TEXT`規則の流用）。**`--`分離は必須**（PANESPEC positionalとPATTERNが「数字1つ」等で衝突するため）で、v1はPATTERN数==1厳格・空pattern拒否（usage error, exit 2）。将来`-- PATTERN...`（any-match拡張）へwidenできるようVecで受ける
 - request: 対象（FilterArgs・read/sendと同一形・複数pane可・any-hit）+ PATTERN + 照合形式（`--regex`。大文字小文字無視は`(?i)`表現のみで`-i` flagは設けない）+ `--interval SECS`（f64・default 1.0・**1.0未満と非有限〔NaN/inf〕はusage error**）+ `--max N`（u32・default 30・最大試行回数。1以上）+ `--full`（dump-screen -f。readと同名同義）
-- 引数検証（違反はUsage exit 2。対象解決・polling開始より前）: pattern数==1 / pattern非空（空substringはcontains常真・空regexは全行matchのため即時偽hitになる） / interval >= 1.0かつ有限 / max >= 1 / `--regex`時の`regex::Regex::new`（compile error文を含む）
+- 引数検証（違反はUsage exit 2。対象解決・polling開始より前）: pattern数==1 / pattern非空（空substringはcontains常真・空regexは全行matchのため即時偽hitになる） / interval >= 1.0かつ有限・かつ`Duration`へ変換可能（巨大有限値〔例: 1e30〕も拒否。REVIEW-1） / max >= 1 / `--regex`時の`regex::Regex::new`（compile error文を含む）。app層引数検証はbackend初期化（version確認・session解決）の後に実行されるため、zellij不在時はexit 4（`ZellijUnavailable`）が引数不正（exit 2）に優先する（既存verbと同一の共通backend経路に従う）
 - 実行: polling loop（`dump-screen`反復。backend/trait無変更・loop実装はapp/watch.rs内部に閉じる。subscribeはv2差し替え候補として余地のみ）
   - 対象解決は開始時に1回（`list_panes` → build_spec → `selector::resolve` → TargetSet。0件はNoTarget exit 3）。毎poll再解決しない
   - attempt 1はt=0即時実行（sleepなし。既出テキスト即hit。`--full`時はscrollback込みの既出もhit）

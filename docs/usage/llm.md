@@ -43,7 +43,8 @@ zelper docs readme | llm usage|skill|snippet
 - `remap`: layout名 / `--path` / `--inline` の3sourceは相互排他
 - `add tab`: `--layout` / `--path` / `--inline` は相互排他
 - `send` / `add` のcommand textは `--` 以降（`last = true`。`--`より前のoptionと混在可）
-- `watch` のPATTERNは `--` 以降（v1はちょうど1件・空文字列拒否）。`--json` 等`--`より後ろはPATTERNと解釈されるためoptionは `--` の前に置く。`--interval` は1.0以上の有限値・`--max` は1以上・`--regex` のcompile errorはusage error
+- `watch` のPATTERNは `--` 以降（v1はちょうど1件・空文字列拒否）。`--json` 等`--`より後ろはPATTERNと解釈されるためoptionは `--` の前に置く。`--interval` は1.0以上の有限値（Durationへ変換不能な巨大値も拒否）・`--max` は1以上・`--regex` のcompile errorはusage error
+- 引数検証（usage error, exit 2）はapp層でbackend初期化（version確認・session解決）の後に行われるため、zellij不在時は引数不正より `ZellijUnavailable`（exit 4）が優先する（全verb共通）
 - `remove tab --empty` はTAB省略可。省略時は全空tab（selectable paneが0個のtab）が対象
 
 既定値: `add pane/tab --count 1`、`resize pane STEPS 1`、`watch --interval 1.0 --max 30`。

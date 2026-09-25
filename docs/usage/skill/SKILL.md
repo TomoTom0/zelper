@@ -53,7 +53,7 @@ zelper docs readme | llm usage|skill|snippet
 
 ## 出力とexit status
 
-`--json` は `schema_version:1` / `ok` / `data`（または `error.class`）を返す。multi-target操作は `results[]` にper-target結果を格納し、部分失敗を隠さない。
+`--json` は `schema_version:1` / `ok` / `data`（または `error.class`）を返す。multi-target操作は `results[]` にper-target結果を格納し、部分失敗を隠さない。`watch` のhit時は例外として `results[]` でなくhit pane単一のobject（`target` / `matched_lines` 等。障害paneは `pane_errors`）。回数切れはexit 5・一部pane消失はexit 6。
 
 ```text
 0 成功 / 2 usage / 3 対象解決失敗(no target|ambiguous) / 4 zellij不在|未サポートversion

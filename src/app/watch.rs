@@ -37,13 +37,19 @@ pub struct WatchHit {
 }
 
 pub fn run(backend: &dyn ZellijBackend, args: &WatchArgs) -> Result<(), ZelperError> {
-    let hit = execute(backend, args)?;
+    let hit = execute(backend, args, std::thread::sleep)?;
     report(&hit, args.json);
     Ok(())
 }
 
-/// polling loop本体（DD-15・TASK-87設計§2.6）。出力は行わない
-pub fn execute(backend: &dyn ZellijBackend, args: &WatchArgs) -> Result<WatchHit, ZelperError> {
+/// polling loop本体（DD-15・TASK-87設計§2.6）。出力は行わない。
+/// attempt間のsleepは引数経由で注入可能（prodはstd::thread::sleep・testは記録用。
+/// REVIEW-1: sleep位置〔初期sleepなし・最終attempt後なし〕のtest保証のため）
+pub fn execute<S: FnMut(Duration)>(
+    backend: &dyn ZellijBackend,
+    args: &WatchArgs,
+    mut sleep: S,
+) -> Result<WatchHit, ZelperError> {
     // 1. 引数検証（違反はUsage exit 2。対象解決・polling開始より前）
     if args.pattern.len() != 1 {
         return Err(ZelperError::new(
@@ -67,6 +73,10 @@ pub fn execute(backend: &dyn ZellijBackend, args: &WatchArgs) -> Result<WatchHit
             "--interval must be a finite number of seconds >= 1.0",
         ));
     }
+    // 有限かつ下限を満たしていてもDurationへ変換不能な巨大値（例: 1e30）は
+    // sleep時の変換panicを招くため引数検証の段階で拒否する（REVIEW-1）
+    let interval_dur = Duration::try_from_secs_f64(args.interval)
+        .map_err(|_| ZelperError::new(ErrorClass::Usage, "--interval is too large"))?;
     if args.max < 1 {
         return Err(ZelperError::new(
             ErrorClass::Usage,
@@ -148,7 +158,7 @@ pub fn execute(backend: &dyn ZellijBackend, args: &WatchArgs) -> Result<WatchHit
             break;
         }
         // attempt < max → 前poll終了後のsleep（drift許容）
-        std::thread::sleep(Duration::from_secs_f64(args.interval));
+        sleep(interval_dur);
     }
 
     // 4. 打ち切り（no hit）。pane障害なし/全pane障害はOperationFailed 5・

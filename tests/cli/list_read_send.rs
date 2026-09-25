@@ -45,6 +45,21 @@ if [[ "$3" == "action" ]]; then
           *) shift;;
         esac
       done
+      # pane毎のdump-screen呼出回数counter（FAKE_DUMP_SCREEN_FRAMES /
+      # FAKE_FAIL_DUMP_SCREEN_AFTERで使用。counter fileはshim内部管理）
+      cnt="${FAKE_LOG}.cnt.$pane"
+      n=0
+      [[ -f "$cnt" ]] && n=$(<"$cnt")
+      n=$((n + 1))
+      printf '%s' "$n" > "$cnt"
+      # FAKE_FAIL_DUMP_SCREEN_AFTER（pane:成功回数のspace区切りlist）に一致するpaneは
+      # 成功回数を超えた呼び出しから失敗させる（polling中のpane消滅模擬。REVIEW-1）
+      for spec in $FAKE_FAIL_DUMP_SCREEN_AFTER; do
+        if [[ "$spec" == "$pane:"* ]]; then
+          limit="${spec##*:}"
+          if (( n > limit )); then echo "boom" >&2; exit 1; fi
+        fi
+      done
       # FAKE_FAIL_DUMP_SCREEN（失敗させるpane idのspace区切りlist）に一致するpaneは
       # 失敗させる。未設定時は現行挙動のまま（後方互換）
       for fail in $FAKE_FAIL_DUMP_SCREEN; do
@@ -54,11 +69,6 @@ if [[ "$3" == "action" ]]; then
       # 応答を返す（@@ATTEMPT@@区切り。frame数を超えたら最終frameを継続。
       # watchの多attempt hit/exhaust再現。未設定時は従来の応答経路）
       if [[ -n "$FAKE_DUMP_SCREEN_FRAMES" ]]; then
-        cnt="${FAKE_LOG}.cnt.$pane"
-        n=0
-        [[ -f "$cnt" ]] && n=$(<"$cnt")
-        n=$((n + 1))
-        printf '%s' "$n" > "$cnt"
         printf '%s' "$FAKE_DUMP_SCREEN_FRAMES" | awk -v n="$n" '
           BEGIN { RS = "@@ATTEMPT@@" }
           { f[NR] = $0 }
@@ -853,8 +863,10 @@ fn watch_empty_pattern_is_usage_error() {
         .code(2);
 }
 
-/// intervalの下限と有限性: 1.0未満・NaN・無限大のいずれもUsage exit 2。
-/// 無限大はinterval >= 1.0の比較を通過するため有限性検査が独立した分岐
+/// intervalの下限と有限性: 1.0未満・NaN・無限大・Durationへ変換不能な巨大有限値
+/// （1e30）のいずれもUsage exit 2。無限大はinterval >= 1.0の比較を通過するため
+/// 有限性検査が、巨大有限値は下限・有限性の両検査を通過するためDuration変換検査が
+/// それぞれ独立した分岐（REVIEW-1）
 // [covers:watch.interval-lower-bound-usage]
 #[test]
 fn watch_interval_lower_bound_is_usage_error() {
@@ -863,6 +875,7 @@ fn watch_interval_lower_bound_is_usage_error() {
         ("watch-interval-05", "0.5"),
         ("watch-interval-nan", "nan"),
         ("watch-interval-inf", "inf"),
+        ("watch-interval-1e30", "1e30"),
     ] {
         let (mut cmd, _) = zelper(tag);
         cmd.args(["watch", "1", "--interval", val, "--", "READY"])
@@ -996,15 +1009,19 @@ fn watch_exhaust_is_operation_failed_with_attempts() {
 
 /// 回数切れ+一部pane障害の排他契約: 一部paneのdump失敗を伴う回数切れはexit 5で
 /// なくPartialFailure（exit 6）に分類され、失敗paneのみのresults[]をerror.dataへ
-/// 報告する
+/// 報告する。系列は条件書givenどおり「pane 1が途中（2回目の呼び出し）から失敗」
+/// （FAKE_FAIL_DUMP_SCREEN_AFTER=terminal_1:1・初回はframe応答で成功。REVIEW-1）
 // [covers:watch.exhaust-partial-failure]
 #[test]
 fn watch_exhaust_with_pane_failure_is_partial_failure() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
     let (mut cmd, _) = zelper("watch-exhaust-partial");
     let out = cmd
-        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1")
-        .env("FAKE_DUMP_SCREEN", "still building")
+        .env("FAKE_FAIL_DUMP_SCREEN_AFTER", "terminal_1:1")
+        .env(
+            "FAKE_DUMP_SCREEN_FRAMES",
+            "attempt1 ok@@ATTEMPT@@attempt2 ok",
+        )
         .args([
             "watch",
             "1",
