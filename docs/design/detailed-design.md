@@ -628,7 +628,7 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
   - **add session×remap合成の注意**: 作成直後のpane 0件・空sessionに対するremapになる（remapのM=0系挙作——`remap-sequence.new-tab-only-needs-no-companion`（M=0・k=1・companion不使用）・`layout-planner.r7-empty-session-all-slots-empty`（M=0: k=1・全tab全slot空）——のとおり、k=1・全slotが既定shellの適用になる）。first attach後の具現化paneをsourceにしたい場合はattach後にremapすること
 - dry-run対象外（DD-12）。attach/detach/add sessionともに状態変更前のfail-fast（TTY検証・同名事前確認）を除けば単一backend呼び出しで、snapshotは取得しない
 
-
+## DD-15. `watch` 操作設計（TASK-86・2026-09-25追加。TASK-87設計書が元）
 
 - grammar: `zelper watch [PANESPEC...] [--tab T] [--name N] [--command C] [--cwd D] [--all] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN`。PATTERNは`--`以降（`last = true`。sendの`-- TEXT`規則の流用）。**`--`分離は必須**（PANESPEC positionalとPATTERNが「数字1つ」等で衝突するため）で、v1はPATTERN数==1厳格・空pattern拒否（usage error, exit 2）。将来`-- PATTERN...`（any-match拡張）へwidenできるようVecで受ける
 - request: 対象（FilterArgs・read/sendと同一形・複数pane可・any-hit）+ PATTERN + 照合形式（`--regex`。大文字小文字無視は`(?i)`表現のみで`-i` flagは設けない）+ `--interval SECS`（f64・default 1.0・**1.0未満と非有限〔NaN/inf〕はusage error**）+ `--max N`（u32・default 30・最大試行回数。1以上）+ `--full`（dump-screen -f。readと同名同義）
