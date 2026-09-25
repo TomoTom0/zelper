@@ -12,9 +12,9 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（16 file・201条件）
+## 条件書一覧（17 file・217条件）
 
-verified列はmeta検証記録（verified = true）の実績値（backend-parserのみsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
+verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。watchはTASK-86手順2のtest先行プロセスで実装前に作成したためfalse）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -34,6 +34,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 14 | remap-cli | src/app/remap.rs | cli_remap（15件） | 15 | true |
 | 15 | docs-verb | src/app/docs.rs | cli_docs（7件） | 7 | true |
 | 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（7件） | 7 | true |
+| 17 | watch | src/app/watch.rs | fake_watch（実装予定。TASK-86） | 16 | false（実装前） |
 
 source_fileの代表とnote欄記載の対応（設計書§2.2）:
 

@@ -1,0 +1,198 @@
+# watch操作（src/app/watch.rs）の検証条件。出典: TASK-87設計書（tmp/tasks/tm-87/design_verb-extension.md）§1.4・§2.6・§4.1-4.3・§5.1 + 要件P1（docs/design/first/260821/requirements.md §4）
+# 対応test: fake_watch（tests/fake_backend/watch.rs想定・Cargo.toml [[test]]追加予定）+ cli shim拡張（FAKE_DUMP_SCREEN_FRAMES）。1条件=1 test fnの1:1対応（設計書§2.3/3.4）
+# watchのgrammar級条件（Verb::Watch構文・排他・help出現・-i不在）はcli-grammar.toml拡張へ、配布物docs記載はdocs-verb.toml拡張へ、設計§5.1どおりTASK-86実装時に条件化予定（本file対象外）
+[meta]
+feature = "watch"
+source_file = "src/app/watch.rs"
+verified = false
+verified_at = ""
+verified_by = ""
+test_command = ""
+source_hash = ""
+note = "src/cli.rs（Verb::Watch定義・--分離/last=true受付）も検証対象。TASK-86手順2（test先行）で実装前に作成: 条件16件 = 設計§5.1計画13件 + 計画外追加3件（no-target-exit3・interval-sleep-and-attempt-count・exhaust-all-pane-failure-exit5。§4.1要求行と§2.6 step2/3c要求に基づく）。source_linesは実装予定test file（fake_watch想定）の概略placeholderで、test実装後にverify scriptがtag走査結果へ書き戻す。出典の設計書はTASK-86 docs更新でDD-15へ移行予定（設計§6）"
+
+[[condition]]
+id = "watch.pattern-count-usage"
+source_lines = "tests/fake_backend/watch.rs:20"
+target_function = "watch::run（引数検証: pattern数）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（PATTERNは--以降。v1はPATTERN数==1厳格〔usage error〕。--分離必須はPANESPEC positionalとの衝突回避） + §2.6 step1（pattern.len()==1検証。違反はUsage exit 2） + §4.1（引数違反〔pattern数〕 = Usage 2）"
+description = "watchのpattern数検証: v1はPATTERN数==1を厳格に要求する。0件（--の省略時はPATTERNがPANESPECとして解釈されるため結果的にpattern 0件）と2件以上はUsage exit 2で拒否する。--分離必須の文法要求がこの検証として現れる（将来のPATTERN複数指定拡張時に本条件は置換対象）"
+given = "fake backend（terminal_1が存在）に対する、PATTERN 0件（--以降にpatternを取らない指定。--全体の省略形を含む）とPATTERN 2件（READY GO相当の2語指定）の各watch実行"
+expect_return = "いずれもUsage error（exit 2）"
+
+[[condition]]
+id = "watch.empty-pattern-usage"
+source_lines = "tests/fake_backend/watch.rs:50"
+target_function = "watch::run（引数検証: 空pattern）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step1（pattern[0]が空でない（空文字列はcontains(空文字列)常真・空regexも全行matchのため即時偽hitになる → Usage exit 2）） + §5.1 watch.toml条件計画（レビュー修正の空pattern条件: 空PATTERN（substring・--regex両方） → Usage exit 2〔即時偽hit防止〕）"
+description = "空文字列PATTERNの拒否: substring・--regex両形式とも空patternは全行matchの即時偽hitになるため、polling開始前にUsage exit 2で拒否する（即時偽hit防止が目的）。pattern数は正しくとも内容が空な場合の検証でありpattern-count-usageと独立"
+given = "fake backend（terminal_1が存在）に対する、空文字列PATTERNのsubstring指定と--regex指定の各watch実行"
+expect_return = "いずれもUsage error（exit 2）"
+
+[[condition]]
+id = "watch.interval-lower-bound-usage"
+source_lines = "tests/fake_backend/watch.rs:80"
+target_function = "watch::run（引数検証: interval）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--interval SECS: f64・default 1.0・1.0未満はusage error exit 2〔user確定〕。NaN/infも拒否） + §2.6 step1（interval >= 1.0 かつ有限） + §4.1（引数違反〔interval<1〕 = Usage 2）"
+description = "intervalの下限と有限性の検証: 1.0未満・NaN・無限大のいずれもUsage exit 2。無限大はinterval >= 1.0の比較を通過するため有限性検査が独立した分岐であり、3値を1条件で検証する"
+given = "fake backend（terminal_1が存在）に対する、--interval 0.5・--interval nan・--interval infの各watch実行（patternはREADY）"
+expect_return = "いずれもUsage error（exit 2）"
+
+[[condition]]
+id = "watch.max-lower-bound-usage"
+source_lines = "tests/fake_backend/watch.rs:110"
+target_function = "watch::run（引数検証: max）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--max N: u32・default 30・1以上〔0はusage error〕。「最大試行回数」の意味をhelpに明記） + §2.6 step1（max >= 1） + §4.1（引数違反〔max<1〕 = Usage 2）"
+description = "maxの下限検証: 最大試行回数0はUsage exit 2（1以上の正整数のみ受理）。0の受理は常にno-hit即打ち切りの無意味操作になるため引数段階で拒否する"
+given = "fake backend（terminal_1が存在）に対する--max 0のwatch実行（patternはREADY）"
+expect_return = "Usage error（exit 2）"
+
+[[condition]]
+id = "watch.regex-compile-usage"
+source_lines = "tests/fake_backend/watch.rs:140"
+target_function = "watch::run（引数検証: --regex compile）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--regex: opt-in。compile errorはusage error exit 2） + §2.6 step1（--regex時 regex::Regex::new。違反はUsage exit 2。regex compile error文を含める） + §4.1（引数違反〔regex compile〕 = Usage 2）"
+description = "--regex指定時のcompile検証: 正規表現として不正なpatternはwatch開始（対象解決・polling）前にUsage exit 2で失敗し、error文にregex compile errorの内容を含む。polling開始後の失敗でなく事前検証であることを担保する"
+given = "fake backend（terminal_1が存在）に対する、--regex指定かつcompile不正なpattern（閉じ括弧を欠く [invalid 等）のwatch実行"
+expect_return_shape = "Usage error（exit 2）かつerror文にregex compile error（不正箇所）が含まれる"
+
+[[condition]]
+id = "watch.no-target-exit3"
+source_lines = "tests/fake_backend/watch.rs:170"
+target_function = "watch::run（対象解決）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step2（対象解決（1回のみ）: list_panes → build_spec → selector::resolve → TargetSet（0件はNoTarget exit 3）） + §4.1（対象0件 = NoTarget 3）"
+description = "watchの対象解決の負荷側: 存在しないpane ID指定（対象0件）はpolling開始前にNoTarget（exit 3）で失敗する。設計§5.1の条件計画に掲載がないが§4.1の要求行であり、readのread-nonexistent-pane-is-no-target-exit3と対になるため計画外追加"
+given = "fake backend（terminal_1・terminal_2が存在）に対する、不在pane ID（999）指定のwatch実行（patternはREADY）"
+expect_return = "NoTarget（exit 3）"
+
+[[condition]]
+id = "watch.any-hit-multi-pane"
+source_lines = "tests/fake_backend/watch.rs:200"
+target_function = "watch::run（loop照合: any-hit）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（対象はFilterArgs（read/sendと同一形・複数pane可・any-hit）） + §2.6 step3a/3b（各paneをTargetSetのvisual order順に照合・hitあり → 即終了（exit 0）。hit paneはvisual order順の最初） + §4.2（watch hit報告はhit pane単一のobject。DD-4.2のmulti-target操作はdata.results[]とする一般規定に対する例外〔DD-15へ明記予定〕） + §5.1（any-hit-multi-pane）"
+description = "複数対象のany-hit契約: いずれかのpaneでhitすれば全体としてhitする。後続attemptで2 pane目のみhitする系列は当該paneを報告し、同一attemptで複数paneがhitする系列はvisual order最初のpaneを報告する（決定論的tie-break。引数順でない）。hit報告はresults[]でなくhit pane単一のobject。両系列を1条件で検証する"
+given = "fake backend（2 pane。frame構成: 後続attemptでpane 2のみがpatternを含む系列と、attempt 1から両paneがpatternを含む系列〔引数順とvisual順が逆になる指定〕）"
+expect_return_shape = "両系列ともexit 0。前者のdata.targetはhitしたpane 2、後者のdata.targetはvisual order最初のpane（引数順でない）"
+
+[[condition]]
+id = "watch.t0-immediate-first-poll"
+source_lines = "tests/fake_backend/watch.rs:230"
+target_function = "watch::run（loop照合: attempt 1即時実行）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6（attempt 1はt=0即時実行（既出テキスト即hit仕様。--full時はscrollback含む既出もhit） + step3a（substring: テキストの行にcontains(pattern)）） + §5.1（t0-immediate-first-poll: attempt 1即時・既出テキストで即hit〔attempts_used=1〕）"
+description = "attempt 1の即時実行と既出テキスト即hit: 初期sleepなしでattempt 1が実行され、watch開始前から存在するテキスト（既出）で即hitする（attempts_used=1・dump呼び出し1回）。照合が行単位のcontains（行全体一致でなく部分一致）であることを併せて検証する"
+given = "fake backend（dump_screenの初回応答から、行の途中にpatternを含むframeを返す構成）に対するwatch実行（patternは当該行の部分文字列）"
+expect_return_shape = "exit 0（hit）かつattempts_used = 1・各paneのdump_screen呼び出しは1回のみ（初期sleepなし）・matched_linesはpatternを含む行全体"
+
+[[condition]]
+id = "watch.regex-opt-in"
+source_lines = "tests/fake_backend/watch.rs:260"
+target_function = "watch::run（loop照合: --regex）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--regex: opt-in。大文字小文字無視は(?i)で表現（-i flagは設けない）） + §2.6 step3a（regex: 行単位に regex.is_match） + §5.1（regex-opt-in: (?i)readyで大小区別hit・無指定ではhitしない）"
+description = "--regexのopt-in契約: 無指定時の照合は固定substring（大文字小文字区別）で、--regex指定で初めて正規表現照合（大文字小文字無視は(?i)表現のみ）になる。既定照合がsubstringであることと--regex時のregex照合を1条件で検証する"
+given = "fake backend（dump内容がREADY〔大文字〕で、patternにready〔小文字〕を指定）に対する、--regex '(?i)ready'指定と無指定の各watch実行"
+expect_return_shape = "--regex '(?i)ready'はexit 0（hit）。無指定はhitせず回数切れ（exit 5）"
+
+[[condition]]
+id = "watch.full-flag"
+source_lines = "tests/fake_backend/watch.rs:290"
+target_function = "watch::run → ZellijBackend::dump_screen（full転送）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--full: dump-screen -f（scrollback込み。readと同名同義）） + §2.6 step3a（dump_screen(pane, full)）と冒頭（--full時はscrollback含む既出もhit） + §5.1（full-flag: dump_screen(full=true)呼出検証）"
+description = "--full指定時のbackend転送: watchのdump_screen呼び出しがfull=true（dump-screen -f）付きに変わること。scrollback込み取得はzellij側機能のためzelperは照合対象テキストを-f付き取得へ切替えるのみ（readのread-full-passes-dump-screen-fと同一契約）。-f応答にのみ存在する行（scrollback由来）でhitすることで転送と照合の両方を観察する"
+given = "fake backend（dump_screenのfull=true検出時のみscrollback由来行を含む応答を返し、全呼び出しを記録）に対する--full指定のwatch実行（patternはfull応答にのみ存在する行の内容）"
+expect_return = "exit 0（hit）かつdump_screenがfull=true付きで呼ばれ、full応答にのみ存在する行でhitする"
+
+[[condition]]
+id = "watch.interval-sleep-and-attempt-count"
+source_lines = "tests/fake_backend/watch.rs:320"
+target_function = "watch::run（polling loop）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step3c（attempt < max → sleep(interval)（前poll終了後のsleep。drift許容）→ 次attempt） + §4.2（data/error.dataのattempts_used・elapsed_secs） + §5.3（watchのtestは--max 1〜2・--interval 1で実行時間を抑制〔interval下限1s仕様の帰結〕）"
+description = "polling loopの構造: attempt間にintervalのsleepを挟み（初期sleepなしはt0-immediate-first-pollが担保）、最終attempt後にはsleepしない。試行回数はdump_screen呼び出し回数として計上されattempts_usedへ現れる（過不足pollなし）。設計§5.1の条件計画に個別掲載がないため計画外追加（polling系: interval sleep・試行回数計上）"
+given = "fake backend（常にno hitのframe構成・呼び出し記録・経過時間計測）に対する--interval 1 --max 2のwatch実行"
+expect_return_shape = "回数切れ（exit 5）かつ各paneのdump_screen呼び出しが2回（= max。最終attempt後の過剰pollなし）・error.data.attempts_used = 2・elapsed_secs >= 1.0（attempt間sleepあり）かつinterval×maxを大きく超えない（最終attempt後にsleepしない）"
+
+[[condition]]
+id = "watch.pane-vanish-continue"
+source_lines = "tests/fake_backend/watch.rs:350"
+target_function = "watch::run（dump失敗paneの除外と継続）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step3a（dump失敗（pane消滅等）: 当該paneを以後のattemptから除外し pane_errors へ記録（他paneは継続）） + step2（対象解決（1回のみ）: 毎poll再解決しない） + §4.2（hit dataのpane_errors） + §5.1（pane-vanish-continue）"
+description = "polling中のpane障害の扱い: dump_screen失敗paneは以後のattemptから除外され（失敗後の再pollなし）、他paneのpollingは継続される。障害はpane_errorsへ記録され、生存paneでのhitが優先される（hit時もexit 0でpane_errorsを併記）。対象解決が開始時1回であることはlist_panes呼び出し回数1で観察する。回数切れ時のexit分類（6/5）はexhaust-partial-failure・exhaust-all-pane-failure-exit5が担保する"
+given = "fake backend（2 pane。pane 1は途中のattemptからdump_screenが失敗〔pane消滅模擬〕・pane 2は後続attemptでhitするframe構成・list_panes/dump呼び出し記録）"
+expect_return_shape = "exit 0（pane 2のhit）かつpane 1の失敗以降の同paneへのdump呼び出しなし・pane 2は継続pollされhit・data.pane_errorsにpane 1が記録・list_panes呼び出しは1回（開始時のみ）"
+
+[[condition]]
+id = "watch.hit-exit0-output"
+source_lines = "tests/fake_backend/watch.rs:380"
+target_function = "watch::run（hit報告出力）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §4.2（watch hitの成功data: target・pattern・regex・attempts_used・elapsed_secs・matched_lines・pane_errors。envelopeはDD-4.2共通） + §4.3（watch hit: readと同型のpane header（=== pane_id (title, tab:POS NAME) ===）+ match行すべて） + §5.1（hit-exit0-output: exit 0・human/JSON形状〔matched_lines含む〕）"
+description = "hit時の出力契約: exit 0で、JSONはdataに7 field（target/pattern/regex/attempts_used/elapsed_secs/matched_lines/pane_errors）を持ち、humanはread同型のpane識別ヘッダー行+match行すべてを出力する。matched_linesはhit pane内のmatch行すべてを含む（2行matchで検証）。envelope全体（schema_version/ok）はjson-contract条件書の共通契約のため本条件はdata内部とhuman形式を対象とする"
+given = "fake backend（2行がpatternにmatchするframe構成）に対する、--json指定とhuman（--jsonなし）の各watch実行"
+expect_return_shape = "両形式ともexit 0。--jsonはdataに上記field群を持ちmatched_linesはmatch行両方を含む。humanは === pane_id (title, tab:POS NAME) === 形式のヘッダー行とmatch行両方を含む"
+
+[[condition]]
+id = "watch.exhaust-operationfailed"
+source_lines = "tests/fake_backend/watch.rs:410"
+target_function = "watch::run（回数切れ: pane障害なし）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step4（打ち切り（no hit）: pane_errors空 → OperationFailed exit 5） + §4.1（回数切れ（pane障害なし） = OperationFailed 5） + §4.2（error envelope: error.dataにattempts_used・elapsed_secs・pattern。message例: pattern not found within 30 attempts (~30s)） + §5.1（exhaust-operationfailed）"
+description = "回数切れ（pane障害なし）の失敗契約: max到達no hitはOperationFailed（exit 5）で、error.dataにattempts_used・elapsed_secs・patternを報告する（PartialFailure〔exit 6〕との排他の基準側）。test実行時間抑制のためmaxは小値で検証する（設計§5.3）"
+given = "fake backend（常にno hitのframe構成）に対する--max 2のwatch --json実行"
+expect_return_shape = "exit 5（OperationFailed）かつerror.class = OperationFailed・error.data.attempts_used = 2・error.data.pattern = 指定pattern・error.data.elapsed_secsが存在"
+
+[[condition]]
+id = "watch.exhaust-partial-failure"
+source_lines = "tests/fake_backend/watch.rs:440"
+target_function = "watch::run（回数切れ: 一部pane障害）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step4（一部pane error → PartialFailure exit 6） + §4.1（回数切れ + 一部pane障害 = PartialFailure 6） + §4.2（PartialFailure時はerror.data.results[]（TargetedResult・失敗paneのみ）） + §5.1（exhaust-partial-failure）"
+description = "回数切れ+一部pane障害の排他契約: 一部paneのdump失敗を伴う回数切れはexit 5でなくPartialFailure（exit 6）に分類され、失敗paneのみのresults[]（TargetedResult）をerror.dataへ報告する（readのread-partial-failure-exit6と対になる。pane障害時の除外・継続挙動自体はpane-vanish-continueが担保する）"
+given = "fake backend（2 pane。pane 1は途中からdump_screenが失敗・pane 2は常にno hitのframe構成）に対する--max 2のwatch --json実行"
+expect_return_shape = "exit 6（PartialFailure）かつerror.data.results[]は失敗pane（pane 1）のみを含む"
+
+[[condition]]
+id = "watch.exhaust-all-pane-failure-exit5"
+source_lines = "tests/fake_backend/watch.rs:470"
+target_function = "watch::run（回数切れ: 全pane障害）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step4（全pane error → OperationFailed exit 5） + §4.1（全pane障害 = OperationFailed 5）"
+description = "全pane障害の分類: 対象全paneのdump_screenが失敗する系列はPartialFailure（exit 6）でなくOperationFailed（exit 5）。一部=6・全て=5の失敗範囲集計判定が独立した分岐であるためexhaust-partial-failureと別条件で検証する（readのread-all-failure-exit5と対になる。設計§5.1の条件計画に個別掲載がないが§4.1の要求行のため計画外追加）"
+given = "fake backend（2 pane。両paneともdump_screenが失敗する構成）に対する--max 2のwatch --json実行"
+expect_return_shape = "exit 5（OperationFailed。PartialFailure〔exit 6〕でない）"
+
+[[excluded]]
+item = "watch照合テキストへのANSI除去（CSI/OSC）正規化（normalize_for_match）の導入"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6（M7でANSI escape含有が確認された場合のみ、ANSI除去正規化をwatch照合にのみ導入する条件付き規定） + tmp/tasks/tm-86/m7_result.log（M7実測証跡） + TASK-86 body手順1（2026-09-25）"
+reason = "M7実測（2026-09-25・zellij 0.44.3・podman sandbox）でdump-screen出力にANSI escape混入なしと確認（全dumpでESC(0x1b) byte count 0。色消去・cursor移動は最終grid状態へ解消・OSC 8 link除去・行末空白trim・wrap join）。設計が定めた導入条件（escape含有の確認）が不成立のため、normalize_for_matchはv1で不導入・dump-screen生テキスト直接照合に確定（TASK-86 body手順1）。正規化挙動が実装に存在しないため条件化対象外（read出力への同一正規化は設計上も別変更・本設計範囲外）"
+decided_at = "2026-09-25"
+decided_by = "claude"
+
+[[excluded]]
+item = "watch対象解決におけるfilter flags（--tab/--name/--command/--cwd/--all）個別の解決条件"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（対象はFilterArgs（read/sendと同一形）） + §2.6 step2（list_panes → build_spec → selector::resolve → TargetSet）"
+reason = "filter解決はread/sendと同一の共通経路（selector）でwatch固有の分岐ではない。read-send.toml（read-single-and-multi-results・read-nonexistent-pane-is-no-target-exit3）とselector.tomlが共通機構を担保済みのため、watch.tomlはPANESPEC複数指定（any-hit-multi-pane）と対象0件（no-target-exit3）のみ条件化し、filter flag個別の再条件化は重複として除外"
+decided_at = "2026-09-25"
+decided_by = "claude"
+
+[[excluded]]
+item = "中断条件がhit/exhaustのみであること（SIGINT/Ctrl+Cのdefault終了・進捗表示なし）"
+source = "tmp/tasks/tm-87/design_verb-extension.md §2.6（中断条件はhit/exhaustのみ。SIGINT/Ctrl+Cはdefault終了（foreground）。進捗表示なし）"
+reason = "いずれも実装分岐を伴わない消極規定（SIGINTはsignal handlingを行わないOS default終了・進捗表示は出力を行わないという規定）で、粒度基準（test-structure skill §8）の書かない分類（挙動に差を生まない内部処理）に相当しtest対象の分岐が存在しない。完了時の出力契約はhit-exit0-output・exhaust系条件が担保する"
+decided_at = "2026-09-25"
+decided_by = "claude"
+
+[[excluded]]
+item = "--interval default 1.0・--max default 30の既定値指定での挙動"
+source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--interval SECS: f64・default 1.0 / --max N: u32・default 30）"
+reason = "既定値はclapの定数宣言で独立した挙動分岐を構成しない。default max=30での回数切れ実測は30sを要し設計§5.3のtest実行時間抑制（--max 1〜2・--interval 1）に反する。loop構造と値の効果（sleep間隔・試行回数）は明示値によるinterval-sleep-and-attempt-count・exhaust系条件が担保するため、既定値自体の条件化は除外"
+decided_at = "2026-09-25"
+decided_by = "claude"
+
+[[excluded]]
+item = "wait semanticsのうちpane output監視以外の分（run block系のprocess終了待ち・state監視）"
+source = "docs/design/first/260821/requirements.md §4 P1（watch/wait semantics for pane output or state） + tmp/tasks/tm-87/design_verb-extension.md §6（P1 L286のwatch（pane output）をP0相当へ昇格（wait semantics（run block系）はP1分離））・§8 TASK-86手順7（run block系wait semanticsは要件P1留保のまま別管理）"
+reason = "TASK-86の対象は要件P1のうちpane output監視（watch）のみ。run block系wait semanticsはP1留保のまま別管理のためwatch verb v1の条件化対象外"
+decided_at = "2026-09-25"
+decided_by = "claude"
+
+[[excluded]]
+item = "watch v2のsubscribe差し替え（zellij subscribe streaming受信）とM10実測項目"
+source = "tmp/tasks/tm-87/design_verb-extension.md 前提3（subscribeはv2差し替え候補として余地のみ残す） + §2.3（watchはtrait変更なし。v2 subscribe差し替えに備えloop実装はapp/watch.rs内部に閉じる） + §7 M10"
+reason = "v1はpolling実装（dump-screen反復・backend無変更）で確定しており、subscribe経路はv2設計課題（M10は低優先・TASK-86 v2消費）。v1条件書の対象外"
+decided_at = "2026-09-25"
+decided_by = "claude"
