@@ -8,12 +8,24 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-// stdはfd複製（dup）・差し替え（dup2）を公開していないため、zelperが既にlink
-// 済みのシステムlibcの該当関数を直接宣言する（依存追加を避ける。TASK-89）
+// stdはfd差し替え（dup2）・close-on-exec付き複製（fcntl F_DUPFD_CLOEXEC）・
+// signal disposition変更を公開していないため、zelperが既にlink済みのシステム
+// libcの該当関数を直接宣言する（依存追加を避ける。TASK-89）
 unsafe extern "C" {
-    fn dup(oldfd: std::os::fd::RawFd) -> std::os::fd::RawFd;
     fn dup2(oldfd: std::os::fd::RawFd, newfd: std::os::fd::RawFd) -> std::os::fd::RawFd;
+    fn fcntl(
+        fd: std::os::fd::RawFd,
+        cmd: std::os::raw::c_int,
+        ...
+    ) -> std::os::raw::c_int;
+    fn signal(signum: std::os::raw::c_int, handler: usize) -> usize;
 }
+
+/// fcntl(2)のF_DUPFD_CLOEXEC（Linux。REVIEW-2指摘2: 複製fdに原子的に
+/// close-on-execを付ける。dup(2)の戻り値はCLOEXECなしで子へ漏れるため不使用）
+const F_DUPFD_CLOEXEC: std::os::raw::c_int = 1030;
+const SIGINT: std::os::raw::c_int = 2;
+const SIG_IGN: usize = 1;
 
 /// 実zellij実行backend（DD-3.1）: 常に `zellij --session NAME action ...` 形式。
 /// argv配列で実行し（shellを経由しない）、1呼び出しのtimeoutを持つ。
