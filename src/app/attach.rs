@@ -5,7 +5,11 @@ use crate::zellij::ZellijBackend;
 /// 対話attach（DD-14）。TTY検証（stdin・stdout両方）はzellij起動前にfail-fast
 /// する。検証と本体は`run_attach_inner`へ分離し、testはtty_ok引数で注入する
 /// （設計§2.5/§5.2）
-pub fn run_attach(backend: &dyn ZellijBackend, session: &str, json: bool) -> Result<(), ZelperError> {
+pub fn run_attach(
+    backend: &dyn ZellijBackend,
+    session: &str,
+    json: bool,
+) -> Result<(), ZelperError> {
     use std::io::IsTerminal;
     let tty_ok = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     run_attach_inner(backend, session, json, tty_ok)
@@ -36,7 +40,11 @@ pub fn run_attach_inner(
 /// 対象sessionのattach clientをdetach（DD-14）。`--session NAME action detach`
 /// wrapで、zellijのaction detachはclient不在でもrc=0 silent（M3 (b)実測）の
 /// ため、client数を検査せずrc=0を無条件で成功扱いする（no-op成功をerrorとしない）
-pub fn run_detach(backend: &dyn ZellijBackend, session: &str, json: bool) -> Result<(), ZelperError> {
+pub fn run_detach(
+    backend: &dyn ZellijBackend,
+    session: &str,
+    json: bool,
+) -> Result<(), ZelperError> {
     backend.detach_session()?;
     println!("{}", detach_report(session, json));
     Ok(())

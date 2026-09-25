@@ -9,10 +9,10 @@
 ### 1.1 凍結されたtop-level verb set（v1）
 
 ```text
-list  read  send  rename  resize  remap  add  remove  watch
+list  read  send  rename  resize  remap  add  remove  attach  detach  watch
 ```
 
-（`watch`はTASK-86・2026-09-25 user指示により追加〔TASK-87設計〕。操作設計はDD-15。verb set v2=12への改訂条文の適用はTASK-88が担うため本節の政策条文は改訂時点まで未適用）
+（`watch`はTASK-86・`attach`/`detach`はTASK-89・いずれも2026-09-25 user指示により追加〔TASK-87設計〕。操作設計はそれぞれDD-15・DD-14。verb set v2=12への改訂条文の適用はTASK-88が担うため本節の政策条文は改訂時点まで未適用）
 
 例外的にtop-levelに許容する非verbコマンド: `completion`（shell補完生成。`zelper completion bash|zsh|fish`）。helpの発見性目的で、文書化された例外として扱う。`docs`（agent向け配布物の出力。`zelper docs readme | llm usage|skill|snippet`）も同様の文書化された例外（配布物の取り出し経路。zellij sessionに触れない純粋出力）。
 
@@ -23,7 +23,7 @@ verb setの拡張方針（TASK-72・2026-09-19確定）: verb setは基準付き
 3. 対話操作の複製でない
 4. 共有契約（JSON envelope・exit status・dry-run方針）を継承する
 
-明示的除外（TASK-72棚卸しで確定）: `attach`本体・`watch`等のUI継続コマンド、scroll/theme/focus/move系等の対話的に容易な操作の一対一wrapはzelperが提供しない（agentは外部から構造化操作を行う前提。画面読み取りはread、継続監視は将来のwatch/wait semantics〔要件P1〕が担う）。zellij操作の全未カバー項目の分類と見送り理由の詳細はTASK-72（tm）に記録する。（`watch`は2026-09-25 user指示により除外から昇格しTASK-86で実装済み。DD-15参照）
+明示的除外（TASK-72棚卸しで確定）: `attach`本体・`watch`等のUI継続コマンド、scroll/theme/focus/move系等の対話的に容易な操作の一対一wrapはzelperが提供しない（agentは外部から構造化操作を行う前提。画面読み取りはread、継続監視は将来のwatch/wait semantics〔要件P1〕が担う）。zellij操作の全未カバー項目の分類と見送り理由の詳細はTASK-72（tm）に記録する。（`watch`は2026-09-25 user指示により除外から昇格しTASK-86で実装済み。DD-15参照。`attach`/`detach`も同日指示により除外から昇格しTASK-89で実装済み——session lifecycle・human handoff・非対話作成経路（`add session`）の提供が対話複製を超える付加価値となるため。DD-14参照）
 
 ### 1.2 構文木（全体）
 
@@ -164,6 +164,7 @@ identity規則: pane IDを主キーとする（0.44.0以降リサイクルなし
 - 実行形式: 常に `zellij --session <NAME> action <ACTION> [args]`（`action --session`は構文errorのため使わない。実機確認済み）
 - argv配列でのsubprocess実行（shellを経由しない。`--layout-string`のKDLにquote問題を持ち込まない）
 - 1呼び出しごとにtimeout（既定10秒、subscribeのみストリーム扱いでv1では未使用。`pipe_plugin`はblockし得るためtimeout必須）
+- **例外: 対話client（attach。DD-14・TASK-89）は`run_interactive()`で実行**。stdioはinherit×3（stdin/stdoutはzelperのfdをそのまま継承。stderrは起動前に親自身のfd 2を一時的なcapture fileへ差し替えた上で継承し、親子で同一fd targetを保つ——captureしたstderrは子終了後に本来のstderrへ転写され、非zero終了時のerror messageへ埋め込まれる。`backend-process.nonzero-exit-operation-failed`と同一規則で、不在session時のzellij側error〔Session not found + 稼働session候補〕をJSON経路にも届けるため）。timeoutは無効（対話sessionは時間無制限が本質で、run()のtimeoutで打ち切られるべきでない）。**既存run()は無変更**（watchのdump-screen反復もrun()のtimeout内で完結するため流用）
 - `zellij --version`を起動時にparse。**最小サポート0.44.3**（DD-10 v2改訂に伴い引き上げ。全実機検証（S1〜S10・E6）が0.44.3、companion pluginのzellij-tile pinと同version、0.44.1/0.44.2の単体検証実績なし。詳細はDD-10.2 #12・compatibility policy（3.5））。未満、または実証済みmajor系列（0.44.x）を超える未来versionは unsupported version error
 
 ### 3.2 typed interface（trait。fake実装と差し替え可能）
@@ -616,7 +617,18 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 - **自spawn複製paneのclose（TASK-81）**: 要件2.6 kill/recreate禁止（L93相当項）の適用対象は「remap実行開始前のlist-panesに存在したpane」であり、**zelperが当該実行内にrun一致不成立でspawnした複製pane（実行開始前snapshotに存在しないid・安定観測後・対応規則〔exited/held化したdupを含む。DD-10.7 step 6多段規則〕でdupと特定されたもの）のcloseは自己副作用の除去としてkill制約の対象外**と定義する。closeしたpane id・対応slot・理由は成功・失敗双方のJSON data（`closed_duplicates[]`）とhuman出力で報告する（報告義務。DD-10.9）
 - 廃止optionのtest固定（設計レビューR6。TASK-43で即時削除に方針変更）: `--session-scope` / `--overflow nest|tabs` はv0.1.xで削除済み。指定はusage error（exit 2・clap経由のstderr出力。`--json`併用時もstdoutには何も出ない）であることと、clap helpに出現しないことをtestで固定する
 
-## DD-15. `watch` 操作設計（TASK-86・2026-09-25追加。TASK-87設計書が元）
+## DD-14. `attach` / `detach` / `add session` 操作設計（session lifecycle。TASK-89・2026-09-25追加。TASK-87設計書が元）
+
+- grammar: `zelper [--session NAME] attach [--json]` / `zelper [--session NAME] detach [--json]` / `zelper add session NAME [--json]`。attach/detachのsession解決は--session共通（DD-1.2）。**`add session`のみ例外dispatch**: 対象session解決（mk_backend）を経ず、`list sessions`（ListResource::Sessions）と同一のprobe backend（`ZellijCliBackend::new("zelper-probe-unused")` + check_capability）を直接構築する（sessionが1つも存在しない環境——add sessionの主要ユースケース——でも作成が成立するため。共通経路のまま実装するとresolve_sessionがNoTargetで失敗する）
+- **attach**: TTY検証（`std::io::IsTerminal`でstdin・stdout両方）をzellij起動前にfail-fast（非TTYは`Preflight` exit 7。誘導文「attach requires a TTY; for non-interactive session creation use `zelper add session`」）。M4実測: 全fd非TTYの素attachはzellijがpanic exit 101・stdout汚染、stdin=TTY/stdout=pipeではUI出力先不在でblockするため、それらに到達させる前に止める（stdout片側のみ非TTYの構成もblock防止のため拒否）。backend経路は`attach_session()` = `run_interactive(["attach", <session>])`（positional形式。DD-3.1例外）。対話終了後のみ報告（対話中は一切出力しない。stdoutはzellijが占有）: human `attach session 'X' ended` / JSON `data.session`。zellij非zero終了は`OperationFailed` exit 5（messageへexit statusとstderr本文を埋め込む。不在session名のzellij rc=1「Session not found + 稼働session候補表示」もこの経路。--session明示時はresolve_sessionが存在確認せずpass-throughのため不在名の検出はzellij側であり、Session not foundをNoTargetへ切り替えない）
+- **detach**: `--session NAME action detach` wrap（現行run_actionの枠・新機構なし）。M3実測: 単一client存在時は外部detachでclient即切断・client exit 0・sessionはRUNNING継続・detach自身はrc=0 silent。**client不在でもrc=0 silent（no-op成功）**のため、zelperはclient数を検査せずrc=0を無条件で成功扱いする（client不在とclient存在がzellerから同一に見える）。報告: human `detached clients from session 'X'` / JSON `data.session`。zellij非zero終了（不在session名のrc=1 Session not found含む）は`OperationFailed` exit 5
+  - 注記（M3 (c)実測）: **複数attach client存在時のdetachはzellijが最新clientのみdetachし、先発clientは描画凍結のまま残留する**（2回目のdetachでも先発client残存）。zellij側のclient選択挙動でありzelperにclient数依存の分岐はなく、rc=0を成功として報告するのみ。全client切断にはclient数分のdetach実行またはclient側での終了が必要
+- **add session**: 事前確認（list_sessionsに同名running存在 → `Preflight` exit 7「session already exists」。作成を試みないfail-fast。EXITED行はrunningとみなさずzellijへ委ねる。0-session環境ではlist-sessions自体がrc=1で失敗する〔M5 (0)実測〕ため、その失敗は「0件」として扱い作成へ進む——同名衝突はzellij本体のattach -bがrc=1「Session already exists」で拒むため安全側）→ `create_session_detached(name)`（argvは `attach -b NAME`。**global --session形式は禁止**: M5 run2実測でrandom別名sessionを作るため。positional形式必須）→ postcondition: list_sessionsにNAMEがrunning出現（DD-11 addの存在確認規則に準拠。作成成否をexit codeのみで信用しない。不在は`VerificationFailed` exit 7）→ 報告: human `created session 'X' (detached)` / JSON `data.session`・`data.created=true`。作成呼出の非zero終了（EXITED同名衝突・race等）は`OperationFailed` exit 5（EXITED同名の実際の挙動は実測不能〔M5 run2/run3〕のためzellij委ね・結果報告の設計）
+  - 作成直後のsessionは空skelton（tab 1・pane 0件。M5実測）で、**first attach時にdefault layoutが具現化する**。v1は素の作成のみ（layout等の作成optionなし——`attach -b`にlayout引数が存在しない。M5 (0)実測）。layout適用は作成後の`remap`合成（`zelper add session work && zelper --session work remap three`）で担う
+  - **add session×remap合成の注意**: 作成直後のpane 0件・空sessionに対するremapになる（remapのM=0系挙作——`remap-sequence.new-tab-only-needs-no-companion`（M=0・k=1・companion不使用）・`layout-planner.r7-empty-session-all-slots-empty`（M=0: k=1・全tab全slot空）——のとおり、k=1・全slotが既定shellの適用になる）。first attach後の具現化paneをsourceにしたい場合はattach後にremapすること
+- dry-run対象外（DD-12）。attach/detach/add sessionともに状態変更前のfail-fast（TTY検証・同名事前確認）を除けば単一backend呼び出しで、snapshotは取得しない
+
+
 
 - grammar: `zelper watch [PANESPEC...] [--tab T] [--name N] [--command C] [--cwd D] [--all] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN`。PATTERNは`--`以降（`last = true`。sendの`-- TEXT`規則の流用）。**`--`分離は必須**（PANESPEC positionalとPATTERNが「数字1つ」等で衝突するため）で、v1はPATTERN数==1厳格・空pattern拒否（usage error, exit 2）。将来`-- PATTERN...`（any-match拡張）へwidenできるようVecで受ける
 - request: 対象（FilterArgs・read/sendと同一形・複数pane可・any-hit）+ PATTERN + 照合形式（`--regex`。大文字小文字無視は`(?i)`表現のみで`-i` flagは設けない）+ `--interval SECS`（f64・default 1.0・**1.0未満と非有限〔NaN/inf〕はusage error**）+ `--max N`（u32・default 30・最大試行回数。1以上）+ `--full`（dump-screen -f。readと同名同義）

@@ -453,11 +453,7 @@ impl ZellijBackend for ZellijCliBackend {
     fn create_session_detached(&self, name: &str) -> Result<(), ZelperError> {
         // 非対話作成（M5実測: one-shot・rc=0・silent）。session解決に依存しない
         // top-level argv（run_actionの--session接頭なし）
-        self.run(&[
-            "attach".to_string(),
-            "-b".to_string(),
-            name.to_string(),
-        ])?;
+        self.run(&["attach".to_string(), "-b".to_string(), name.to_string()])?;
         Ok(())
     }
 }
@@ -478,7 +474,8 @@ impl StderrCapture {
     fn new() -> Result<Self, ZelperError> {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("zelper-attach-stderr-{}-{n}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("zelper-attach-stderr-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).map_err(|e| {
             ZelperError::new(
                 ErrorClass::OperationFailed,

@@ -50,7 +50,11 @@ fn attach_success_reports_after_client_end() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["data"]["session"], "work");
     // backend呼出はattach 1回（対話clientの起動）
-    assert!(b.calls().iter().any(|c| c == "attach"), "calls: {:?}", b.calls());
+    assert!(
+        b.calls().iter().any(|c| c == "attach"),
+        "calls: {:?}",
+        b.calls()
+    );
 }
 
 /// detachのno-op成功契約: zellijのaction detachはclient不在でもrc=0 silent

@@ -1151,10 +1151,7 @@ fn attach_non_tty_is_preflight_exit7_fail_fast() {
     assert!(msg.contains("add session"), "message: {msg}");
     // fail-fast: zellij attach呼出は発生しない（FAKE_LOGにattach行なし）
     let cs = calls(&log);
-    assert!(
-        !cs.iter().any(|c| c.starts_with("attach")),
-        "calls: {cs:?}"
-    );
+    assert!(!cs.iter().any(|c| c.starts_with("attach")), "calls: {cs:?}");
 }
 
 /// detachのbackend argv契約: session解決済みのsession名で

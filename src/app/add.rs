@@ -144,11 +144,7 @@ pub fn run_tab(
 /// add session NAME: detached session作成（DD-14・TASK-89）。main.rsからは
 /// 0-session環境で動く前提のprobe backend（session解決なし）が渡される
 /// （AddTarget::Session例外dispatch。設計§2.2）
-pub fn run_session(
-    backend: &dyn ZellijBackend,
-    name: &str,
-    json: bool,
-) -> Result<(), ZelperError> {
+pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Result<(), ZelperError> {
     // 事前確認: 同名running sessionの存在はPreflightでfail-fast拒否する
     // （zellijのrc=1「Session already exists」を待たない）。EXITED行はrunningと
     // みなさない（EXITED同名はzellijへ委ねる）。0-session環境ではlist-sessions
