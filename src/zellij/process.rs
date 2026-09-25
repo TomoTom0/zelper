@@ -834,7 +834,9 @@ exit 0
 p=$PPID
 : > "{report}"
 for n in 0 1 2; do
-  a=$(readlink /proc/self/fd/$n)
+  # 注: /proc/self だと readlinkプロセス自身（$()のpipe）が見えるため
+  # $$（このscriptのPID）で比較する
+  a=$(readlink /proc/$$/fd/$n)
   b=$(readlink /proc/$p/fd/$n)
   if [[ "$a" == "$b" ]]; then
     echo "fd$n=same" >> "{report}"

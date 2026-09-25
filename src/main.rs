@@ -173,6 +173,10 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                         *json,
                     )
                 }
+                // Sessionは上記の例外dispatch（probe backend）で処理済み
+                zelper::cli::AddTarget::Session { .. } => {
+                    unreachable!("AddTarget::Session is dispatched via probe backend above")
+                }
             }
         }
         Verb::Remove { target } => {
