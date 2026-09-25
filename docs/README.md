@@ -7,7 +7,7 @@
 - `design/` — 設計
   - `first/260821/` — 初回ハンドオフパッケージ（requirements.md / basic-design.md / development-plan.md / README.md）
   - `requirements-traceability.md` — Phase 2/8。要件分類とP0→DD章マップ、制約と設計指示
-  - `detailed-design.md` — Phase 3。DD-1〜DD-12（CLI grammar / domain / backend / output / 操作設計 / remap v2・resize algorithm / safety）
+  - `detailed-design.md` — Phase 3。DD-1〜DD-12・DD-15（CLI grammar / domain / backend / output / 操作設計 / remap v2・resize algorithm / safety / watch）
   - `remap-v2-matching-fix-task74.md` — TASK-74。remap適用経路のrun一致照合修正（DD-10 v2.1）の設計記録: 原因確定（spike S・実験a/b/cの証拠F1〜F8）・照合key変更（terminal_command）・default_tab_template反映・poll空応答retry・test-first計画・E2E acceptance手順
   - `remap-v3-multi-tab-task75.md` — TASK-75。remapのmulti-tab layout全体再現（DD-10 v2.2）の設計記録: 正規形TabTemplate列（反復単位=layout全体・S=sum(N_t)）・visual order逐次充填の累積slot配分則・tab名生成規則（anchor名保持例外）・tab/pane focus再現（focus-pane-id）・空groupのnew-tab経路・検証計画・E2E acceptance手順・実験記録（tmp/task75/）
 - `research/` — 調査

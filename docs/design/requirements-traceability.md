@@ -127,6 +127,7 @@ detailed-design.md（Phase 3成果物）の章番号を以下のように規定�
 | DD-10 | `remap`アルゴリズム（v2: companion plugin・配置・移動・検証） | preservation・overflow・順序・plugin扱い |
 | DD-11 | `add`/`remove`操作設計 | 追加/削除・空tab cleanup |
 | DD-12 | safety model（dry-run・確認・部分失敗・error分類/exit status） | dry-run・clear error handling |
+| DD-15 | `watch`操作設計（polling pattern監視。TASK-86・2026-09-25追加） | watch pane output（元P1。user指示により実装。条件書: tests/design/watch.toml 16条件） |
 
 Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 
@@ -150,11 +151,12 @@ Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 | shell completion（P0） | DD-1.7 | main.rs | L3 completion | - | implemented |
 | clear error handling（P0） | DD-4/12 | error.rs | L1対応表 / L3 exit code | S10 | implemented |
 | dry-run（§3.7） | DD-12 | remap/remove | L2 / L3 | S8・S5 | implemented with documented limitation（`resize equalize`/`add`はP1: MR-7） |
+| watch pane output（元P1。2026-09-25 user指示により昇格・TASK-86） | DD-15 | app/watch.rs | L2 fake_watch / L3 cli shim（条件書watch.toml 16条件） | -（fake zellij shimのみで完結・実zellijはdump-screen反復のため新規L4要件なし） | implemented |
 | AC-1〜6・9〜11・13・14 | 上記対応行と同一 | - | - | S1〜S6, S10 | implemented（AC-14はhelp文言test無し、実装と--help出力で確認） |
 
 **AC-7（kill/recreateなしのremap）**: L4 S7・S-v2-1で実証（保存対象paneのheartbeat pidと連番が途切れなく継続、pane ID同一、geometry変化）。v2には再作成paneが存在しないため、旧S9のrecreated pane検証は廃止。S-v3-2〜4でもsource pane全生存（remap前後のpane id集合一致・最大15 pane）を再実証。
 **AC-8（overflow決定性）**: S-v2-1で実証（9 pane→k=3・visual order割当・連番tab）。v2.2（TASK-75）後の実装は反復単位がlayout全体（S=sum(N_t)）へ一般化され、tab名はlayout由来（名前あり鋳型名/base幹 + `-<b+1>` block接尾。anchor名保持例外）へ変更。block反復はS-v3-4（M=15 > S=12 → k=2・block 1 tabの`-2`接尾・6 tab）で実証。v2は要件2.6の文言どおりの実装（§4-1）。旧S9時点の `--overflow tabs` による代替設計は廃止済み。
-**not implemented**: なし（P0範囲）。P1（bulk rename・`--no-fill`・equalize/add dry-run・watch等）はrequirements P1リストのまま未実装。
+**not implemented**: なし（P0範囲）。P1のうちwatch（pane出力のpattern監視）は2026-09-25 user指示によりTASK-86で実装済み（DD-15・条件書tests/design/watch.toml 16条件・L2 fake_watch + L3 cli shim。run block系wait semantics〔process終了待ち〕は要件P1留保のまま別管理）。残るP1（bulk rename・`--no-fill`・equalize/add dry-run等）はrequirements P1リストのまま未実装。
 
 ## 4. 制約と設計への指示（impossible要件の代替）
 

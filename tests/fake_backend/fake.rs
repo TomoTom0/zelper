@@ -8,7 +8,7 @@
 // PaneState.terminal_command/cwdからderive（Some→Command{cwd:None}・None→None）
 // により既存条件の期待値を維持したままreconciliation系条件を支える。
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use zelper::domain::*;
 use zelper::error::{ErrorClass, ZelperError};
@@ -140,6 +140,16 @@ pub struct FakeBackend {
     /// するがargv一致逆引きにもbare突合にも掛からない「close対象なしの無害系列」
     /// を作る。terminal_command=Someのためbare候補数に寄与せずu=0が保たれる）
     pub spawn_held_extra_on_override: RefCell<Vec<(TabId, String)>>,
+    /// watch用（TASK-86・設計§5.2）: pane毎のdump_frames。dump_screen呼出毎に
+    /// 先頭から1件ずつ返し、尽きたら最終frameを継続して返す。未設定paneは
+    /// 従来どおりSCREEN[pane]応答（既存条件の期待値不変）
+    pub dump_frames: RefCell<HashMap<PaneKindId, VecDeque<String>>>,
+    /// watch用: このpaneのdump_screen呼び出しが指定回数の成功を超えたら失敗させる
+    /// （pane消滅模擬）
+    pub dump_fail_after: RefCell<HashMap<PaneKindId, usize>>,
+    /// watch用: full=true（dump-screen -f）検出時のみ返す応答（--full時の
+    /// scrollback行の再現）。未設定paneはdump_frames/従来応答と同一
+    pub dump_full_frames: RefCell<HashMap<PaneKindId, String>>,
 }
 
 pub struct FakeState {
@@ -208,6 +218,9 @@ impl FakeBackend {
             hold_spawned_command_dup: Cell::new(false),
             bare_spawn_cwd: RefCell::new(None),
             spawn_held_extra_on_override: RefCell::new(Vec::new()),
+            dump_frames: RefCell::new(HashMap::new()),
+            dump_fail_after: RefCell::new(HashMap::new()),
+            dump_full_frames: RefCell::new(HashMap::new()),
         }
     }
 
@@ -383,6 +396,41 @@ impl FakeBackend {
         self.spawn_held_extra_on_override
             .borrow_mut()
             .push((tab, command.to_string()));
+    }
+
+    /// watch用: paneのdump_screen応答frame列を設定（呼出毎に1件ずつ消費し
+    /// 尽きたら最終frameを継続。TASK-86）
+    #[allow(dead_code)]
+    pub fn set_dump_frames(&self, pane: PaneKindId, frames: Vec<String>) {
+        self.dump_frames
+            .borrow_mut()
+            .insert(pane, VecDeque::from(frames));
+    }
+
+    /// watch用: dump_screenの成功回数を制限し、指定回数を超えた呼び出しを失敗
+    /// させる（pane消滅模擬。TASK-86）
+    #[allow(dead_code)]
+    pub fn set_dump_fail_after(&self, pane: PaneKindId, ok_calls: usize) {
+        self.dump_fail_after.borrow_mut().insert(pane, ok_calls);
+    }
+
+    /// watch用: full=true検出時のみのdump_screen応答を設定（--full時のscrollback
+    /// 行の再現。TASK-86）
+    #[allow(dead_code)]
+    pub fn set_dump_full(&self, pane: PaneKindId, content: String) {
+        self.dump_full_frames.borrow_mut().insert(pane, content);
+    }
+
+    /// watch用: paneへのdump_screen呼び出し回数（記録から計上。-f付き呼び出しを
+    /// 含む。TASK-86）
+    pub fn dump_calls(&self, pane: &PaneKindId) -> usize {
+        let spec = format!("dump-screen {}", pane.as_spec());
+        let with_f = format!("{spec} ");
+        self.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.as_str() == spec || c.starts_with(&with_f))
+            .count()
     }
 
     /// armed state（break系pipe呼出済み・go-to-tab未呼び出し）のlist-tabs系呼び出し
@@ -694,9 +742,41 @@ impl ZellijBackend for FakeBackend {
             .ok_or_else(|| ZelperError::new(ErrorClass::OperationFailed, "no active tab"))
     }
 
-    fn dump_screen(&self, pane: &PaneKindId, _full: bool) -> Result<String, ZelperError> {
-        self.record(&format!("dump-screen {}", pane.as_spec()))?;
-        Ok(format!("SCREEN[{}]\n", pane.as_spec()))
+    /// TASK-86（watch）: dump_frames/dump_fail_after/dump_full_frames注入に対応。
+    /// 未設定pane・未設定項目は従来挙動のまま（既存条件の期待値不変）。full=trueの
+    /// 呼び出しは記録に"-f"を付ける（既存L2条件はfull=falseのみのため影響なし）
+    fn dump_screen(&self, pane: &PaneKindId, full: bool) -> Result<String, ZelperError> {
+        let spec = pane.as_spec();
+        self.record(&format!(
+            "dump-screen {spec}{}",
+            if full { " -f" } else { "" }
+        ))?;
+        // 消滅模擬: 成功回数の上限を超えた呼び出しは失敗する
+        let n = self.dump_calls(pane);
+        if let Some(ok_calls) = self.dump_fail_after.borrow().get(pane)
+            && n > *ok_calls
+        {
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!("pane {spec} vanished (injected)"),
+            ));
+        }
+        if full && let Some(c) = self.dump_full_frames.borrow().get(pane) {
+            return Ok(c.clone());
+        }
+        let mut frames = self.dump_frames.borrow_mut();
+        if let Some(dq) = frames.get_mut(pane) {
+            // 呼出毎に先頭frameを1件消費。尽きたら最終frameを継続して返す
+            if dq.len() > 1 {
+                dq.pop_front()
+            } else {
+                dq.front().cloned()
+            }
+            .map(Ok)
+            .unwrap_or_else(|| Ok(format!("SCREEN[{spec}]\n")))
+        } else {
+            Ok(format!("SCREEN[{spec}]\n"))
+        }
     }
 
     fn write_chars(&self, pane: &PaneKindId, text: &str) -> Result<(), ZelperError> {

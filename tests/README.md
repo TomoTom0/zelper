@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書16file・200条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
+- `design/` — テスト設計条件書17file・217条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -12,14 +12,15 @@
   - `layout_planner.rs` — layout-planner.toml（remap v2 planner grouping。26条件。TASK-81のpane_cwd欠落skip+warning・shell -c高疑いheuristicsを含む）
   - `layout_generator.rs` — layout-generator.toml（remap v2 生成KDL。14条件。TASK-81のcwd注入・Run::Cwd slot表現・hold属性非併記を含む）
 - `cli/` — L3 CLI契約（assert_cmd + fake zellij shim。shimはtest実行時に生成: argv記録・fixture応答・FAKE_* envで応答差替え。shim公開はstaging+atomic rename・binary内直列化でETXTBSY対策。fail-first期のfail testによるmutex毒化にもlock取得側で回復）
-  - `list_read_send.rs` — cli-grammar（6）+ read-send（11。--tail/--full加工2件・失敗注入/複数行系列4件。shimのFAKE_DUMP_SCREEN応答差し替え・FAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入）+ list-display（10）+ json-contract（2）の29条件
+  - `list_read_send.rs` — cli-grammar（6）+ read-send（11。--tail/--full加工2件・失敗注入/複数行系列4件。shimのFAKE_DUMP_SCREEN応答差し替え・FAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入）+ list-display（10）+ json-contract（2）+ watch（10。文法・出力契約・exit分類。TASK-86: shimのFAKE_DUMP_SCREEN_FRAMES〔@@ATTEMPT@@区切り・pane毎呼出回数で内容が変わるdump-screen応答〕で多attemptを再現）の39条件
   - `remap.rs` — remap-cli.toml（15条件。dry-run multi-tab拡張・JSON n=S互換・preflight warning伝達経路〔preflight-warning-paths-stderr-and-json〕・TASK-81のdry-run floating緩和・KDL preview cwd・error.data拡張・成功data.closed_duplicatesを含む。shimはFAKE_DUP_AFTER_OVERRIDEでdup spawnのemulationも持つ）
   - `docs.rs` — docs-verb.toml（7条件。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
 - `fake_backend/` — L2 決定的fake backend
-  - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入。test支援資産でtag対象外）
+  - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入・watch用のdump_frames/dump_fail_after/dump_full_frames注入〔未設定時は従来挙動不変〕。test支援資産でtag対象外）
   - `rename_add_remove.rs` — rename.toml（3）+ add-remove.toml（7）の10条件
   - `resize.rs` — resize.toml（7条件）
   - `companion_seed.rs` — companion-seed.toml（14条件。tempdir実file。lock fileは残留期待〔concurrent-seeds・stale-lock-file-tolerated-and-retained〕・r26/c4で恒久lock file許容）
+  - `watch.rs` — watch.toml（16条件のうちloop系6件: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。文法・出力契約・exit分類の10件はcli/list_read_send.rs。TASK-86）
   - `remap.rs` — remap-sequence.toml（46条件。multi-tab移動系列・空group new-tab --layout-string・focus-pane-id・最終go-to・per-tab検証・leftover・M=0・tab id再解決〔tab-id-resolution-lenient-before-apply〕・embed-floating-exited-held-excluded-from-floating-setを含む。r41はerror.data拡張assert・r47/template-invalidはfocus-pane-id/new-tab不発生assert。TASK-81のreconciliation系13条件〔安定観測・反転・dup close・closed_duplicates報告・(e')(e'')・dry-run緩和・E2E改訂F1/F2の押し出し割り込み・held化dup回収・再E2E R1の同一cwd曖昧tie-break・R2の対象tab内source外held pane報告〕を含む。fake.rsのFakeRun side-table・invoked_with等値matcher〔find_already_running_panes模倣〕・derive互換・bare slot spawn dupのpane_cwd注入も参照）
 - `fixtures/zellij/` — 実zellij 0.44.3出力fixture 11file: panes.json / tabs.json（汎用）・panes-three.json（3 pane基本remap）・panes-remap.json / tabs-remap.json（remap dry-run）・panes-hetero.json / tabs-hetero.json（M=15・T=3 dry-run検証用の合成fixture）・panes-floating.json（TASK-81: 3 tiled + selectable floating terminal）・panes-cwd.json（TASK-81: terminal_command+pane_cwd付きpane）・panes-two.json（TASK-81: M=2<N=3検証失敗系列）・panes-three-dup.json（TASK-81: dup pane入り・FAKE_DUP_AFTER_OVERRIDEと併用）
 
@@ -32,8 +33,8 @@ lib内test 10件（`src/app/list.rs` 3件・`src/zellij/process.rs` 7件）はli
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（200テスト）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。200条件・200tag・48excludedでexit 0）
+cargo test          # L1〜L3（217テスト）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。217条件・217tag・54excludedでexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）

@@ -31,6 +31,7 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...] [--j
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...] [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab [TAB...] [--empty] [--yes] [--dry-run] [--json]
+zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
 zelper completion bash|zsh|fish
 zelper docs readme | llm usage|skill|snippet
 ```
@@ -42,9 +43,12 @@ zelper docs readme | llm usage|skill|snippet
 - `remap`: layout名 / `--path` / `--inline` の3sourceは相互排他
 - `add tab`: `--layout` / `--path` / `--inline` は相互排他
 - `send` / `add` のcommand textは `--` 以降（`last = true`。`--`より前のoptionと混在可）
+- `watch` のPATTERNは `--` 以降（v1はちょうど1件・空文字列拒否）。`--json` 等`--`より後ろはPATTERNと解釈されるためoptionは `--` の前に置く。`--interval` は1.0以上の有限値・`--max` は1以上・`--regex` のcompile errorはusage error
 - `remove tab --empty` はTAB省略可。省略時は全空tab（selectable paneが0個のtab）が対象
 
-既定値: `add pane/tab --count 1`、`resize pane STEPS 1`。
+既定値: `add pane/tab --count 1`、`resize pane STEPS 1`、`watch --interval 1.0 --max 30`。
+
+`watch` の意味論: 対象pane（複数可・any-hit）の出力を`--interval`秒間隔でpolling（`dump-screen`反復）し、`-- PATTERN`を含む行が出現したら即hit（exit 0）。attempt 1はsleepなし即時実行のため開始前の既出テキストもhit（`--full`でscrollback込み）。照合はdump-screen生テキストの行単位（既定は固定substring・`--regex`で正規表現。ANSI正規化なし）。hit paneはvisual order最初の1件。`--max`回到達でno hitなら失敗。
 
 ## JSON出力契約（`--json`）
 
@@ -72,6 +76,7 @@ zelper docs readme | llm usage|skill|snippet
 - `remap` は単一のenvelope。成功時の `data` は `m` / `n`（= S: layout全体slot数）/ `k` / `t`（tab鋳型数）/ `s` / `n_slots`（tab毎slot数列）・`mapping[]`（pane / block〔instance keyは維持〕 / tab_index / slot / tab / preserved / alive）・`tabs[]`（生成tabのblock/tab_index/id/name）・`leftover_tabs[]`（remap対象外の残存tab。closeされない）・`closed_duplicates[]`（run一致不成立でzelperがspawnしcloseした複製pane。pane/slot/reason。成功・失敗双方で報告）・`source_excluded_panes[]`（対象tab内に残留するsource外のexited/held pane。pane/tab/title/exited/held。closeされない）・`warnings`・`snapshot_len`。検証失敗時は `error.data` にm/n/k/t/n_slots・mapping・missing・`leftover_tabs`・`closed_duplicates`・`source_excluded_panes` が載る。`--dry-run` の `data` は `dry_run` / `source[]`（visual order・`invoked_with`含む）・M/S/k/T/`n_slots`・`tabs[]`（鋳型name/focus）・割当表（`instances[]`〔block×tab毎のassignments〕）・生成tab毎のKDL preview（`instances[].kdl`・occupied slotにはcommand+args+cwdを注入）・操作列（`operations[]`・new-tab〔空group〕/focus-pane-id/最終go-to含む）・`warnings` で、状態は一切変更しない
 - `list sessions` のみJSONをzellijが提供しないためテキストparse。name / created（zellijの相対表記）/ current / panes_per_tab（tab毎tiled pane数。取得失敗時null）を返す。EXITED（dead session）は表示・session解決から除外される
 - `list layouts` の `layouts` は `{name, size, modified_epoch}` の配列（stat失敗時はsize/modified_epochがnull）
+- `watch` のhit時 `data` は `{ target, pattern, regex, attempts_used, elapsed_secs, matched_lines, pane_errors }`（DD-15）。**multi-targetでもresults[]でなくhit pane単一のobject**（DD-4.2一般規定の例外）。回数切れの `error.data` は `{ attempts_used, elapsed_secs, pattern }`（一部pane消失を伴うPartialFailure時は失敗paneのみの `results[]`）
 
 ## exit codeとerror class対応
 
@@ -81,8 +86,8 @@ zelper docs readme | llm usage|skill|snippet
 | 2 | `Usage` | 引数・文法・排他規則違反 |
 | 3 | `NoTarget` / `AmbiguousTarget` | 対象解決失敗（0件 / 複数ヒット。candidates参照） |
 | 4 | `ZellijUnavailable` / `UnsupportedVersion` | zellij不在 / version < 0.44.3 または未実証の上位series（0.45.0等） |
-| 5 | `OperationFailed` | zellij操作の失敗（remapのprobe不成立・移動timeoutを含む。いずれもpaneは無傷） |
-| 6 | `PartialFailure` | multi-targetの一部失敗（results[]参照） |
+| 5 | `OperationFailed` | zellij操作の失敗（remapのprobe不成立・移動timeout・watchの試行回数切れを含む。いずれもpaneは無傷） |
+| 6 | `PartialFailure` | multi-targetの一部失敗（results[]参照。watchの回数切れ+一部pane消失を含む） |
 | 7 | `LayoutNotFound` / `LayoutInvalid` / `Preflight` / `VerificationFailed` | layout不在 / KDL不正 / 事前条件違反 / 適用後検証不一致 |
 
 class名はPascalCaseで固定。stdoutはJSON（または人間可読テキスト）、診断はstderr。
@@ -115,6 +120,7 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 | `zelper resize pane 3 grow` | `zelper resize pane 3 grow right`（方向まで必須） |
 | `zelper remap three --inline '...'` | layout名と `--inline` は排他。どちらか一方 |
 | `zelper send --keys Enter -- y` | `--keys` とtextは排他 |
+| `zelper watch 3 READY` / `zelper watch 3 -- READY --json` | PATTERNは `--` 以降のためoptionは `--` の前へ: `zelper watch 3 --json -- READY` |
 | 対象名が曖昧なまま再試行 | errorの `candidates` のIDを使う |
 
 ## 既知の制限（agentが前提にしてはならないこと）
@@ -122,5 +128,6 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 - remapのslot割当はgroup（block×tab所属）とrun（command+args+cwd）が一意なpaneのslot対応に限り決定的。同一runの複数pane間・複数shell pane間のslot順は保証外
 - `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpane・shell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差によりpane_cwd≠起動時cwdとなったpaneは照合を外しうる
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
+- `watch` はpolling実装（`dump-screen`反復・既定1s間隔）。最小intervalは1sのため高速pollは不可能。対象解決は開始時1回のみ（監視中に追加されたpaneは対象外）。照合はdump-screen生テキストの行単位でANSI escapeの正規化は行わない
 - tab IDはclose後に再利用される。取得したtab IDは即時使用のみ
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。config.kdlの `layout_dir` は読まない

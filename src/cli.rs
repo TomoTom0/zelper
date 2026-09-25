@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 Panels are addressed by pane id (terminal_3, plugin_1, or a bare number).\n\
 Targets: positional pane ids plus filter options (--tab/--name/--command/--cwd/--all).\n\
 \n\
-Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run",
+Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run\n  zelper watch --command codex -- READY",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -108,6 +108,30 @@ pub enum Verb {
     Remove {
         #[command(subcommand)]
         target: RemoveTarget,
+    },
+    /// pane出力のpattern監視（polling。hitまたは最大試行回数到達まで）
+    Watch {
+        /// pane ID（terminal_3 / plugin_1 / 3）。複数指定可（any-hit）
+        panes: Vec<String>,
+        #[command(flatten)]
+        filter: FilterArgs,
+        /// PATTERNを正規表現として照合（大文字小文字無視は`(?i)`表現）
+        #[arg(long)]
+        regex: bool,
+        /// scrollback込みで取得（dump-screen -f）
+        #[arg(long)]
+        full: bool,
+        /// polling間隔（秒）。1.0未満はusage error
+        #[arg(long, default_value_t = 1.0)]
+        interval: f64,
+        /// 最大試行回数（既定30）
+        #[arg(long, default_value_t = 30)]
+        max: u32,
+        #[arg(long)]
+        json: bool,
+        /// 監視pattern（`--`以降。v1はちょうど1件）
+        #[arg(last = true)]
+        pattern: Vec<String>,
     },
     /// shell補完scriptの生成（文書化されたverb原則の例外）
     Completion { shell: clap_complete::Shell },

@@ -9,8 +9,10 @@
 ### 1.1 凍結されたtop-level verb set（v1）
 
 ```text
-list  read  send  rename  resize  remap  add  remove
+list  read  send  rename  resize  remap  add  remove  watch
 ```
+
+（`watch`はTASK-86・2026-09-25 user指示により追加〔TASK-87設計〕。操作設計はDD-15。verb set v2=12への改訂条文の適用はTASK-88が担うため本節の政策条文は改訂時点まで未適用）
 
 例外的にtop-levelに許容する非verbコマンド: `completion`（shell補完生成。`zelper completion bash|zsh|fish`）。helpの発見性目的で、文書化された例外として扱う。`docs`（agent向け配布物の出力。`zelper docs readme | llm usage|skill|snippet`）も同様の文書化された例外（配布物の取り出し経路。zellij sessionに触れない純粋出力）。
 
@@ -21,7 +23,7 @@ verb setの拡張方針（TASK-72・2026-09-19確定）: verb setは基準付き
 3. 対話操作の複製でない
 4. 共有契約（JSON envelope・exit status・dry-run方針）を継承する
 
-明示的除外（TASK-72棚卸しで確定）: `attach`本体・`watch`等のUI継続コマンド、scroll/theme/focus/move系等の対話的に容易な操作の一対一wrapはzelperが提供しない（agentは外部から構造化操作を行う前提。画面読み取りはread、継続監視は将来のwatch/wait semantics〔要件P1〕が担う）。zellij操作の全未カバー項目の分類と見送り理由の詳細はTASK-72（tm）に記録する。
+明示的除外（TASK-72棚卸しで確定）: `attach`本体・`watch`等のUI継続コマンド、scroll/theme/focus/move系等の対話的に容易な操作の一対一wrapはzelperが提供しない（agentは外部から構造化操作を行う前提。画面読み取りはread、継続監視は将来のwatch/wait semantics〔要件P1〕が担う）。zellij操作の全未カバー項目の分類と見送り理由の詳細はTASK-72（tm）に記録する。（`watch`は2026-09-25 user指示により除外から昇格しTASK-86で実装済み。DD-15参照）
 
 ### 1.2 構文木（全体）
 
@@ -614,6 +616,25 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 - **自spawn複製paneのclose（TASK-81）**: 要件2.6 kill/recreate禁止（L93相当項）の適用対象は「remap実行開始前のlist-panesに存在したpane」であり、**zelperが当該実行内にrun一致不成立でspawnした複製pane（実行開始前snapshotに存在しないid・安定観測後・対応規則〔exited/held化したdupを含む。DD-10.7 step 6多段規則〕でdupと特定されたもの）のcloseは自己副作用の除去としてkill制約の対象外**と定義する。closeしたpane id・対応slot・理由は成功・失敗双方のJSON data（`closed_duplicates[]`）とhuman出力で報告する（報告義務。DD-10.9）
 - 廃止optionのtest固定（設計レビューR6。TASK-43で即時削除に方針変更）: `--session-scope` / `--overflow nest|tabs` はv0.1.xで削除済み。指定はusage error（exit 2・clap経由のstderr出力。`--json`併用時もstdoutには何も出ない）であることと、clap helpに出現しないことをtestで固定する
 
+## DD-15. `watch` 操作設計（TASK-86・2026-09-25追加。TASK-87設計書が元）
+
+- grammar: `zelper watch [PANESPEC...] [--tab T] [--name N] [--command C] [--cwd D] [--all] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN`。PATTERNは`--`以降（`last = true`。sendの`-- TEXT`規則の流用）。**`--`分離は必須**（PANESPEC positionalとPATTERNが「数字1つ」等で衝突するため）で、v1はPATTERN数==1厳格・空pattern拒否（usage error, exit 2）。将来`-- PATTERN...`（any-match拡張）へwidenできるようVecで受ける
+- request: 対象（FilterArgs・read/sendと同一形・複数pane可・any-hit）+ PATTERN + 照合形式（`--regex`。大文字小文字無視は`(?i)`表現のみで`-i` flagは設けない）+ `--interval SECS`（f64・default 1.0・**1.0未満と非有限〔NaN/inf〕はusage error**）+ `--max N`（u32・default 30・最大試行回数。1以上）+ `--full`（dump-screen -f。readと同名同義）
+- 引数検証（違反はUsage exit 2。対象解決・polling開始より前）: pattern数==1 / pattern非空（空substringはcontains常真・空regexは全行matchのため即時偽hitになる） / interval >= 1.0かつ有限 / max >= 1 / `--regex`時の`regex::Regex::new`（compile error文を含む）
+- 実行: polling loop（`dump-screen`反復。backend/trait無変更・loop実装はapp/watch.rs内部に閉じる。subscribeはv2差し替え候補として余地のみ）
+  - 対象解決は開始時に1回（`list_panes` → build_spec → `selector::resolve` → TargetSet。0件はNoTarget exit 3）。毎poll再解決しない
+  - attempt 1はt=0即時実行（sleepなし。既出テキスト即hit。`--full`時はscrollback込みの既出もhit）
+  - 照合は`dump-screen`生テキストの**行単位**: substring（既定）は行へのcontains、`--regex`は行への`regex.is_match`。ANSI正規化は不導入（M7実測〔2026-09-25・zellij 0.44.3・podman sandbox〕でdump-screen出力へのescape混入なし。導入条件を満たさないため。read出力への同一正規化はもともと別変更・範囲外）
+  - 対象paneはTargetSetのvisual order順に照合し、hitありで即終了。**hit paneはvisual order順の最初**（同一attempt複数hitの決定論的tie-break）
+  - attempt < maxの間、前poll終了後に`sleep(interval)`（drift許容）。最終attempt後はsleepなし
+  - `dump_screen`失敗（pane消滅等）のpaneは以後のattemptから除外し`pane_errors`へ記録（他paneのpollingは継続・生存paneでのhit優先）。中断条件はhit/exhaustのみ（SIGINT/Ctrl+Cはdefault終了・進捗表示なし）
+- postcondition: なし（読み取り専用操作の反復）
+- 失敗: 回数切れ（no hit・pane障害なし）と全pane障害は`OperationFailed`（exit 5）。一部pane障害を伴う回数切れは`PartialFailure`（exit 6）
+- JSON: hit時の`data`は7 field: `{ target, pattern, regex, attempts_used, elapsed_secs, matched_lines, pane_errors }`（envelopeはDD-4.2共通）。回数切れの`error.data`は`{ attempts_used, elapsed_secs, pattern }`（PartialFailure時は失敗paneのみの`results[]`〔TargetedResult〕）
+- human: readと同型のpane header（`=== terminal_3 (title, tab:N name) ===`）+ match行すべて（+ pane_errorsがある場合はFAILED行）
+- **DD-4.2一般規定に対する例外（明示）**: watchのhit報告は`data.results[]`でなく**hit pane単一のobject**である。multi-target操作（read/send/remove）が`data.results[]`にper-target結果を格納するDD-4.2の一般規定に対し、watchは「最初にhitした1 paneのみが結果」（any-hit契約・複数paneの同時報告はしない）のため単一objectとし、障害paneは`pane_errors`（hit時）/`error.data.results[]`（PartialFailure時）へ載せる
+- 依存: `regex` crate（`--regex`時のみ使用。TASK-86で追加）
+
 ## 実装モジュール構成（basic-design §9を踏襲、DD-10 v2に伴い更新）
 
 ```text
@@ -621,11 +642,11 @@ plugin/                            # cargo workspace member zelper-companion-plu
                                    # bin crate・zellij-tile =0.44.3・wasm32-wasip1 release buildを
                                    # zelperのbuild.rsがbinaryへ埋込
 src/
-  main.rs  cli/  app/{list,read,send,rename,resize,remap,add,remove}.rs
+  main.rs  cli/  app/{list,read,send,rename,resize,remap,add,remove,watch}.rs
   companion.rs                     # wasm extract・permissions.kdl seed（DD-10.3/10.4）
   domain/  zellij/{process,parser,capabilities}.rs
   layout/{resolver,generator}.rs   # generator: KDL生成（改行区切り・slot正規化。DD-10.8）
   output/{human,json}.rs  error.rs
 ```
 
-Rust library選定: `clap`（derive）+ `clap_complete` / `serde`+`serde_json` / `thiserror`（library境界）+ `anyhow`（binary境界） / `kdl` crate（layout KDLの最小parse: slot数カウント・末端pane列挙。生成は文字列組み立て） / CLI testは`assert_cmd`+`predicates`。subprocessは`std::process::Command`で十分（async不要）。
+Rust library選定: `clap`（derive）+ `clap_complete` / `serde`+`serde_json` / `thiserror`（library境界）+ `anyhow`（binary境界） / `kdl` crate（layout KDLの最小parse: slot数カウント・末端pane列挙。生成は文字列組み立て） / `regex` crate（watch `--regex`照合。DD-15） / CLI testは`assert_cmd`+`predicates`。subprocessは`std::process::Command`で十分（async不要）。

@@ -20,6 +20,7 @@ serde_json = "1"
 thiserror = "2"
 anyhow = "1"
 kdl = "6"
+regex = "1"
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -68,6 +69,10 @@ path = "tests/fake_backend/resize.rs"
 [[test]]
 name = "fake_remap"
 path = "tests/fake_backend/remap.rs"
+
+[[test]]
+name = "fake_watch"
+path = "tests/fake_backend/watch.rs"
 
 [[test]]
 name = "companion_seed"

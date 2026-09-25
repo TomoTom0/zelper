@@ -5,6 +5,7 @@ Zellij向けの構造化automation/orchestration CLI。複数pane/tab・外部sc
 ```text
 zelper send --command codex -- y        # codexを走らせたpane全てにyを送る
 zelper read --tab agents                # agents tabの全paneの画面を読む
+zelper watch --command codex -- READY   # codex paneのいずれかにREADYが出るまで待つ
 zelper remap three                      # 動いているpaneをprocess保持のまま3分割layoutへ
 ```
 
@@ -82,6 +83,9 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
+                                        （pane出力のpattern監視。polling: 1s間隔・最大30回で
+                                         hitならexit 0、回数切れはexit 5。PATTERNは1件）
 zelper completion bash|zsh|fish
 zelper docs readme | llm usage|skill|snippet
                                         （ドキュメント配布物の出力。docs/usage/参照）
@@ -95,6 +99,13 @@ zelper docs readme | llm usage|skill|snippet
 0 成功 / 2 usage / 3 対象解決失敗(no target|ambiguous) / 4 zellij不在|未サポートversion
 5 操作失敗 / 6 部分失敗 / 7 preflight・layout不正・検証失敗
 ```
+
+## watchの意味論
+
+- 対象pane（複数可・any-hit）の出力を`--interval`秒間隔（既定1s・1s未満はusage error）でpollingし、`-- PATTERN`（1件）を含む行が出現したら即座にhit報告（exit 0）。既定の照合は固定substring（行単位）・`--regex`で正規表現（大文字小文字無視は`(?i)`表現）
+- attempt 1はsleepなしの即時実行のため、watch開始前に既に出力済みのテキストでもhitします（`--full`でscrollback込み）。hit paneが複数あり得る場合はvisual order最初のpane 1件を報告
+- 最大試行回数`--max`（既定30）に到達すると失敗（exit 5。監視中のpane消失を一部に伴う場合はexit 6）。pollingは`dump-screen`の反復で、対象解決は開始時1回のみ（新規paneの追加は対象外）
+- 照合は`dump-screen`生テキストの行単位（ANSI escapeの正規化は行わない）
 
 ## remapの意味論
 

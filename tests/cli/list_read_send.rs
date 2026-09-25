@@ -1,6 +1,7 @@
-// L3: CLI契約テスト（list/read/send。test-plan §2.1/2.4/2.10）
+// L3: CLI契約テスト（list/read/send/watch。test-plan §2.1/2.4/2.10。watchはTASK-86）
 // fake zellij shimをtest実行時に生成し、PATHへ差し込む（実zellijに依存しない）
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -49,6 +50,21 @@ if [[ "$3" == "action" ]]; then
       for fail in $FAKE_FAIL_DUMP_SCREEN; do
         if [[ "$fail" == "$pane" ]]; then echo "boom" >&2; exit 1; fi
       done
+      # FAKE_DUMP_SCREEN_FRAMES設定時は呼出回数（pane毎counter file）で内容が変わる
+      # 応答を返す（@@ATTEMPT@@区切り。frame数を超えたら最終frameを継続。
+      # watchの多attempt hit/exhaust再現。未設定時は従来の応答経路）
+      if [[ -n "$FAKE_DUMP_SCREEN_FRAMES" ]]; then
+        cnt="${FAKE_LOG}.cnt.$pane"
+        n=0
+        [[ -f "$cnt" ]] && n=$(<"$cnt")
+        n=$((n + 1))
+        printf '%s' "$n" > "$cnt"
+        printf '%s' "$FAKE_DUMP_SCREEN_FRAMES" | awk -v n="$n" '
+          BEGIN { RS = "@@ATTEMPT@@" }
+          { f[NR] = $0 }
+          END { if (n > NR) print f[NR]; else print f[n] }'
+        exit 0
+      fi
       # FAKE_DUMP_SCREEN設定時は応答を差し替え（末尾行へFULL接尾）。未設定時は現状通り
       if [[ -n "$FAKE_DUMP_SCREEN" ]]; then
         printf '%s%s\n' "$FAKE_DUMP_SCREEN" "$full"
@@ -788,4 +804,263 @@ fn list_layouts_compact_shows_names_only() {
         .assert()
         .success()
         .stdout("solo\n");
+}
+
+// ---------------------------------------------------------------------------
+// watch（TASK-86・watch.toml 16条件のうち文法・出力契約・exit分類の10条件。
+// loop系6条件はtests/fake_backend/watch.rs。設計§5.3/R6: 実行時間抑制のため
+// intervalは明示1・maxは1〜2に寄せる）
+
+/// watchのpattern数検証: PATTERN 0件（`--`の省略時はPATTERNがPANESPECとして
+/// 解釈されるため結果的にpattern 0件）と2件はUsage exit 2で拒否する
+// [covers:watch.pattern-count-usage]
+#[test]
+fn watch_pattern_count_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    // PATTERN 2件（READY GO相当の2語指定）
+    let (mut cmd, _) = zelper("watch-two-patterns");
+    cmd.args(["watch", "1", "--", "READY", "GO"])
+        .assert()
+        .failure()
+        .code(2);
+
+    // PATTERN 0件: `--`以降に何も取らない指定
+    let (mut cmd, _) = zelper("watch-no-pattern");
+    cmd.args(["watch", "1", "--"]).assert().failure().code(2);
+
+    // PATTERN 0件: `--`全体の省略（READYがPANESPECとして解釈されるため結果的に
+    // pattern 0件。panes検証と同様にUsage exit 2）
+    let (mut cmd, _) = zelper("watch-no-dash");
+    cmd.args(["watch", "1", "READY"]).assert().failure().code(2);
+}
+
+/// 空文字列PATTERNの拒否: substring・--regex両形式とも空patternは全行matchの
+/// 即時偽hitになるため、polling開始前にUsage exit 2で拒否する
+// [covers:watch.empty-pattern-usage]
+#[test]
+fn watch_empty_pattern_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-empty");
+    cmd.args(["watch", "1", "--", ""])
+        .assert()
+        .failure()
+        .code(2);
+
+    let (mut cmd, _) = zelper("watch-empty-regex");
+    cmd.args(["watch", "1", "--regex", "--", ""])
+        .assert()
+        .failure()
+        .code(2);
+}
+
+/// intervalの下限と有限性: 1.0未満・NaN・無限大のいずれもUsage exit 2。
+/// 無限大はinterval >= 1.0の比較を通過するため有限性検査が独立した分岐
+// [covers:watch.interval-lower-bound-usage]
+#[test]
+fn watch_interval_lower_bound_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    for (tag, val) in [
+        ("watch-interval-05", "0.5"),
+        ("watch-interval-nan", "nan"),
+        ("watch-interval-inf", "inf"),
+    ] {
+        let (mut cmd, _) = zelper(tag);
+        cmd.args(["watch", "1", "--interval", val, "--", "READY"])
+            .assert()
+            .failure()
+            .code(2);
+    }
+}
+
+/// maxの下限: 最大試行回数0はUsage exit 2（1以上の正整数のみ受理）
+// [covers:watch.max-lower-bound-usage]
+#[test]
+fn watch_max_lower_bound_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-max0");
+    cmd.args(["watch", "1", "--max", "0", "--", "READY"])
+        .assert()
+        .failure()
+        .code(2);
+}
+
+/// --regex指定時のcompile検証: 正規表現として不正なpatternはwatch開始（対象解決・
+/// polling）前にUsage exit 2で失敗し、error文にregex compile errorの内容を含む
+// [covers:watch.regex-compile-usage]
+#[test]
+fn watch_regex_compile_error_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-bad-regex");
+    cmd.args(["watch", "1", "--regex", "--", "[invalid"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("regex parse error"));
+}
+
+/// watchの対象解決の負荷側: 存在しないpane ID指定（対象0件）はpolling開始前に
+/// NoTarget（exit 3）で失敗する
+// [covers:watch.no-target-exit3]
+#[test]
+fn watch_nonexistent_pane_is_no_target_exit3() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-miss");
+    cmd.args(["watch", "999", "--", "READY"])
+        .assert()
+        .failure()
+        .code(3);
+}
+
+/// hit時の出力契約: JSONはdataに7 field（target/pattern/regex/attempts_used/
+/// elapsed_secs/matched_lines/pane_errors）を持ち、humanはread同型のpane識別
+/// ヘッダー行+match行すべてを出力する（matched_linesはhit pane内のmatch行すべて）
+// [covers:watch.hit-exit0-output]
+#[test]
+fn watch_hit_exit0_output_json_and_human() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let screen = "booting\nREADY one\nREADY two\nidle";
+    // JSON: data 7 field・matched_linesはmatch行両方
+    let (mut cmd, _) = zelper("watch-hit-json");
+    let out = cmd
+        .env("FAKE_DUMP_SCREEN", screen)
+        .args(["watch", "1", "--json", "--", "READY"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["schema_version"], 1);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["target"], "terminal_1");
+    assert_eq!(v["data"]["pattern"], "READY");
+    assert_eq!(v["data"]["regex"], false);
+    assert_eq!(v["data"]["attempts_used"], 1);
+    assert_eq!(
+        v["data"]["matched_lines"],
+        serde_json::json!(["READY one", "READY two"])
+    );
+    assert_eq!(v["data"]["pane_errors"], serde_json::json!([]));
+    assert!(v["data"]["elapsed_secs"].is_f64());
+
+    // human: read同型のpane header + match行両方
+    let (mut cmd, _) = zelper("watch-hit-human");
+    cmd.env("FAKE_DUMP_SCREEN", screen)
+        .args(["watch", "1", "--", "READY"])
+        .assert()
+        .success()
+        .stdout(
+            predicates::str::contains("=== terminal_1 (agent-a, tab:0 Tab #1) ===")
+                .and(predicates::str::contains("READY one"))
+                .and(predicates::str::contains("READY two")),
+        );
+}
+
+/// 回数切れ（pane障害なし）: max到達no hitはOperationFailed（exit 5）で、
+/// error.dataにattempts_used・elapsed_secs・patternを報告する。多attemptの内容
+/// 変化はshimのFAKE_DUMP_SCREEN_FRAMESで再現（実行時間は--max 2で抑制）
+// [covers:watch.exhaust-operationfailed]
+#[test]
+fn watch_exhaust_is_operation_failed_with_attempts() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-exhaust");
+    let out = cmd
+        .env(
+            "FAKE_DUMP_SCREEN_FRAMES",
+            "attempt1 no match\nattempt1 line2@@ATTEMPT@@attempt2 still no match",
+        )
+        .args([
+            "watch",
+            "1",
+            "--interval",
+            "1",
+            "--max",
+            "2",
+            "--json",
+            "--",
+            "READY",
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    assert_eq!(v["error"]["data"]["attempts_used"], 2);
+    assert_eq!(v["error"]["data"]["pattern"], "READY");
+    assert!(v["error"]["data"]["elapsed_secs"].is_f64());
+}
+
+/// 回数切れ+一部pane障害の排他契約: 一部paneのdump失敗を伴う回数切れはexit 5で
+/// なくPartialFailure（exit 6）に分類され、失敗paneのみのresults[]をerror.dataへ
+/// 報告する
+// [covers:watch.exhaust-partial-failure]
+#[test]
+fn watch_exhaust_with_pane_failure_is_partial_failure() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-exhaust-partial");
+    let out = cmd
+        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1")
+        .env("FAKE_DUMP_SCREEN", "still building")
+        .args([
+            "watch",
+            "1",
+            "2",
+            "--interval",
+            "1",
+            "--max",
+            "2",
+            "--json",
+            "--",
+            "READY",
+        ])
+        .assert()
+        .failure()
+        .code(6)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "PartialFailure");
+    let results = v["error"]["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1, "results: {results:?}");
+    assert_eq!(results[0]["target"], "terminal_1");
+    assert_eq!(results[0]["ok"], false);
+    assert!(results[0]["error"].as_str().unwrap().contains("boom"));
+}
+
+/// 全pane障害の分類: 対象全paneのdump_screenが失敗する系列はPartialFailure
+/// （exit 6）でなくOperationFailed（exit 5）。一部=6・全て=5の失敗範囲集計判定
+// [covers:watch.exhaust-all-pane-failure-exit5]
+#[test]
+fn watch_exhaust_all_pane_failure_is_exit5() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("watch-exhaust-all");
+    let out = cmd
+        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1 terminal_2")
+        .args([
+            "watch",
+            "1",
+            "2",
+            "--interval",
+            "1",
+            "--max",
+            "2",
+            "--json",
+            "--",
+            "READY",
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
 }

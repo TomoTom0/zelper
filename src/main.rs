@@ -45,6 +45,7 @@ fn wants_json(cli: &Cli) -> bool {
             RemoveTarget::Pane { json, .. } => *json,
             RemoveTarget::Tab { json, .. } => *json,
         },
+        Verb::Watch { json, .. } => *json,
         Verb::Completion { .. } => false,
         Verb::Docs { .. } => false,
     }
@@ -215,6 +216,29 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                     )
                 }
             }
+        }
+        Verb::Watch {
+            panes,
+            filter,
+            regex,
+            full,
+            interval,
+            max,
+            json,
+            pattern,
+        } => {
+            let backend = mk_backend(&cli)?;
+            let args = zelper::app::watch::WatchArgs {
+                panes,
+                filter,
+                regex: *regex,
+                full: *full,
+                interval: *interval,
+                max: *max,
+                pattern,
+                json: *json,
+            };
+            zelper::app::watch::run(backend.as_ref(), &args)
         }
         Verb::Remap {
             layout,

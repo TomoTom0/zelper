@@ -36,6 +36,7 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
 zelper completion bash|zsh|fish
 zelper docs readme | llm usage|skill|snippet
 ```
@@ -47,6 +48,7 @@ zelper docs readme | llm usage|skill|snippet
 - `rename` はnoun形式: `zelper rename pane 3 build` / `zelper rename tab agents work`
 - `resize` は方向まで指定: `zelper resize pane 3 grow right 2`
 - `remap` のlayout指定は名前 / `--path` / `--inline` の3source相互排他。併用はusage error
+- `watch` のPATTERNは `--` 区切り必須で1件（`zelper watch --command codex -- READY`）。optionは `--` の前に置く。 pollingは既定1s間隔・最大30回で、開始前の既出テキストもhitする
 - `--tab agents` のような名前指定は一意な名前のみ。同名tabが複数あればtab IDを使う
 
 ## 出力とexit status
@@ -84,6 +86,7 @@ zelper docs readme | llm usage|skill|snippet
 zelper list panes --json                      # 構造把握（最初の一歩）
 zelper read --tab agents                      # agents tabの全pane画面を読む
 zelper send --command codex -- y              # codex稼働pane全てにyを送る
+zelper watch --command codex -- READY         # いずれかのcodex paneにREADY出現まで待つ
 zelper remap three --dry-run --json           # 3分割layout再配置の計画確認
 zelper add pane --name build -- cargo build   # build用paneを追加してコマンド実行
 zelper remove pane 12                         # pane削除（2対象以上で--yes確認要求）

@@ -7,6 +7,7 @@ pub mod remove;
 pub mod rename;
 pub mod resize;
 pub mod send;
+pub mod watch;
 
 use crate::error::{ErrorClass, ZelperError};
 use crate::zellij::ZellijBackend;
