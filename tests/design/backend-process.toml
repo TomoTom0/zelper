@@ -12,7 +12,7 @@ note = "TASK-59完了: backend-parser.toml移行時excluded 1件（zellijのerro
 
 [[condition]]
 id = "backend-process.nonzero-exit-operation-failed"
-source_lines = "src/zellij/process.rs:619"
+source_lines = "src/zellij/process.rs:707"
 target_function = "ZellijCliBackend::run（非zero exit）"
 source = "docs/testing/test-plan.md §2.3（zellijのerror出力（Failed to load layout: ...等、Phase 1失敗記録から）→ error class変換。旧本文・git 2a9c85f時点） + docs/design/detailed-design.md DD-5:265（zellij側errorをclass=OperationFailedで包む）・DD-10.14:512（class割当）"
 description = "zellijの非zero exit終了は常にOperationFailedへ変換される: messageへexit statusとtrim済みstderr本文を埋め込む。stderr内容によるclass切替は設計上存在しない（DD-5:265・DD-10.14:512）"
@@ -21,7 +21,7 @@ expect_return = "Err。class=OperationFailed。messageはexit status（exit stat
 
 [[condition]]
 id = "backend-process.spawn-notfound-zellij-unavailable"
-source_lines = "src/zellij/process.rs:643"
+source_lines = "src/zellij/process.rs:731"
 target_function = "ZellijCliBackend::run（spawn NotFound）"
 source = "docs/testing/test-plan.md §2.9（zellij不在でZellijUnavailable exit 4。cli-grammar.tomlのzellij不在excludedと同源） + docs/design/detailed-design.md DD-3.1"
 description = "programが存在しない（spawn ErrのErrorKind=NotFound）場合の起動失敗はZellijUnavailableへ分類される。CLI levelのexit 4実pathはcli-grammar.tomlのexcludedに記録のまま（本条件はrun()機構側）"
@@ -30,7 +30,7 @@ expect_return = "Err。class=ZellijUnavailable。messageはzellij executable not
 
 [[condition]]
 id = "backend-process.spawn-permission-denied-zellij-unavailable"
-source_lines = "src/zellij/process.rs:669"
+source_lines = "src/zellij/process.rs:757"
 target_function = "ZellijCliBackend::run（spawn失敗: NotFound以外）"
 source = "docs/design/detailed-design.md DD-5（zellij起動失敗系のerror分類）+ src/zellij/process.rs:66-70"
 description = "NotFound以外のspawn失敗（実行権限なしによるEACCES等）もZellijUnavailableへ分類され、messageへ起動error本文を埋め込む。mode 0644（x bitなし）のexecはLinuxではrootにも拒否される（CAP_DAC_OVERRIDEでもS_IXUGO必須）ため、test実行userによらず決定的"
@@ -39,7 +39,7 @@ expect_return = "Err。class=ZellijUnavailable。messageはfailed to start zelli
 
 [[condition]]
 id = "backend-process.version-unparseable-unsupported"
-source_lines = "src/zellij/process.rs:696"
+source_lines = "src/zellij/process.rs:784"
 target_function = "check_capability（version parse不能）"
 source = "docs/testing/test-plan.md §2.3（version文字列→判定。旧本文・git 2a9c85f時点） + docs/design/detailed-design.md DD-3.5"
 description = "--version出力がversion形式にparse不能な場合の拒否: UnsupportedVersion。check_capabilityの分岐のうち既存条件がcoverしない残り経路。parse_version(\"not-a-version\\n\")→None（backend-parser.version-stringsがparse関数側を検証）に依存する"
@@ -48,7 +48,7 @@ expect_return = "Err。class=UnsupportedVersion。messageはfailed to parse zell
 
 [[condition]]
 id = "backend-process.timeout-operation-failed"
-source_lines = "src/zellij/process.rs:722"
+source_lines = "src/zellij/process.rs:810"
 target_function = "ZellijCliBackend::run（timeout超過）"
 source = "docs/design/detailed-design.md DD-3.1（1呼び出しのtimeout）"
 description = "1呼び出しのtimeout超過はOperationFailedへ変換される（DD-3.1: pipe_pluginがblockし得るためtimeout必須）。in-module testからprivate field timeoutへ短い値（数百ms）を直接設定し、長くsleepするfake zellij scriptで決定的に検証する（TR59-1対応の条件化）"
@@ -57,7 +57,7 @@ expect_return = "Err。class=OperationFailed。messageはzellij call timed out a
 
 [[condition]]
 id = "backend-process.current-tab-unexpected-output-operation-failed"
-source_lines = "src/zellij/process.rs:747"
+source_lines = "src/zellij/process.rs:835"
 target_function = "ZellijCliBackend::current_tab（非単一tab出力）"
 source = "docs/design/detailed-design.md DD-3.4（current-tab-info --jsonをTabInfoとして直接decode・単体parse） + src/zellij/process.rs:161-168 + current-tab-infoの非単一tab出力はOperationFailed（error分岐は列挙漏れなく条件化する規律）"
 description = "current-tab-info --jsonの出力が単一tabに定まらない（parse結果が0件または複数件）場合はOperationFailed（unexpected current-tab-info output）。TR59-3対応: 移行時列挙漏れ分岐の条件化。in-module testからfake zellij scriptの応答を複数tab JSON配列へ固定して決定的に検証する"
@@ -66,7 +66,7 @@ expect_return = "Err。class=OperationFailed。messageはunexpected current-tab-
 
 [[condition]]
 id = "backend-process.focus-pane-id-argv"
-source_lines = "src/zellij/process.rs:775"
+source_lines = "src/zellij/process.rs:863"
 target_function = "ZellijCliBackend::focus_pane（argv組み立て・薄いResult）"
 source = "docs/design/remap-v3-multi-tab-task75.md §3.5（focus_pane追加: argv zellij --session <NAME> action focus-pane-id terminal_3。PANE_ID形式はPaneKindId::as_spec()。backend〔process.rs実装・trait〕はargv組み立てとResultを返す薄い実装のみ〔warning化・retryなし。現行の他actionと同一構成〕。PaneKindIdの系列分離〔terminal_N / plugin_N〕はas_spec()が担いbackendは分岐を持たない。TR75-10: Errのwarning化はexecute側の責務） + docs/design/detailed-design.md DD-10.7 step 6 v2.2・DD-10.1 事実6（R75-5: focus-pane-idはterminal_N / plugin_N / bare Nを受理。remap経路でのplugin paneへのfocus呼出は設計上存在しない） + tmp/task75/20260915_doc_task75_focus_pane_id_help.txt（action help実測）"
 description = "focus-pane-id backendの薄い実装（TASK-75・TR75-10）: focus_paneは argv zellij --session <NAME> action focus-pane-id <PANE_ID>（PANE_IDはPaneKindId::as_spec()形式。Terminal(3)→terminal_3）を組み立てて実行し、Resultを返すのみ（warning化・retryなし。warning化・実行継続はexecute側の責務——remap-sequence.focus-pane-id-after-override-per-tab。fake.rsも同型の薄い実装+呼出記録）。非zero exit等は現行run()系と同一のerror変換（OperationFailed）。plugin_N・bare Nもzellij仕様として受理されるが、remapのfocus対象はterminal slotのみのためzelper経路でのplugin paneへのfocus呼出は設計上存在しない。fail-first: 現行実装はfocus_paneを持たない"

@@ -4,6 +4,7 @@ use crate::domain::{PaneKindId, SessionRef, TabId, TabState};
 use crate::error::{ErrorClass, ZelperError};
 use std::io::{Read, Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -13,11 +14,7 @@ use std::time::{Duration, Instant};
 // libcの該当関数を直接宣言する（依存追加を避ける。TASK-89）
 unsafe extern "C" {
     fn dup2(oldfd: std::os::fd::RawFd, newfd: std::os::fd::RawFd) -> std::os::fd::RawFd;
-    fn fcntl(
-        fd: std::os::fd::RawFd,
-        cmd: std::os::raw::c_int,
-        ...
-    ) -> std::os::raw::c_int;
+    fn fcntl(fd: std::os::fd::RawFd, cmd: std::os::raw::c_int, ...) -> std::os::raw::c_int;
     fn signal(signum: std::os::raw::c_int, handler: usize) -> usize;
 }
 
@@ -73,10 +70,19 @@ impl ZellijCliBackend {
     ///
     /// stderrのみ、起動前に親自身のfd 2を一時的なcapture fileへ差し替えた上で
     /// 継承する（StdioCapture）。これにより (1) 子のfd 0/1/2は親の対応fdと同一
-    /// targetのまま（inherit×3の維持） (2) 子のstderr出力をcaptureでき、終了後に
-    /// 本来のstderrへ転写するとともに非zero終了時のerror messageへ埋め込む
-    /// （backend-process.nonzero-exit-operation-failedと同一規則。zellij attachの
-    /// 不在session error〔Session not found + 稼働session候補〕をJSON経路にも届ける）
+    /// targetのまま（inherit×3の維持。ただしfd 2のtargetはcapture fileであり、
+    /// 元stderrのTTY属性・即時可視性は失われる。fd 0/1は元targetを継承する）
+    /// (2) 子のstderr出力をcaptureでき、終了後に本来のstderrへ一括転写するとともに
+    /// 非zero終了時のerror messageへ埋め込む（backend-process.nonzero-exit-
+    /// operation-failedと同一規則。zellij attachの不在session error〔Session not
+    /// found + 稼働session候補〕をJSON経路にも届ける。v1で対話中の即時転送は行わない）
+    ///
+    /// SIGINTは実行中のみ親側でSIG_IGNへ変更する（REVIEW-2指摘3）: 同一
+    /// foreground process groupではCtrl-CのSIGINTが親（zelper）にも届くため、
+    /// 子zellijがSIGINTを受けて処理・終了する間に親がstderr転写・報告前に死ぬ
+    /// ことを防ぐ。installはspawn成功後（SIG_IGNはexecを通じて子に継承される
+    /// ため、子の起動前に親へ設定すると子までSIGINTを無視してしまう）。子の
+    /// 終了検出後に旧dispositionへ復元する
     fn run_interactive(&self, args: &[String]) -> Result<(), ZelperError> {
         let mut cap = StderrCapture::new()?;
         let mut cmd = Command::new(&self.program);
@@ -88,10 +94,13 @@ impl ZellijCliBackend {
             Ok(c) => c,
             Err(e) => {
                 let e = Self::map_spawn_err(e);
-                cap.restore();
+                let _ = cap.restore();
                 return Err(e);
             }
         };
+        // SAFETY: SIGINT dispositionの一時変更（子はspawn済みのため影響しない。
+        // restore_sigintで必ず戻す）
+        let prev_sig = unsafe { ignore_sigint() };
         // timeout無効: child.wait()のblocking待機のみ（poll/killなし）
         let status = match child.wait() {
             Ok(s) => s,
@@ -100,11 +109,22 @@ impl ZellijCliBackend {
                     ErrorClass::OperationFailed,
                     format!("failed to wait for zellij: {e}"),
                 );
-                cap.restore();
+                // SAFETY: 上記ignore_sigintで退避したdispositionへ戻す
+                unsafe { restore_sigint(prev_sig) };
+                let _ = cap.restore();
                 return Err(e);
             }
         };
-        cap.restore();
+        // SAFETY: 上記ignore_sigintで退避したdispositionへ戻す
+        unsafe { restore_sigint(prev_sig) };
+        if let Err(e) = cap.restore() {
+            // 復元不能な失敗はerror経路で報告（capture内容の転写先が確定しない
+            // ため読み取り結果は破棄する）
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!("failed to restore stderr after zellij attach ({status}): {e}"),
+            ));
+        }
         let stderr = cap.read();
         if !stderr.trim().is_empty() {
             // captureしたstderrを本来のstderrへ転写（inherit相当の可視性の維持。
@@ -472,13 +492,15 @@ impl ZellijBackend for ZellijCliBackend {
 
 /// run_interactive用のstderr capture（DD-14）。親自身のfd 2を一時的なcapture
 /// fileへ差し替え、子spawn中は親子で同一fd targetを保つ（stdio inherit×3の
-/// 維持）。restore後にcapture内容を読み出せる。Dropで確実にfd 2を復帰し
-/// 一時fileを掃除する
+/// 維持）。restore後にcapture内容を読み出せる。
+///
+/// 復元（restore）の失敗はResultとしてcaller（run_interactiveのerror経路）へ
+/// 報告される。Dropはbest-effort（panic時等の最終防衛。失敗は通知できない）
 struct StderrCapture {
-    /// 差し替え前のfd 2の退避先（None = 未差し替え）
+    /// 差し替え前のfd 2の退避先（None = 未差し替え/復元済み。CLOEXEC付きで
+    /// 複製されているため子へは継承されない）
     saved: Option<std::os::fd::RawFd>,
     file: Option<std::fs::File>,
-    path: PathBuf,
     dir: PathBuf,
 }
 
@@ -486,6 +508,7 @@ impl StderrCapture {
     fn new() -> Result<Self, ZelperError> {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // 呼出毎に一意なdir（同一process内の並行実行との分離）
         let dir =
             std::env::temp_dir().join(format!("zelper-attach-stderr-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).map_err(|e| {
@@ -495,11 +518,14 @@ impl StderrCapture {
             )
         })?;
         let path = dir.join("stderr.log");
+        // REVIEW-2指摘1: create_new（O_CREAT|O_EXCL）で排他作成する。同名fileや
+        // symlinkが既に存在すれば失敗し、symlinkを辿った既存fileのtruncateを構造
+        // 排除する。mode(0o600)で作成時点から権限を限定する
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
+            .mode(0o600)
             .open(&path)
             .map_err(|e| {
                 ZelperError::new(
@@ -507,21 +533,32 @@ impl StderrCapture {
                     format!("failed to prepare stderr capture: {e}"),
                 )
             })?;
+        // 作成直後にunlinkしてFDのみ保持する（path経由の追記・読取を不能にする。
+        // 転写はFDのseek(0)読み取りで行う。失敗したらFDを閉じて中断）
+        if let Err(e) = std::fs::remove_file(&path) {
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!("failed to prepare stderr capture: unlink failed: {e}"),
+            ));
+        }
         let mut cap = StderrCapture {
             saved: None,
             file: Some(file),
-            path,
             dir,
         };
-        // SAFETY: fd 2はこの時点で有効な stderr。dupは退避用の複製を作るだけで
-        // fd 2を変更しない。dup2でfd 2をcapture fileへ差し替える（失敗時はfd 2は
-        // 不変のため退避分を閉じて元の状態へ戻す）
+        // SAFETY: fd 2はこの時点で有効なstderr。fcntl(F_DUPFD_CLOEXEC)は退避用の
+        // 複製（close-on-exec付き。子への継承なし）を作るだけでfd 2を変更しない。
+        // dup2でfd 2をcapture fileへ差し替える（失敗時はfd 2は不変のため退避分を
+        // 閉じて元の状態へ戻す）
         unsafe {
-            let saved = dup(2);
+            let saved = fcntl(2, F_DUPFD_CLOEXEC, 0);
             if saved < 0 {
                 return Err(ZelperError::new(
                     ErrorClass::OperationFailed,
-                    "failed to prepare stderr capture: dup failed",
+                    format!(
+                        "failed to prepare stderr capture: fcntl F_DUPFD_CLOEXEC failed: {}",
+                        std::io::Error::last_os_error()
+                    ),
                 ));
             }
             let file_fd = cap.file.as_ref().expect("file opened").as_raw_fd();
@@ -529,7 +566,10 @@ impl StderrCapture {
                 drop(std::os::fd::OwnedFd::from_raw_fd(saved));
                 return Err(ZelperError::new(
                     ErrorClass::OperationFailed,
-                    "failed to prepare stderr capture: dup2 failed",
+                    format!(
+                        "failed to prepare stderr capture: dup2 failed: {}",
+                        std::io::Error::last_os_error()
+                    ),
                 ));
             }
             cap.saved = Some(saved);
@@ -537,18 +577,33 @@ impl StderrCapture {
         Ok(cap)
     }
 
-    /// fd 2を本来のstderrへ戻す（冪等）
-    fn restore(&mut self) {
-        if let Some(saved) = self.saved.take() {
-            // SAFETY: savedはdup(2)で作った有効なfd。dup2でfd 2へ戻した後に閉じる
-            unsafe {
-                let _ = dup2(saved, 2);
-                drop(std::os::fd::OwnedFd::from_raw_fd(saved));
+    /// fd 2を本来のstderrへ戻す（冪等）。復元dup2が成功するまで退避FDを保持し
+    /// （REVIEW-2指摘4: takeして閉じると再試行不能になるため）、EINTRは再試行
+    /// する。復元成功後にのみ退避FDを閉じる
+    fn restore(&mut self) -> std::io::Result<()> {
+        let Some(saved) = self.saved else {
+            return Ok(());
+        };
+        loop {
+            // SAFETY: savedはfcntl(2, F_DUPFD_CLOEXEC, 0)で作った有効な退避FD。
+            // 成功するまで閉じない
+            let r = unsafe { dup2(saved, 2) };
+            if r >= 0 {
+                break;
+            }
+            let e = std::io::Error::last_os_error();
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                return Err(e);
             }
         }
+        self.saved = None;
+        // SAFETY: 復元済み。退避FDを閉じる
+        unsafe { drop(std::os::fd::OwnedFd::from_raw_fd(saved)) }
+        Ok(())
     }
 
-    /// captureしたstderr内容の読み出し（restore後）
+    /// captureしたstderr内容の読み出し（restore後。fileはunlink済みだがFD経由で
+    /// 読める）
     fn read(&mut self) -> String {
         let Some(f) = self.file.as_mut() else {
             return String::new();
@@ -564,11 +619,32 @@ impl StderrCapture {
 
 impl Drop for StderrCapture {
     fn drop(&mut self) {
-        self.restore();
+        // best-effort（明示経路での復元失敗はrun_interactiveが報告済み）
+        let _ = self.restore();
         self.file = None;
-        let _ = std::fs::remove_file(&self.path);
         let _ = std::fs::remove_dir(&self.dir);
     }
+}
+
+/// SIGINTを一時的にSIG_IGNへ変更し、旧dispositionを返す（DD-14・REVIEW-2指摘3）。
+/// run_interactiveの実行中、同一foreground groupのCtrl-Cで子zellijがSIGINTを
+/// 処理して終了する間に親が転写・報告前に死なないための処置
+///
+/// # Safety
+/// dispositionはprocess-wide。callerは戻り値をrestore_sigintへ渡して必ず戻す
+unsafe fn ignore_sigint() -> usize {
+    // SAFETY: SIGINT dispositionの変更（callerがrestore_sigintで戻す契約）
+    unsafe { signal(SIGINT, SIG_IGN) }
+}
+
+/// ignore_sigintで退避したdispositionへSIGINTを復元し、復元直前のdispositionを
+/// 返す
+///
+/// # Safety
+/// prevはignore_sigintの戻り値（またはそれと同型の正当なdisposition値）であること
+unsafe fn restore_sigint(prev: usize) -> usize {
+    // SAFETY: prevは退避済みの正当なdisposition値
+    unsafe { signal(SIGINT, prev) }
 }
 
 /// 起動時のversion/可用性チェック（DD-3.5 compatibility policy）。
@@ -824,14 +900,18 @@ exit 0
     /// stdioをinherit×3でspawnし（fd 0/1/2とも子は親の対応fdと同一targetを継承。
     /// stderrは一時的captureへ差し替えた上での継承）、run()のtimeout機構を適用
     /// しない（対話sessionは時間無制限が本質）。(a)は子がfd 0/1/2の参照先を親
-    /// （getppid）と比較し報告fileへ書くfake programでinheritを検出、(b)はbackend
-    /// のtimeout値を超えてsleepするfake programがtimeout errorにならずOkで完結
-    /// することでtimeout無効を検証する
+    /// （getppid）と比較し報告fileへ書くfake programでinheritを検出（あわせて
+    /// REVIEW-2指摘2: 退避FD〔元stderrの複製〕がclose-on-exec付きで子へ漏れて
+    /// いないことをfd 3以上の一覧で検証）、(b)はbackendのtimeout値を超えて
+    /// sleepするfake programがtimeout errorにならずOkで完結することでtimeout無効
+    /// を検証、(c)はSIGINT dispositionのinstall→restore往復を検証する
+    /// （実signal送信はtest全体を終了させるため対象外——関数の往復のみ）
     // [covers:attach-detach.attach-run-interactive-stdio-inherit-no-timeout]
     #[test]
     fn attach_run_interactive_inherits_stdio_and_skips_timeout() {
         let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
-        // (a) stdio inherit検出: 子のfd 0/1/2の参照先を親と比較し報告fileへ書く
+        // (a) stdio inherit検出: 子のfd 0/1/2の参照先を親と比較し報告fileへ書く。
+        // あわせてfd 3以上の一覧（target付き）も報告させる
         let dir = std::env::temp_dir().join(format!(
             "zelper-fake-process-attachfd-{}",
             std::process::id()
@@ -853,19 +933,39 @@ for n in 0 1 2; do
     echo "fd$n=DIFF" >> "{report}"
   fi
 done
+# fd 3以上の一覧（退避FD漏れ検出用。loop setup時にglob展開されるため
+# report追記用に一時開くfdは一覧に現れない）
+for f in /proc/self/fd/*; do
+  n="${{f##*/}}"
+  if (( n >= 3 )); then
+    echo "extra$n=$(readlink "$f")" >> "{report}"
+  fi
+done
 exit 0
 "#,
             report = report.display()
         );
         let program = setup_fake_zellij("attach-fd", &script);
         let backend = ZellijCliBackend::new("sess89").with_program(program);
+        // 差し替え前の元stderrのtarget（退避FDが子へ漏れていた場合にこのtargetと
+        // 同一のfdが子の一覧へ現れる）
+        let orig_stderr = std::fs::read_link("/proc/self/fd/2").expect("readlink stderr");
         backend.attach_session().unwrap();
         let recorded = std::fs::read_to_string(&report).unwrap();
-        assert_eq!(
-            recorded.trim(),
-            "fd0=same\nfd1=same\nfd2=same",
-            "fd report: {recorded}"
-        );
+        for want in ["fd0=same", "fd1=same", "fd2=same"] {
+            assert!(recorded.lines().any(|l| l == want), "fd report: {recorded}");
+        }
+        // REVIEW-2指摘2: 退避FD（元stderrの複製）はF_DUPFD_CLOEXEC付きで作られる
+        // ため子へ継承されない——fd 3以上に元stderrと同一targetのfdが現れない。
+        // （bash自身のscript fd〔255等〕は現れてよいが、それは元stderrと別target）
+        for line in recorded.lines().filter(|l| l.starts_with("extra")) {
+            let (_, target) = line.split_once('=').expect("extra<N>=<target>");
+            assert_ne!(
+                target,
+                orig_stderr.to_str().unwrap_or("?"),
+                "退避FDが子へ漏れている: {line}"
+            );
+        }
 
         // (b) timeout無効: backend.timeout（数百ms）を超えてsleepしてもtimeout
         // error（zellij call timed out）にならずOkで完結する
@@ -873,6 +973,19 @@ exit 0
         let mut backend = ZellijCliBackend::new("sess89").with_program(program);
         backend.timeout = Duration::from_millis(300);
         backend.attach_session().unwrap();
+
+        // (c) SIGINT dispositionのinstall→restore往復（REVIEW-2指摘3）:
+        // ignore→復元すると復元直前のdispositionはSIG_IGN、復元後に再度ignoreすると
+        // 戻り値（直前のdisposition）は最初に退避した値と一致する。最後に戻す
+        // SAFETY: dispositionの往復（最後に元へ戻す）
+        unsafe {
+            let prev = ignore_sigint();
+            let cur = restore_sigint(prev);
+            assert_eq!(cur, SIG_IGN, "復元直前のdispositionはSIG_IGN");
+            let prev2 = ignore_sigint();
+            assert_eq!(prev2, prev, "復値後のignoreの戻り値は旧dispositionと一致");
+            let _ = restore_sigint(prev2);
+        }
     }
 
     /// TASK-89（DD-14）: attachのzellij非zero終了はOperationFailed（exit 5相当）へ

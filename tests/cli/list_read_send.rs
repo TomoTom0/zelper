@@ -147,6 +147,10 @@ exit 0
     std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::rename(staged, &shim).unwrap();
     let log = dir.join("calls.log");
+    // TASK-89 REVIEW-2指摘8: FAKE_SESSIONS_CREATEの状態file（${FAKE_LOG}.sessions）を
+    // setup時に初期化する（PID再利用で既存dirを再利用した際の前回作成分の残留を
+    // 排除。空fileはshimの [[ -s ]] で「無し」と同一扱い）
+    std::fs::write(dir.join("calls.log.sessions"), "").unwrap();
     (dir, log)
 }
 
@@ -1155,7 +1159,10 @@ fn attach_non_tty_is_preflight_exit7_fail_fast() {
 }
 
 /// detachのbackend argv契約: session解決済みのsession名で
-/// `zellij --session NAME action detach` を実行する（既存run_actionの枠のwrap）
+/// `zellij --session NAME action detach` を実行する（既存run_actionの枠のwrap）。
+/// human/JSON双方の実出力（1行サマリ/envelope 1通・data.session）も検証する
+/// （REVIEW-2指摘6と同一の実出力観測。L2のFakeBackendはlibtestのstdout capture
+/// の外で出力を観測できないため実binary側で担保）
 // [covers:attach-detach.detach-argv]
 #[test]
 fn detach_records_session_action_detach_argv() {
@@ -1169,6 +1176,26 @@ fn detach_records_session_action_detach_argv() {
     assert!(
         cs.iter().any(|c| c == "--session fake-sess action detach"),
         "calls: {cs:?}"
+    );
+
+    // JSON: 実出力はenvelope 1通のみでdata.session=NAME
+    let (mut cmd, log) = zelper("detach-argv-json");
+    let out = cmd
+        .args(["--session", "fake-sess", "detach", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["session"], "fake-sess");
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session fake-sess action detach"),
+        "calls: {:?}",
+        calls(&log)
     );
 }
 
@@ -1377,6 +1404,37 @@ fn add_session_postcondition_missing_is_verification_failed() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "VerificationFailed");
     // attach -b自体は発行済み（rc=0・list-sessions不変の系列）
+    assert!(
+        calls(&log).iter().any(|c| c == "attach -b work"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// add sessionのpostcondition検索の0件分類（REVIEW-2指摘5）: 作成呼出
+/// （attach -b）がrc=0でも作成後のlist-sessionsが0件rc=1
+/// （No active zellij sessions found.）の応答でも「0件」として扱い、NAME不在は
+/// VerificationFailed（exit 7）へ分類する（OperationFailed 5の伝播でなく。
+/// shimはFAKE_SESSIONS_EMPTY=1 + FAKE_SESSIONS_CREATE=ok-muteで
+/// list-sessions常にrc=1・作成rc=0で応答反映なしの系列を再現）
+// [covers:attach-detach.add-session-postcondition-empty-list-verification-failed]
+#[test]
+fn add_session_postcondition_empty_list_is_verification_failed() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("add-session-emptylist");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .env("FAKE_SESSIONS_CREATE", "ok-mute")
+        .args(["add", "session", "work", "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "VerificationFailed");
+    // 作成呼出自体はrc=0で実行済み（一覧0件は作成後の検証段階の分類）
     assert!(
         calls(&log).iter().any(|c| c == "attach -b work"),
         "calls: {:?}",

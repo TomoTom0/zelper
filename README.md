@@ -113,7 +113,7 @@ zelper docs readme | llm usage|skill|snippet
 ## session lifecycle（attach / detach / add session）
 
 - `attach` は対話clientの起動です。stdin・stdoutの両方がTTYであることを要求し、非TTY（script・agent実行等）ではzellijを起動する前にexit 7で拒否します（非TTYの素attachはzellij側でpanicするため）。対話終了後に `attach session 'NAME' ended` の1行（`--json` は `data.session`）を報告します。不在session名はzellij側の失敗（Session not found + 稼働session候補表示）をmessageに載せてexit 5になります
-- `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。複数clientがattachしている場合、zellijの仕様としてdetachは最新clientのみ切断し、先発clientは画面凍結のまま残る点に注意してください（全client切断には複数回のdetachが必要）
+- `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。複数clientがattachしている場合、zellijの仕様としてdetachは最新のattach clientのみ切断し、先発clientは画面凍結のまま残留します（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しません）
 - `add session NAME` はdetached sessionを作成します（`zellij attach -b NAME` 相当）。sessionが1つも存在しない環境でも動作し、同名running sessionが既にあれば作成前にexit 7で拒否、作成後のlist-sessions出現を検証してから `created session 'NAME' (detached)` を報告します。作成直後は空session（tab 1・pane 0件）で、最初のattach時にdefault layoutが具現化します。layoutを適用したい場合は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行います
 
 

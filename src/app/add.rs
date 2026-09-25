@@ -159,8 +159,12 @@ pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Resul
     }
     backend.create_session_detached(name)?;
     // postcondition: 作成後のlist_sessionsにNAMEがrunning出現（DD-11 addの存在
-    // 確認規則に準拠。作成成否をexit codeのみで信用しない）
-    let sessions = backend.list_sessions()?;
+    // 確認規則に準拠。作成成否をexit codeのみで信用しない）。0-session環境の
+    // list-sessions rc=1（No active zellij sessions found.）も事前確認と同一に
+    // 「0件」として扱う（REVIEW-2指摘5: 作成rc=0かつ一覧0件はpostcondition不在
+    // としてVerificationFailedへ分類する。一般backend障害との区別に使える情報が
+    // error文面に無いため rc=1 は一律0件扱いとする）
+    let sessions = backend.list_sessions().unwrap_or_default();
     if sessions.iter().any(|s| !s.exited && s.name == name) {
         println!("{}", session_report(name, json));
         Ok(())

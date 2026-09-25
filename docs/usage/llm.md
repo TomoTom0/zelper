@@ -57,7 +57,7 @@ zelper docs readme | llm usage|skill|snippet
 `attach` / `detach` / `add session` の意味論（session lifecycle・DD-14）:
 
 - `attach`: 対話client起動。**stdin・stdoutの両方がTTYであること必須**（非TTYはzellij起動前に `Preflight` exit 7で拒否。agent/script実行からは使えない）。対話終了後のみ報告（human `attach session 'NAME' ended` / JSON `data.session`）。zellij非zero終了（不在session名のSession not found + 稼働session候補表示を含む）は `OperationFailed` exit 5
-- `detach`: 対象sessionのattach clientをdetach。client不在でも成功（no-op）扱い（human `detached clients from session 'NAME'` / JSON `data.session`）。複数clientがattach中の場合、detachはzellijの仕様として最新clientのみ切断し先発clientは画面凍結のまま残る（全client切断には複数回のdetach）
+- `detach`: 対象sessionのattach clientをdetach。client不在でも成功（no-op）扱い（human `detached clients from session 'NAME'` / JSON `data.session`）。複数clientがattach中の場合、detachはzellijの仕様として最新のattach clientのみ切断し、先発clientは画面凍結のまま残留する（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しない）
 - `add session NAME`: detached session作成（`attach -b NAME` 相当の非対話経路）。session 0件環境でも動作（対象session解決を経ない例外dispatch）。同名running session既存は `Preflight` exit 7（fail-fast）・作成呼出失敗は `OperationFailed` exit 5・作成後のlist-sessions出現確認は `VerificationFailed` exit 7。成功は human `created session 'NAME' (detached)` / JSON `data.session`・`data.created=true`。作成直後は空session（tab 1・pane 0件）でfirst attach時にdefault layoutが具現化する。layout適用は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行う
 
 ## JSON出力契約（`--json`）
@@ -141,6 +141,6 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 - `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpane・shell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差によりpane_cwd≠起動時cwdとなったpaneは照合を外しうる
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
 - `watch` はpolling実装（`dump-screen`反復・既定1s間隔）。最小intervalは1sのため高速pollは不可能。対象解決は開始時1回のみ（監視中に追加されたpaneは対象外）。照合はdump-screen生テキストの行単位でANSI escapeの正規化は行わない
-- `attach` は対話clientのため実TTY前提（stdin・stdout両方）。複数clientがattach中のsessionへの `detach` はzellijの仕様として最新clientのみ切断し、先発clientは画面凍結のまま残る（全client切断には複数回のdetach）。`add session` で作成直後のsessionは空（tab 1・pane 0件）で、first attach時にdefault layoutが具現化する。作成直後に `remap` する場合は空session（M=0）への適用になる点に注意
+- `attach` は対話clientのため実TTY前提（stdin・stdout両方）。複数clientがattach中のsessionへの `detach` はzellijの仕様として最新のattach clientのみ切断し、先発clientは画面凍結のまま残る（M3実測: 反復detachでも先発clientは残留）。`add session` で作成直後のsessionは空（tab 1・pane 0件）で、first attach時にdefault layoutが具現化する。作成直後に `remap` する場合は空session（M=0）への適用になる点に注意
 - tab IDはclose後に再利用される。取得したtab IDは即時使用のみ
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。config.kdlの `layout_dir` は読まない

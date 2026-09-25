@@ -153,6 +153,13 @@ pub struct FakeBackend {
     /// add session用（TASK-89）: create_session_detachedをOkのままlist-sessions
     /// 状態へ反映しない（rc=0・postcondition不在模擬）
     pub mute_create_session: Cell<bool>,
+    /// attach呼出時点のstdout内容（/proc/self/fd/1の読み直し）を記録する注入
+    /// （TASK-89 REVIEW-2指摘6: backend復帰前の無出力検証用。test側がfd 1を
+    /// 一時fileへredirectした構成でのみ使用する——pipeだと読み取りがblockする
+    /// ためarmed時のみ読む）
+    pub probe_stdout_on_attach: Cell<bool>,
+    /// arm_stdout_probe後のattach_session呼出時点のstdout内容
+    pub stdout_at_attach: RefCell<Option<String>>,
 }
 
 pub struct FakeState {
@@ -234,6 +241,8 @@ impl FakeBackend {
             dump_fail_after: RefCell::new(HashMap::new()),
             dump_full_frames: RefCell::new(HashMap::new()),
             mute_create_session: Cell::new(false),
+            probe_stdout_on_attach: Cell::new(false),
+            stdout_at_attach: RefCell::new(None),
         }
     }
 
@@ -439,6 +448,20 @@ impl FakeBackend {
     #[allow(dead_code)]
     pub fn mute_create_session(&self) {
         self.mute_create_session.set(true);
+    }
+
+    /// attach呼出時点のstdout内容の記録を有効化（TASK-89 REVIEW-2指摘6。
+    /// test側がfd 1を一時fileへredirectしている構成でのみ使用）
+    #[allow(dead_code)]
+    pub fn arm_stdout_probe(&self) {
+        self.probe_stdout_on_attach.set(true);
+    }
+
+    /// arm_stdout_probe後の直近attach_session呼出時点のstdout内容
+    /// （読み取り失敗時はNone）
+    #[allow(dead_code)]
+    pub fn stdout_at_attach(&self) -> Option<String> {
+        self.stdout_at_attach.borrow().clone()
     }
 
     /// watch用: paneへのdump_screen呼び出し回数（記録から計上。-f付き呼び出しを
@@ -1338,9 +1361,16 @@ impl ZellijBackend for FakeBackend {
 
     /// TASK-89（DD-14）: attach/detach/create_session_detachedは呼出記録のみの
     /// 薄い実装。attachは対話clientの実挙動（stdio inherit等）ではなくapp層の
-    /// 報告契約の検証用（run_interactive経路の検証はsrc/zellij/process.rs内test）
+    /// 報告契約の検証用（run_interactive経路の検証はsrc/zellij/process.rs内test）。
+    /// arm_stdout_probe時は呼出時点のstdout内容（/proc/self/fd/1の読み直し）を
+    /// 記録する（backend復帰前の無出力検証。REVIEW-2指摘6）
     fn attach_session(&self) -> Result<(), ZelperError> {
         self.record("attach")?;
+        if self.probe_stdout_on_attach.get() {
+            // fd 1がtest側で一時fileへredirectされている前提（pipeだとblockする
+            // ためarmed時のみ）。読み取りは新しいfile descriptionで先頭から
+            *self.stdout_at_attach.borrow_mut() = std::fs::read_to_string("/proc/self/fd/1").ok();
+        }
         Ok(())
     }
 
