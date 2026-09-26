@@ -1650,7 +1650,8 @@ fn move_tab_swap_argv_sequence_and_success() {
             dir.to_str().unwrap(),
             std::env::var("PATH").unwrap_or_default()
         );
-        cmd.env("PATH", path)
+        let stdout = cmd
+            .env("PATH", path)
             .env_remove("ZELLIJ_SESSION_NAME")
             .env("FAKE_LOG", &log)
             .env("FAKE_FIXTURES", fixture_dir())
@@ -1660,7 +1661,8 @@ fn move_tab_swap_argv_sequence_and_success() {
             .success()
             .get_output()
             .stdout
-            .clone()
+            .clone();
+        serde_json::from_slice(&stdout).unwrap()
     };
     let out = run_once();
     let argv: Vec<String> = calls(&log)
@@ -1682,7 +1684,8 @@ fn move_tab_swap_argv_sequence_and_success() {
         "-tはfocus不変のためgo-to不使用: {:?}",
         calls(&log)
     );
-    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let out = run_once();
+    let v: &serde_json::Value = &out;
     assert_eq!(v["ok"], true);
     assert_eq!(v["data"]["action"], "swap-tab");
     assert_eq!(
@@ -1711,9 +1714,8 @@ fn move_tab_swap_argv_sequence_and_success() {
         ],
         "再実行も同一argv列（状態fileのsetup時初期化）: {argv2:?}"
     );
-    let v2: serde_json::Value = serde_json::from_slice(&out2).unwrap();
     assert_eq!(
-        v2["data"]["tabs"][0],
+        out2["data"]["tabs"][0],
         serde_json::json!({"id": 0, "position": 2}),
         "再実行も初期状態から交換（前回結果のposition 2→0が残留しない）"
     );
