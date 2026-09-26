@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書18file・229条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
+- `design/` — テスト設計条件書19file・259条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -12,20 +12,21 @@
   - `layout_planner.rs` — layout-planner.toml（remap v2 planner grouping。26条件。TASK-81のpane_cwd欠落skip+warning・shell -c高疑いheuristicsを含む）
   - `layout_generator.rs` — layout-generator.toml（remap v2 生成KDL。14条件。TASK-81のcwd注入・Run::Cwd slot表現・hold属性非併記を含む）
 - `cli/` — L3 CLI契約（assert_cmd + fake zellij shim。shimはtest実行時に生成: argv記録・fixture応答・FAKE_* envで応答差替え。shim公開はstaging+atomic rename・binary内直列化でETXTBSY対策。fail-first期のfail testによるmutex毒化にもlock取得側で回復）
-  - `list_read_send.rs` — cli-grammar（6）+ read-send（11。--tail/--full加工2件・失敗注入/複数行系列4件。shimのFAKE_DUMP_SCREEN応答差し替え・FAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入）+ list-display（10）+ json-contract（2）+ watch（10。文法・出力契約・exit分類。TASK-86: shimのFAKE_DUMP_SCREEN_FRAMES〔@@ATTEMPT@@区切り・pane毎呼出回数で内容が変わるdump-screen応答〕・FAKE_FAIL_DUMP_SCREEN_AFTER〔pane:成功回数で途中から失敗〕で多attempt・pane消滅系列を再現）+ attach-detach（8。L3層。TASK-89: shimのFAKE_DETACH_FAIL・FAKE_SESSIONS_CREATE〔attach -b応答制御・ok時は作成NAMEをlist-sessions応答へ反映する状態管理〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・不在session名へのaction rc=1 Session not found応答）の47条件
+  - `list_read_send.rs` — cli-grammar（11）+ read-send（11。--tail/--full加工2件・失敗注入/複数行系列4件。shimのFAKE_DUMP_SCREEN応答差し替え・FAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入）+ list-display（10）+ json-contract（2）+ watch（10。文法・出力契約・exit分類。TASK-86: shimのFAKE_DUMP_SCREEN_FRAMES〔@@ATTEMPT@@区切り・pane毎呼出回数で内容が変わるdump-screen応答〕・FAKE_FAIL_DUMP_SCREEN_AFTER〔pane:成功回数で途中から失敗〕で多attempt・pane消滅系列を再現）+ attach-detach（9。L3層。TASK-89: shimのFAKE_DETACH_FAIL・FAKE_SESSIONS_CREATE〔attach -b応答制御・ok時は作成NAMEをlist-sessions応答へ反映する状態管理〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・不在session名へのaction rc=1 Session not found応答）+ move（5。L3層。TASK-88: parse排他・native argv/no-op JSON・fail exit5・tab swap argv列〔shimのFAKE_FAIL_MOVE_PANE/FAKE_FAIL_MOVE_TAB・FAKE_TABS_JSON〔move-tabでposition移動を反映するtabs状態管理〕〕・help出現）の53条件
   - `remap.rs` — remap-cli.toml（15条件。dry-run multi-tab拡張・JSON n=S互換・preflight warning伝達経路〔preflight-warning-paths-stderr-and-json〕・TASK-81のdry-run floating緩和・KDL preview cwd・error.data拡張・成功data.closed_duplicatesを含む。shimはFAKE_DUP_AFTER_OVERRIDEでdup spawnのemulationも持つ）
-  - `docs.rs` — docs-verb.toml（7条件。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
+  - `docs.rs` — docs-verb.toml（9条件。TASK-88のmove文法記載・verb set v2=12配布物記載2件を含む。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
 - `fake_backend/` — L2 決定的fake backend
-  - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入・watch用のdump_frames/dump_fail_after/dump_full_frames注入〔未設定時は従来挙動不変〕。test支援資産でtag対象外）
+  - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入・watch用のdump_frames/dump_fail_after/dump_full_frames注入・move用のmove_pane/move_tab emulation〔M1/M2実測基準値: slot幾何不変swap・edge no-op・wrap〕とmute_break_id_nth/rename_moved_pane_after_break_nth/mute_move_tab注入〔未設定時は従来挙動不変〕。test支援資産でtag対象外）
   - `rename_add_remove.rs` — rename.toml（3）+ add-remove.toml（7）の10条件
   - `resize.rs` — resize.toml（7条件）
   - `companion_seed.rs` — companion-seed.toml（14条件。tempdir実file。lock fileは残留期待〔concurrent-seeds・stale-lock-file-tolerated-and-retained〕・r26/c4で恒久lock file許容）
   - `watch.rs` — watch.toml（16条件のうちloop系6件: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。文法・出力契約・exit分類の10件はcli/list_read_send.rs。TASK-86）
   - `attach.rs` — attach-detach.toml（12条件のうちL2層2件: attach成功報告契約〔tty_ok注入〕・detach no-op成功。run_interactive系2件はlib src/zellij/process.rs・L3層8件はcli/list_read_send.rs。TASK-89。fake.rsのsession状態管理〔create_session_detachedでNAMEをlist_sessionsへ追加〕・mute_create_session注入も参照）
   - `remap.rs` — remap-sequence.toml（46条件。multi-tab移動系列・空group new-tab --layout-string・focus-pane-id・最終go-to・per-tab検証・leftover・M=0・tab id再解決〔tab-id-resolution-lenient-before-apply〕・embed-floating-exited-held-excluded-from-floating-setを含む。r41はerror.data拡張assert・r47/template-invalidはfocus-pane-id/new-tab不発生assert。TASK-81のreconciliation系13条件〔安定観測・反転・dup close・closed_duplicates報告・(e')(e'')・dry-run緩和・E2E改訂F1/F2の押し出し割り込み・held化dup回収・再E2E R1の同一cwd曖昧tie-break・R2の対象tab内source外held pane報告〕を含む。fake.rsのFakeRun side-table・invoked_with等値matcher〔find_already_running_panes模倣〕・derive互換・bare slot spawn dupのpane_cwd注入も参照）
+  - `move.rs` — move.toml（22条件。TASK-88: native系argv形式〔move-pane <dir> -p / move-pane -p / move-pane-backwards -p〕・edge no-op検出・companion系実行sequence〔permissions seed→probe→break-id〕・no-op/不在/曖昧・floating/plugin pane preflight・pane交換の順序規則〔singleton判定〕・同一tab/両singleton拒否・部分失敗報告・tab交換の隣接transposition合成〔2d-1回〕・postcondition検証〔pane id不変・position交換〕・backend失敗。polling timeout系2条件は10s deadlineを実時間消費〔fake_remap r36と同一方式〕）
 - `fixtures/zellij/` — 実zellij 0.44.3出力fixture 11file: panes.json / tabs.json（汎用）・panes-three.json（3 pane基本remap）・panes-remap.json / tabs-remap.json（remap dry-run）・panes-hetero.json / tabs-hetero.json（M=15・T=3 dry-run検証用の合成fixture）・panes-floating.json（TASK-81: 3 tiled + selectable floating terminal）・panes-cwd.json（TASK-81: terminal_command+pane_cwd付きpane）・panes-two.json（TASK-81: M=2<N=3検証失敗系列）・panes-three-dup.json（TASK-81: dup pane入り・FAKE_DUP_AFTER_OVERRIDEと併用）
 
-lib内test 10件（`src/app/list.rs` 3件・`src/zellij/process.rs` 7件）はlist-display.toml・backend-process.tomlが管轄（src/のままtag付け。条件数の内訳13条件・7条件に含む）。
+lib内test 12件（`src/app/list.rs` 3件・`src/zellij/process.rs` 9件〔TASK-89のrun_interactive系2件を含む〕）はlist-display.toml・backend-process.toml・attach-detach.tomlが管轄（src/のままtag付け。条件数の内訳13条件・7条件・13条件に含む）。
 
 ## L4統合テスト（実zellij）
 
@@ -34,8 +35,8 @@ lib内test 10件（`src/app/list.rs` 3件・`src/zellij/process.rs` 7件）はli
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（229テスト）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。229条件・229tag・65excludedでexit 0）
+cargo test          # L1〜L3（259テスト）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。259条件でexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）

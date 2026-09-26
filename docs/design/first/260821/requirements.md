@@ -110,6 +110,8 @@ Requirements:
 
 Zellij already supports runtime `override-layout`, retaining existing terminal panes, active-tab-only application, raw inline layouts, and swap layouts. Detailed design SHALL assess how much of `remap` can use these primitives and where orchestration is still required.
 
+`remap` is the heavyweight whole-set rearrangement; single-target relative moves and swaps (moving one pane within its tab, across tabs, swapping two panes, swapping two tabs) are provided by the separate `move` verb (added 2026-09-25, TASK-87/88).
+
 ### 2.7 Add panes and tabs
 
 The user can add workspace capacity through `zelper`.
@@ -155,6 +157,27 @@ The exact option names may change during detailed design if there is a clear imp
 - bare positional operand = normal/default resource form
 - alternative source forms = explicit options
 - mutually exclusive source forms must be rejected when supplied together
+
+### 2.10 Watch pane output for a pattern（added 2026-09-25, TASK-86。元P1→実装）
+
+The user (or an agent) can wait until a given pattern appears in the output of one or more panes, without polling manually.
+
+Requirements:
+
+- watch the visible output (optionally including scrollback) of a multi-pane target set and report the first pane where a line matching the pattern appears (any-hit)
+- the first check SHALL run immediately (already-emitted text SHALL match), and polling continues at a configurable interval until a max attempt count
+- fixed substring matching by default, with regex as an explicit opt-in; an empty pattern and other invalid arguments SHALL be rejected before any polling starts
+- termination is hit or exhaustion only; per-pane read failures during polling SHALL be reported distinctly (partial failure) rather than aborting the whole watch
+
+### 2.11 Session lifecycle: attach / detach / create sessions（added 2026-09-25, TASK-89）
+
+The user can hand a session over to interactive use and back, and create detached sessions from non-interactive contexts.
+
+Requirements:
+
+- interactive attach SHALL require a TTY and fail fast (before launching zellij) otherwise
+- detach SHALL address the attach clients of the resolved target session
+- detached session creation SHALL work in environments where no session exists yet, and report post-creation presence in the session list
 
 The same principle applies throughout the CLI, not only to `remap`.
 
@@ -283,7 +306,7 @@ Dry run must report the resolved targets and planned operations without mutating
 
 - richer selection filters
 - saved groups / aliases for pane sets
-- watch/wait semantics for pane output or state
+- watch/wait semantics for pane output or state（pane outputのpattern監視〔watch〕は2026-09-25 user指示によりP0相当へ昇格しTASK-86で実装済み。残るwait semantics〔run block系のprocess終了待ち・state監視〕はP1のまま分離）
 - batch execution policies
 - richer remap policies (reuse tabs, naming policies, overflow variants)
 - configuration file for defaults
@@ -306,7 +329,7 @@ The first version SHALL NOT aim to:
 - recreate panes just to perform remapping when preservation is possible
 - invent a large selector DSL before common positional/options grammar is proven insufficient
 
-Commands such as focus/move that are already easy interactively are lower priority unless they are needed as internal primitives or become valuable as part of multi-step wrapper operations.
+Commands such as focus/move that are already easy interactively are lower priority unless they are needed as internal primitives or become valuable as part of multi-step wrapper operations.（改訂2026-09-25・TASK-87: `move pane`は軽量な単一対象primitiveとして追加済み〔TASK-88実装〕。focus系は引き続き低優先）
 
 ## 6. Technology requirements
 

@@ -46,6 +46,10 @@ fn wants_json(cli: &Cli) -> bool {
             RemoveTarget::Pane { json, .. } => *json,
             RemoveTarget::Tab { json, .. } => *json,
         },
+        Verb::Move { target } => match target {
+            MoveTarget::Pane { json, .. } => *json,
+            MoveTarget::Tab { json, .. } => *json,
+        },
         Verb::Attach { json, .. } => *json,
         Verb::Detach { json, .. } => *json,
         Verb::Watch { json, .. } => *json,
@@ -202,6 +206,62 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                     *dry_run,
                     *json,
                 ),
+            }
+        }
+        Verb::Move { target } => {
+            let backend = mk_backend(&cli)?;
+            match target {
+                zelper::cli::MoveTarget::Pane {
+                    pane,
+                    action,
+                    backwards,
+                    to_tab,
+                    swap_with,
+                    json,
+                } => {
+                    // cli enum（MovePaneAction）→domain（move_::PaneMoveAction）への
+                    // 写像（resize armと同一pattern。三者排他・--backwards×rotateの
+                    // 最終検証はapp層）
+                    let act = action.map(|a| match a {
+                        zelper::cli::MovePaneAction::Left => {
+                            zelper::app::move_::PaneMoveAction::Direction(
+                                zelper::zellij::ResizeDirection::Left,
+                            )
+                        }
+                        zelper::cli::MovePaneAction::Right => {
+                            zelper::app::move_::PaneMoveAction::Direction(
+                                zelper::zellij::ResizeDirection::Right,
+                            )
+                        }
+                        zelper::cli::MovePaneAction::Up => {
+                            zelper::app::move_::PaneMoveAction::Direction(
+                                zelper::zellij::ResizeDirection::Up,
+                            )
+                        }
+                        zelper::cli::MovePaneAction::Down => {
+                            zelper::app::move_::PaneMoveAction::Direction(
+                                zelper::zellij::ResizeDirection::Down,
+                            )
+                        }
+                        zelper::cli::MovePaneAction::Rotate => {
+                            zelper::app::move_::PaneMoveAction::Rotate
+                        }
+                    });
+                    zelper::app::move_::run_pane(
+                        backend.as_ref(),
+                        pane,
+                        act,
+                        *backwards,
+                        to_tab.as_deref(),
+                        swap_with.as_deref(),
+                        *json,
+                    )
+                }
+                zelper::cli::MoveTarget::Tab {
+                    tab,
+                    swap_with,
+                    json,
+                } => zelper::app::move_::run_tab(backend.as_ref(), tab, swap_with, *json),
             }
         }
         Verb::Resize { target } => {

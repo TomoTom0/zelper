@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 Panels are addressed by pane id (terminal_3, plugin_1, or a bare number).\n\
 Targets: positional pane ids plus filter options (--tab/--name/--command/--cwd/--all).\n\
 \n\
-Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run\n  zelper watch --command codex -- READY\n  zelper add session work",
+Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run\n  zelper move pane 3 left\n  zelper watch --command codex -- READY\n  zelper add session work",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -108,6 +108,11 @@ pub enum Verb {
     Remove {
         #[command(subcommand)]
         target: RemoveTarget,
+    },
+    /// 単一pane/tabの移動・交換（remap=全体再配置に対するlightweight操作）
+    Move {
+        #[command(subcommand)]
+        target: MoveTarget,
     },
     /// 対話attach（TTY必須。非TTYはexit 7）
     Attach {
@@ -277,6 +282,46 @@ pub enum AddTarget {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MoveTarget {
+    /// pane移動: zelper move pane PANESPEC (left|right|up|down|rotate) [--backwards]
+    ///          / zelper move pane PANESPEC --to-tab TABSPEC / --swap-with PANESPEC
+    ///          （action positional / --to-tab / --swap-with は三者排他かつちょうど1つ）
+    Pane {
+        pane: String,
+        /// 方向移動・rotate（--to-tab / --swap-with と排他）
+        action: Option<MovePaneAction>,
+        /// rotateを逆回しにする（action=rotateとのみ併用可）
+        #[arg(long, requires = "action")]
+        backwards: bool,
+        /// 移動先tab（ID or 一意な名前。action positional / --swap-with と排他）
+        #[arg(long = "to-tab", conflicts_with_all = ["action", "swap_with"])]
+        to_tab: Option<String>,
+        /// 交換相手pane（action positional / --to-tab と排他）
+        #[arg(long, conflicts_with_all = ["action", "to_tab"])]
+        swap_with: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// tab交換: zelper move tab TABSPEC --swap-with TABSPEC
+    Tab {
+        tab: String,
+        #[arg(long)]
+        swap_with: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum MovePaneAction {
+    Left,
+    Right,
+    Up,
+    Down,
+    Rotate,
 }
 
 #[derive(Subcommand, Debug)]

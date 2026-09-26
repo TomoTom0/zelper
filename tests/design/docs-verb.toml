@@ -72,3 +72,22 @@ source = "2段構造の値域（docs readme | llm usage|skill|snippet） + docs/
 description = "docs llm <resource>の値域はusage/skill/snippetに限る: 不明resourceはusage error。将来の値追加時に意図せず受理されない固定"
 given = "zelper docs llm bogusの実行（不明resource）"
 expect_return = "exit 2（usage error）"
+
+[[condition]]
+id = "docs-verb.usage-docs-cover-move-grammar"
+source_lines = "tests/cli/docs.rs:90"
+target_function = "docs::run（DocsTarget::LlmUsage）のmove文法記載"
+source = "tmp/tasks/tm-87/design_verb-extension.md §5.1（docs-verb.toml: 配布物〔README/llm/skill/snippet〕新verb記載の条件を追加）/§1.2（move系grammar確定形: move pane PANESPEC (left|right|up|down|rotate) [--backwards] / --to-tab TABSPEC / --swap-with PANESPEC・move tab TABSPEC --swap-with TABSPEC）+ §6（docs更新範囲: llm.mdへmove文法・JSON例・error対応追記）"
+description = "LLM向けusage参照（docs/usage/llm.md）のmove文法記載: move paneの全形式（directional/rotate positional・--to-tab・--swap-with）とmove tab --swap-withが`zelper docs llm usage`の出力に現れる。agentが誤用なくmoveを使うための配布物側の保証"
+given = "zelper docs llm usage の実行"
+expect_return_shape = "exit 0かつstdoutが \"move pane\"・\"(left|right|up|down|rotate)\"・\"--to-tab\"・\"--swap-with\"・\"move tab\" をすべて含む"
+
+[[condition]]
+id = "docs-verb.distribution-covers-verb-set-v2"
+source_lines = "tests/cli/docs.rs:116"
+target_function = "docs::run（全配布物）のverb set v2=12記載"
+source = "tmp/tasks/tm-87/design_verb-extension.md §5.1（docs-verb.toml: 配布物〔README/llm/skill/snippet〕新verb記載の条件を追加——TASK-88がwatch/attach/detach分の継承条件としても担う）/§1.1（verb set v2 = 12: 既存8 + move/attach/detach/watch）+ §6（docs更新範囲: README・skill/SKILL.md・snippet.mdへの新verb追記）"
+description = "全配布物のverb set v2=12記載: README・llm usage・skill・snippetの4配布物がいずれもTASK-86/87/88追加verb（watch・attach・detach・move）に言及する。配布物と実装のverb集合の一致保証（docs verbは正本のbyte一致出力であるため本文の記載内容が検証対象）"
+given = "zelper docs readme / llm usage / llm skill / llm snippet の各実行"
+expect_return_shape = "いずれもexit 0かつstdoutが move・watch・attach・detach の4語をすべて含む"
+

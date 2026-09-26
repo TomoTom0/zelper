@@ -69,6 +69,20 @@ if [[ "$3" == "action" ]]; then
     list-panes) cat "$FAKE_FIXTURES/panes.json"; exit 0;;
     list-tabs)
       if [[ -n "$FAKE_FAIL_LIST_TABS" ]]; then echo "boom" >&2; exit 1; fi
+      # TASK-88: FAKE_TABS_JSON設定時は行単位の状態file（1行=1tab object）で
+      # tab順序を管理し、move-tabのposition移動をlist-tabs応答へ反映する
+      # （未設定時は従来のfixture応答）
+      state="${FAKE_LOG}.tabs"
+      if [[ -n "$FAKE_TABS_JSON" ]]; then
+        if [[ ! -f "$state" ]]; then
+          printf '%s' "$FAKE_TABS_JSON" | tr -d '\n' \
+            | sed -e 's/^\[ *//' -e 's/ *\]$//' -e 's/}, *{/}\n{/g' > "$state"
+        fi
+        echo '['
+        awk 'NR > 1 { printf "," } { printf "%s\n", $0 }' "$state"
+        echo ']'
+        exit 0
+      fi
       cat "$FAKE_FIXTURES/tabs.json"; exit 0;;
     dump-screen)
       pane=""; full=""
@@ -134,6 +148,54 @@ if [[ "$3" == "action" ]]; then
     # 未設定時は rc=0 silent no-op成功（client不在の実zellij挙動・M3 (b)と同一）
     detach)
       if [[ -n "$FAKE_DETACH_FAIL" ]]; then echo "boom" >&2; exit 1; fi
+      echo "ok"; exit 0;;
+    # TASK-88: FAKE_FAIL_MOVE_PANE設定時はmove-pane系actionを非zero終了させる
+    # （OperationFailed exit 5の検証用）。未設定時はrc=0（pane状態は変えないため
+    # zeller側の幾何比較はno-op warning経路になる）
+    move-pane|move-pane-backwards)
+      if [[ -n "$FAKE_FAIL_MOVE_PANE" ]]; then echo "boom" >&2; exit 1; fi
+      echo "ok"; exit 0;;
+    # TASK-88: FAKE_FAIL_MOVE_TAB設定時はmove-tabを非zero終了させる。未設定時は
+    # FAKE_TABS_JSONの状態file上で1 position移動（edgeはwrap）し、各行のposition
+    # fieldを行番号へ再採番する（tab交換の2d-1回呼出に対してpostconditionの
+    # position交換が成立する応答）
+    move-tab)
+      if [[ -n "$FAKE_FAIL_MOVE_TAB" ]]; then echo "boom" >&2; exit 1; fi
+      dir=""; tid=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          left|right) dir="$1"; shift;;
+          -t) tid="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      state="${FAKE_LOG}.tabs"
+      if [[ -f "$state" && -n "$tid" ]]; then
+        awk -v dir="$dir" -v tid="$tid" '
+          { a[NR] = $0 }
+          END {
+            n = NR; pos = 0
+            for (i = 1; i <= n; i++)
+              if (a[i] ~ ("\"tab_id\": *" tid "[,}]")) { pos = i; break }
+            if (pos == 0) { for (i = 1; i <= n; i++) print a[i]; exit }
+            line = a[pos]
+            if (dir == "right") new_pos = (pos < n) ? pos + 1 : 1
+            else new_pos = (pos > 1) ? pos - 1 : n
+            k = 0
+            for (j = 1; j <= n; j++) if (j != pos) b[++k] = a[j]
+            k = 0
+            for (i = 1; i <= n; i++) {
+              if (i == new_pos) out[i] = line
+              else { k++; out[i] = b[k] }
+            }
+            for (i = 1; i <= n; i++) {
+              l = out[i]
+              rep = "\"position\": " (i - 1)
+              gsub(/"position": *[0-9]+/, rep, l)
+              print l
+            }
+          }' "$state" > "${state}.new" && mv "${state}.new" "$state"
+      fi
       echo "ok"; exit 0;;
     *) echo "ok"; exit 0;;
   esac
@@ -1440,4 +1502,200 @@ fn add_session_postcondition_empty_list_is_verification_failed() {
         "calls: {:?}",
         calls(&log)
     );
+}
+
+// ---------------------------------------------------------------------------
+// move（TASK-88・move.tomlのCLI表面はcli-grammar管轄。設計§5.3: FAKE_LOG全argv
+// 記録でmoveのargv列を担保し、FAKE_FAIL_MOVE_PANE / FAKE_FAIL_MOVE_TABで
+// 非zero終了のexit分類を検証する）
+
+/// 4 tab構成のtabs応答（FAKE_TABS_JSON。1行=1tab object。move-tabの状態管理は
+/// shimがlist-tabs応答へ反映する）
+const FOUR_TABS_JSON: &str = "[{\"position\":0,\"name\":\"w\",\"active\":true,\"are_floating_panes_visible\":false,\"selectable_tiled_panes_count\":2,\"selectable_floating_panes_count\":0,\"tab_id\":0},{\"position\":1,\"name\":\"x\",\"active\":false,\"are_floating_panes_visible\":false,\"selectable_tiled_panes_count\":2,\"selectable_floating_panes_count\":0,\"tab_id\":1},{\"position\":2,\"name\":\"y\",\"active\":false,\"are_floating_panes_visible\":false,\"selectable_tiled_panes_count\":2,\"selectable_floating_panes_count\":0,\"tab_id\":2},{\"position\":3,\"name\":\"z\",\"active\":false,\"are_floating_panes_visible\":false,\"selectable_tiled_panes_count\":2,\"selectable_floating_panes_count\":0,\"tab_id\":3}]";
+
+/// move paneの三者排他（action positional / --to-tab / --swap-with はちょうど1つ）
+/// と--backwords×rotate制約のCLI parse表面。いずれもusage error exit 2で、
+/// backend呼出（session解決後のmove-pane argv）は不発
+// [covers:cli-grammar.move-three-way-exclusive-usage-error]
+#[test]
+fn move_pane_three_way_exclusive_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    // (1) 3指定とも不在
+    let (mut cmd, _log) = zelper("move-none");
+    cmd.args(["move", "pane", "1"]).assert().failure().code(2);
+    // (2) action positional + --to-tab同時
+    let (mut cmd, log) = zelper("move-left-totab");
+    cmd.args(["move", "pane", "1", "left", "--to-tab", "0"])
+        .assert()
+        .failure()
+        .code(2);
+    // (3) --swap-with + --to-tab同時
+    let (mut cmd, _) = zelper("move-swap-totab");
+    cmd.args(["move", "pane", "1", "--to-tab", "0", "--swap-with", "2"])
+        .assert()
+        .failure()
+        .code(2);
+    // (4) --backwards単独（action不在。clap requires）
+    let (mut cmd, _) = zelper("move-backwards-alone");
+    cmd.args(["move", "pane", "1", "--backwards"])
+        .assert()
+        .failure()
+        .code(2);
+    // (5) --backwards + action=left（rotate以外との併用。app層runtime検証）
+    let (mut cmd, _) = zelper("move-backwards-left");
+    cmd.args(["move", "pane", "1", "left", "--backwards"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("--backwards"));
+    // parse段・検証段ともにmove-pane argvは不発
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("move-pane")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// move pane nativeのCLI表面: `move pane 1 left`は`move-pane left -p terminal_1`
+/// を発行しexit 0。fake shimはpane状態を変えないため幾何比較はno-op判定になり、
+/// warning行（stderr）+ JSON envelope（data.noop=true）で報告する（M1実測の
+/// edge silent no-op契約。exit codeのみでは成否判別不能のための検出経路）
+// [covers:cli-grammar.move-native-argv-and-noop-warning]
+#[test]
+fn move_pane_native_argv_json_and_noop_warning() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("move-left");
+    let output = cmd
+        .args(["move", "pane", "1", "left", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c.ends_with("action move-pane left -p terminal_1")),
+        "argv: {:?}",
+        calls(&log)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning"),
+        "no-op warning（幾何不変の検出）: {stderr}"
+    );
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["target"], "terminal_1");
+    assert_eq!(v["data"]["action"], "left");
+    assert_eq!(v["data"]["noop"], true);
+
+    // rotate backwardsのargv（move-pane-backwards・-p尊重）
+    let (mut cmd, log) = zelper("move-rotate-back");
+    cmd.args(["move", "pane", "1", "rotate", "--backwards"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c.ends_with("action move-pane-backwards -p terminal_1")),
+        "argv: {:?}",
+        calls(&log)
+    );
+}
+
+/// move系backend失敗のexit分類: move-pane・move-tabの非zero終了はいずれも
+/// OperationFailed（exit 5・--json時はerror envelope）
+// [covers:cli-grammar.move-failure-exit5-operation-failed]
+#[test]
+fn move_backend_failure_is_exit5() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("move-fail-pane");
+    cmd.env("FAKE_FAIL_MOVE_PANE", "1")
+        .args(["move", "pane", "1", "left", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .stdout(predicates::str::contains("\"OperationFailed\""));
+
+    let (mut cmd, _) = zelper("move-fail-tab");
+    cmd.env("FAKE_FAIL_MOVE_TAB", "1")
+        .env("FAKE_TABS_JSON", FOUR_TABS_JSON)
+        .args(["move", "tab", "0", "--swap-with", "2", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .stdout(predicates::str::contains("\"OperationFailed\""));
+}
+
+/// move tab交換のCLI表面: d=2（position 0と2）の交換は`move-tab right -t 0`×2 +
+/// `move-tab left -t 2`×1の計3回（隣接transposition合成・go-to-tab不使用）で
+/// position交換がpostcondition検証を通過しexit 0する
+// [covers:cli-grammar.move-tab-swap-argv-sequence]
+#[test]
+fn move_tab_swap_argv_sequence_and_success() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, log) = zelper("move-tabswap");
+    let out = cmd
+        .env("FAKE_TABS_JSON", FOUR_TABS_JSON)
+        .args(["move", "tab", "0", "--swap-with", "2", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let argv: Vec<String> = calls(&log)
+        .iter()
+        .filter(|c| c.contains("action move-tab "))
+        .map(|c| c.rsplit("action ").next().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        argv,
+        vec![
+            "move-tab right -t 0",
+            "move-tab right -t 0",
+            "move-tab left -t 2"
+        ],
+        "2d-1回の隣接transposition合成: {argv:?}"
+    );
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("go-to-tab")),
+        "-tはfocus不変のためgo-to不使用: {:?}",
+        calls(&log)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["action"], "swap-tab");
+    assert_eq!(
+        v["data"]["tabs"][0],
+        serde_json::json!({"id": 0, "position": 2})
+    );
+    assert_eq!(
+        v["data"]["tabs"][1],
+        serde_json::json!({"id": 2, "position": 0})
+    );
+}
+
+/// verb set v2=12のうちTASK-86/87/88追加verb（watch/attach/detach/move）が
+/// helpのCommands一覧に現れる（新verb構文のhelp出現・廃止option不在規約と同型）
+// [covers:cli-grammar.verb-set-v2-new-verbs-in-help]
+#[test]
+fn help_lists_verb_set_v2_new_verbs() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let (mut cmd, _) = zelper("help-verbs");
+    let out = cmd
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8_lossy(&out);
+    for verb in ["move", "attach", "detach", "watch"] {
+        assert!(s.contains(verb), "helpに{verb}が現れる: {}", first_line(&s));
+    }
+}
+
+/// helper: 先頭行のみ（assert文面のコンパクト化用）
+fn first_line(s: &str) -> &str {
+    s.lines().next().unwrap_or("")
 }

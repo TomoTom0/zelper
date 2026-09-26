@@ -4,15 +4,16 @@
 [meta]
 feature = "move"
 source_file = "src/app/move_.rs"
-verified = false
-verified_at = ""
-verified_by = ""
-test_command = ""
-source_hash = ""
-note = "TASK-88 test-first前段（実装前・src/app/move_.rs未作成）。src/zellij/process.rs（move_pane / move_tab trait実装・TabMoveDirection）とsrc/companion.rs（§2.8 remap.rsから切り出しのcompanion helper）も検証対象。fake_move test binary（Cargo.toml [[test]]追記）は後段実装"
+verified = true
+verified_at = "2026-09-26"
+verified_by = "claude"
+test_command = "cargo test --test fake_move"
+source_hash = "594dc601121f6e636f1a1a6d7d8bda86be8fae92"
+note = "TASK-88実装済み（2026-09-26）。L2 22条件はtests/fake_backend/move.rs（fake_move）・CLI parse表面・help出現はcli-grammar.tomlのmove系5条件が分担。src/zellij/process.rs（move_pane / move_tab trait実装・MovePaneOp・TabMoveDirection）とsrc/companion.rs（§2.8 remap.rsから切り出しのcompanion helper。setup_and_probe・poll・break_id_payload・POLL_*・PERMISSION_HINT）も検証対象"
 
 [[condition]]
 id = "move.pane-direction-argv"
+source_lines = "tests/fake_backend/move.rs:137"
 target_function = "move_::run_pane_native（directional）/ ZellijBackend::move_pane（argv: move-pane <dir> -p <spec>）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.1（MovePaneAction: Left/Right/Up/Down/Rotate ValueEnum positional）/§2.3（move_pane: op=Direction(ResizeDirection)・argv = move-pane <dir> -p <spec>）/§2.4（run_pane_native: 対象解決→move_pane→geometry比較→1行サマリ）/§5.1 + TASK-88 body【M1】 + tmp/tasks/tm-88/m1_result.log（CASE L/R/U/D: slot幾何完全不変のpane id付け替えswap・rc=0・pane id/tab id不変）"
 description = "native方向移動（4方位）の発行形式: 方向指定はMovePaneOp::Direction（ResizeDirection流用）としてbackendのmove_paneへ渡り、zellij argvはmove-pane <dir> -p <spec>に組み立てられる。-p指定により非focus paneを対象にできる（M1(b)(c)実測: focusは元paneに追従しzeller側のfocus制御は不要）。M1実測の挙動（slot幾何不変のpane id付け替えswap）はfakeの基準値"
@@ -21,6 +22,7 @@ expect_return = "Ok。move_paneがMovePaneOp::Direction(Left)でちょうど1回
 
 [[condition]]
 id = "move.rotate-argv"
+source_lines = "tests/fake_backend/move.rs:185"
 target_function = "move_::run_pane_native（rotate）/ ZellijBackend::move_pane（argv: move-pane -p <spec>）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.2（rotate値+--backwards）/§2.3（op=RotateForwards・argv = move-pane -p <spec>〔bare〕）/§5.1 + TASK-88 body【M1】bareはrotate forwards + tmp/tasks/tm-88/m1_result.log（M1 (f)+(c) rotate系: bare move-pane -p はサイクル前回し・rotate-series CHECK PASS）"
 description = "rotate（forwards）の発行形式: action=rotate・--backwardsなしはMovePaneOp::RotateForwardsとしてmove_paneへ渡り、argvはbareのmove-pane -p <spec>（方向引数なし）になる。bareがrotate forwardsであることはM1実測確定"
@@ -29,6 +31,7 @@ expect_return = "Ok。move_paneがMovePaneOp::RotateForwardsでちょうど1回�
 
 [[condition]]
 id = "move.rotate-backwards-argv"
+source_lines = "tests/fake_backend/move.rs:216"
 target_function = "move_::run_pane_native（rotate --backwards）/ ZellijBackend::move_pane（argv: move-pane-backwards -p <spec>）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.2（--backwardsはaction=rotateとのみ併用可）/§2.3（op=RotateBackwards・argv = move-pane-backwards -p <spec>）/§5.1 + TASK-88 body【M1】backwardsはサイクル逆回し（-p尊重） + tmp/tasks/tm-88/m1_result.log（M1 (f)+(c): move-pane-backwards -p は逆回し）・m1c_result.log（非focus対象でもbackwardsが機能）"
 description = "rotate backwardsの発行形式: --backwards付きrotateはMovePaneOp::RotateBackwardsとしてmove_paneへ渡り、argvはmove-pane-backwards -p <spec>になる（別action名。方向引数を持たない）"
@@ -37,6 +40,7 @@ expect_return = "Ok。move_paneがMovePaneOp::RotateBackwardsでちょうど1回
 
 [[condition]]
 id = "move.pane-edge-noop-warning"
+source_lines = "tests/fake_backend/move.rs:243"
 target_function = "move_::run_pane_native（edge silent no-op検出）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.4（M1実測確定: edge方向移動はrc=0・出力空のsilent no-opのためexit codeのみでは成否判別不能。postconditionとしてlist-panes再取得でgeometry比較し、幾何不変ならno-opだった旨をwarning報告・exit 0。resizeのno-op報告規約に準拠）/§5.1 + TASK-88 body【M1】edge方向はsilent no-op rc=0 + tmp/tasks/tm-88/m1_result.log（edge EL/EU/ER/ED: rc=0・出力空・幾何不変）"
 description = "edge方向移動のno-op検出: 対象paneが移動方向の端にいる場合、zellijはrc=0・出力空で何も変えない（M1実測）。無検証の成功を返さず、実行後のlist-panes再取得と幾何比較でno-opを検出してwarning報告する（resize.noop-stops-early-with-warningと同一規約・誤成功報告の防止）。検証限界: warning文面そのものはrun層では報告構造で検証（CLI表面の文面はL3）"
@@ -45,6 +49,7 @@ expect_return = "Ok（exit 0）。move_pane呼出はrc=0で完了するが、lis
 
 [[condition]]
 id = "move.exclusive-usage"
+source_lines = "tests/fake_backend/move.rs:267"
 target_function = "move_::run_pane（引数排他検証: action positional / --to-tab / --swap-with / --backwards）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.2（MovePaneAction positional / --to-tab / --swap-with は三者相互排他かつちょうど1つ必須。違反はusage error exit 2。clap conflicts + code levelのexactly one検証〔LayoutSpec::validate_exclusiveと同一pattern〕・--backwardsはaction=rotateとのみ併用可〔runtime検証〕）/§1.5（DD-1.5排他規則追記）/§4.1（構文違反 → Usage 2）/§5.1"
 description = "move paneの三者排他と--backwards制約: 方向・rotate・--to-tab・--swap-withは相互排他かつちょうど1つ必須（0個・2個同時はusage error）。--backwardsはaction=rotateとのみ併用可（direction指定との併用はusage error。clapで表現できないenum値条件のためapp層runtime検証）"
@@ -53,6 +58,7 @@ expect_return = "いずれもErr（ErrorClass=Usage・exit 2）。move_pane・co
 
 [[condition]]
 id = "move.self-target-swap-usage-error"
+source_lines = "tests/fake_backend/move.rs:324"
 target_function = "move_::run_pane_swap / move_::run_tab_swap（同一対象検証）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.2（--swap-withの相手と同一対象〔自分自身と交換〕はusage error）/§4.1（move tab swap: 同一tab指定 → Usage 2）"
 description = "swap系の同一対象指定: move pane P --swap-with P（自分自身）と move tab T --swap-with T（同一tab）はいずれもusage error。無意味な操作の実行防止（解決前の文字列/解決後のidのどちらの段階で弾くかは実装に委ねるが、状態変更前にUsageで中断する）"
@@ -61,6 +67,7 @@ expect_return = "いずれもErr（ErrorClass=Usage・exit 2）。backend呼出�
 
 [[condition]]
 id = "move.target-resolution-not-found-and-ambiguous"
+source_lines = "tests/fake_backend/move.rs:351"
 target_function = "move_::run_pane_native / run_pane_to_tab / run_pane_swap / run_tab_swap（対象解決）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.4（対象解決: list_panes + 単一解決・list_tabs + selector::resolve_tab）/§4.1（pane不在/複数hit → NoTarget/AmbiguousTarget 3・tab不在・名前曖昧〔--to-tab〕→ NoTarget/AmbiguousTarget 3・move tab swapのtab不在・曖昧 → 3/3）"
 description = "対象解決のerror分類: PANESPEC解決0件はNoTarget・複数hitはAmbiguousTarget。--to-tab宛先tab・swap対象tabの不在はNoTarget・同名曖昧はAmbiguousTarget（selector::resolve_tab共通解決のerror mapping）。黙って除外・先頭採用をしない"
@@ -69,6 +76,7 @@ expect_return = "解決0件・不在はErr（ErrorClass=NoTarget・exit 3）。�
 
 [[condition]]
 id = "move.floating-pane-preflight"
+source_lines = "tests/fake_backend/move.rs:391"
 target_function = "move_::run_pane_native / run_pane_to_tab / run_pane_swap（floating pane対象外検査）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（companion系preflight step1: floating paneはE6未検証のためPreflight error / native系floating pane扱い: M1実測では方向移動はrc=0で座標shiftとして動作〔slot swapでない〕しrotateはno-opとなる。この挙動はslot配置の変更の直観に反するためcompanion系と同一にPreflight error exit 7としremap --embed-floating併用〔tiled化してから移動〕をhintする）/§4.1（floating pane対象 → Preflight 7〔native・companion双方〕）/§5.1 + TASK-88 body【M1】floatingは座標shift rc=0〔zellerはPreflight errorで統一〕 + tmp/tasks/tm-88/m1_result.log（M1 (e): x=25→15の座標shift・rotateは不変）"
 description = "floating paneの遮断（native・companion双方）: 対象paneがfloatingの場合、native系（方向移動・rotate）はM1実測の座標shiftという直観に反する挙動をとるため、companion系と同一に状態変更前にPreflight errorで中断する（exit codeでは判別不能・zellerは到達させない）。native系はremap --embed-floating併用のhintを含む"
@@ -77,6 +85,7 @@ expect_return = "いずれもErr（ErrorClass=Preflight・exit 7）。native系�
 
 [[condition]]
 id = "move.plugin-pane-preflight"
+source_lines = "tests/fake_backend/move.rs:454"
 target_function = "move_::run_pane_to_tab / run_pane_swap（plugin pane対象外検査）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（companion系preflight step1: 対象paneはterminal・tiled・selectable・非exited/held〔is_remap_source相当の単一pane版検査〕。plugin paneはPreflight error）/§4.1（companion系: floating/plugin pane → Preflight 7）/§5.1"
 description = "companion系のplugin pane対象外検査: --to-tab / --swap-withの対象はterminal paneに限る。plugin pane指定は状態変更前にPreflight error（pipe経路では対象を特定できないため事前遮断）。対象検査はterminal・tiled・selectable・非exited/heldの単一pane版"
@@ -85,6 +94,7 @@ expect_return = "いずれもErr（ErrorClass=Preflight・exit 7）。companion 
 
 [[condition]]
 id = "move.to-tab-companion-sequence"
+source_lines = "tests/fake_backend/move.rs:497"
 target_function = "move_::run_pane_to_tab（companion経路の実行sequence・polling・postcondition）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.4（run_pane_to_tab: 対象pane・宛先tab解決→preflight→companion経路→polling完了確認→報告）/§3.2（P1採用: 既存break-idの部分利用・tab間移動はbreak-id <宛先tab_id> <単一pane_id>）/§3.3（実行sequence: companion setup + probe → pipe発行 + polling〔list-panes 250ms/10s〕→完了条件 = pane.tab_id == 宛先tab id→postcondition: 完了条件 + pane id不変）/§2.8（helper切り出し）/§5.1 + TASK-88 body【M8】pane id不変基準 + tmp/tasks/tm-88/m8_result.log（CHECK[m8-*] 全PASS: pane id/title不変）"
 description = "--to-tabのcompanion実行一式: 対象・宛先解決後、companion setup → probe pipe（zelper-probe-<nonce>出現確認）→ break-id pipe（payload = 宛先tab idと単一pane id。remap anchor寄せと同一命令の部分利用）→ list-panes pollingでpane.tab_id == 宛先tab idを確認して完了する。postconditionはpane id不変（M8基準）。polling間隔・deadline（250ms/10s）は実装定数のため本条件では検証しない"
@@ -93,6 +103,7 @@ expect_return = "Ok。呼び出し列にcompanion setup（permissions seed）→
 
 [[condition]]
 id = "move.to-tab-noop-same-tab"
+source_lines = "tests/fake_backend/move.rs:530"
 target_function = "move_::run_pane_to_tab（宛先==現tabのno-op判定）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（preflight step1: --to-tabの宛先がpaneの現tabと同一 → pipeなしwarning付きexit 0。resizeのno-op規約に準拠）/§5.1"
 description = "宛先==現tabのno-op: 対象paneが既に宛先tabに所属する場合はcompanion経路を一切使わず、warning付きexit 0で完了する（不要なpipe・plugin操作を行わない）"
@@ -101,6 +112,7 @@ expect_return = "Ok（exit 0）かつno-op warning報告。companion setup・pro
 
 [[condition]]
 id = "move.probe-failure"
+source_lines = "tests/fake_backend/move.rs:548"
 target_function = "move_::run_pane_to_tab / run_pane_swap（probe不成立の安全側中断）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（step2: companion setup + probe。probe不成立は状態変更前にOperationFailed + 権限hint）/§4.1（probe不成立 → OperationFailed 5〔+権限hint〕）/§5.1 + remap DD-10.4と同一の権限hint構成（seed未反映・dialog pending・手動grant案内）"
 description = "probe不成立の安全側中断: probe pipe送信後にcompanion plugin paneのtitle（zelper-probe-<nonce>）が出現しない系列では、一切の状態変更（break-id pipe等）前にOperationFailedで中断する。errorは権限hint（seed未反映・dialog pending・手動grant案内）を含む（remap r31と同一構成）"
@@ -109,6 +121,7 @@ expect_return = "Err（ErrorClass=OperationFailed・exit 5・messageに権限hin
 
 [[condition]]
 id = "move.companion-setup-failure"
+source_lines = "tests/fake_backend/move.rs:575"
 target_function = "move_::run_pane_to_tab / run_pane_swap（companion setup失敗）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.1（companion setup失敗 → Preflight 7）/§5.1 + §2.8（切り出しhelper: ensure_companion_wasm + ensure_permissionsの呼び出し列。remap/move双方から利用）"
 description = "companion setup失敗の事前中断: companion setup（wasm extract / permissions seed）が失敗する系列では、probe・break-id pipe等の状態変更前にPreflight errorで中断する。remap-sequence.tomlではfake経路の注入test fnがなく未条件化だった経路を、TASK-88のhelper切り出し（src/companion.rs）とfake_move新設によりmove側で条件化する"
@@ -117,6 +130,7 @@ expect_return = "Err（ErrorClass=Preflight・exit 7）。probe pipe・break-id 
 
 [[condition]]
 id = "move.to-tab-poll-timeout"
+source_lines = "tests/fake_backend/move.rs:604"
 target_function = "move_::run_pane_to_tab（polling timeout）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（step3: pipe発行 + polling〔list-panes 250ms/10s〕・完了条件 = pane.tab_id == 宛先tab id / step4: polling timeout → OperationFailed〔権限hint付き・exit 5〕。いずれも移動済み/未移動の正確な報告〔pipeはCLI失敗後もserver側で遅延実行されうる旨の注意を含む。remap 10.7と同一文面規則〕）/§4.1 + §5.1"
 description = "to-tab完了pollingのtimeout: break-id pipe送信後にpane.tab_idが宛先へ変わらない系列では、deadline（10s）超過でOperationFailedとして中断する。報告はremap DD-10.7と同一文面規則: 権限hint・pipe遅延実行の注意・移動済み/未移動の正確な報告を含む"
@@ -125,6 +139,7 @@ expect_return = "Err（ErrorClass=OperationFailed・exit 5）。messageに権限
 
 [[condition]]
 id = "move.swap-order-singleton-rule"
+source_lines = "tests/fake_backend/move.rs:630"
 target_function = "move_::run_pane_swap（pane交換の順序規則・singleton判定）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（pane交換の順序規則: AもBも当該tabの最後のselectable paneでない → A→T_B先〔決定論的tie-break〕/ Aのみ最後 → B→T_A先〔T_AはBの到着後もAが残るまで空にならない〕/ Bのみ最後 → A→T_B先〔対称〕。移動元tab自動close〔E6事実1〕の回避）/§5.1"
 description = "pane交換2連発の順序規則: singleton判定（当該tabのselectable pane数==1基準）で発行順序を決め、どちらかのtabが一時的に空になって自動closeされる系列を構造的に回避する。両非singletonはA→T_Bが先（決定論的tie-break）、片方のみsingletonは非singleton側paneの移動が先（相手tab到着後の残存で空tabを防ぐ）"
@@ -133,6 +148,7 @@ expect_return = "いずれもOk。break-idの発行順序が規則どおり（�
 
 [[condition]]
 id = "move.swap-same-tab-preflight-error"
+source_lines = "tests/fake_backend/move.rs:709"
 target_function = "move_::run_pane_swap（同一tab内2 paneの拒否）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（同一tab内の2 pane → Preflight error exit 7。break系はtab間移動のみで、tab内位置交換の機構がzellijに存在しない。remapをhint）/§4.1/§5.1"
 description = "同一tab内のpane交換拒否: break-idはtab間移動のみを担うため、同一tab内の2 pane交換は実行できずPreflight errorとする（沈黙の失敗・pipe発行後のtimeoutにしない）。messageはremapへのhintを含む"
@@ -141,6 +157,7 @@ expect_return = "Err（ErrorClass=Preflight・exit 7・messageにremap hintを�
 
 [[condition]]
 id = "move.swap-both-singleton-preflight-error"
+source_lines = "tests/fake_backend/move.rs:734"
 target_function = "move_::run_pane_swap（両singleton tabの拒否）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（両方最後〔両singleton tab〕→ Preflight error exit 7。「どちらのtabも閉じて再作成が必要になりtab位置・idを保存できない。move tab --swap-with（tab交換。pane内容の位置関係は入れ替わるが、tab名・tab idの帰属は入れ替わらない点がpane交換と異なる）かremapを使うこと」をhint）/§9 R7/§5.1 + TASK-88 body【確定事実の前提: 順序規則では自動close回避不能】"
 description = "両singleton tabのpane交換拒否: どちらかのpane移動で必ず移動元tabが空になり自動closeされるため（順序規則で回避不能）、実行前にPreflight errorで中断する。hintは代替手段（move tab --swap-with・remap）と、tab交換ではtab名・tab idの帰属が入れ替わらない旨の差分案内を含む（R7）"
@@ -149,6 +166,7 @@ expect_return = "Err（ErrorClass=Preflight・exit 7・messageにmove tab --swap
 
 [[condition]]
 id = "move.swap-partial-failure-report"
+source_lines = "tests/fake_backend/move.rs:763"
 target_function = "move_::run_pane_swap（途中失敗の部分状態報告）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（途中失敗時: 1step目成功・2step目失敗なら「A moved to T_B; B remains in T_B。完了は zelper move pane B --to-tab T_A」を正確に報告。atomicityは主張しない〔DD-12準拠〕）/§5.1 + §9 R4"
 description = "pane交換2連発の途中失敗報告: 2 step目（B→T_A）が失敗する系列では、1 step目の実行済み（A moved to T_B）と未実行（B remains in T_B）を正確に区別して報告し、手動完了hint（move pane B --to-tab T_A）を含む。atomicityの主張・黙示をしない（2 pipe間失敗は起こりうる。R4）"
@@ -157,6 +175,7 @@ expect_return = "Err（ErrorClass=OperationFailed・exit 5）。messageに移動
 
 [[condition]]
 id = "move.tab-swap-argv-sequence"
+source_lines = "tests/fake_backend/move.rs:799"
 target_function = "move_::run_tab_swap / ZellijBackend::move_tab（argv: move-tab <left|right> -t <tab_id>）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.3（move_tab: TabMoveDirection〔Left/Right〕・argv = move-tab <left|right> -t <tab_id>。M2実測確定: direction positional必須・-tが存在し非active tabをfocus不変で1 position移動・go-to併用・focus復帰・step毎focus追跡は不要）/§2.4（run_tab_swap: 2 tab解決→position取得〔i<j・d=j-i〕→隣接transposition合成: A〔左側tab〕をright×d・相手側をleft×(d-1)の計2d-1回のmove-tab -t呼び出しで純position交換〔各呼び出しはedgeを越えないためwrap不発火・d=1はright×1の1回〕→id基準で追跡しstep毎にlist-tabsで存在確認→postcondition〔position交換・id/name不変をlist-tabsのid追跡で検証〕）/§5.1 + TASK-88 body【M2】 + tmp/tasks/tm-88/m2_result.log（move-tab left --tab-id 3: 非active tab移動・active維持・CHECK[m2-id-name] PASS）・m2b_result.log（隣接1回: A0B1→B0A1の純swap・最後尾rightはwrap全体rotation〔直接反復では純swap不可の観測根拠〕）"
 description = "tab交換の隣接transposition合成: 左側tab A（position i）をright×d・相手B（position j>i）をleft×(d-1)の計2d-1回のmove_tab呼び出しで純position交換を実現する（M2実測「隣接は1回で純swap」からの導出。各呼び出しは1 position移動のためedge wrap〔全体rotation〕は不発火）。d=1（隣接）はright×1の1回。step毎にlist-tabsでid存在確認（id基準追跡）。-tがfocus不変のためgo-to-tab併用・focus復帰は行わない（M2確定）。postcondition: 両tabのposition交換・tab id/name不変"
@@ -165,6 +184,7 @@ expect_return = "Ok。move_tab呼び出しはd=2系でTabMoveDirection::Right×2
 
 [[condition]]
 id = "move.tab-swap-verification-failed"
+source_lines = "tests/fake_backend/move.rs:857"
 target_function = "move_::run_tab_swap（postcondition position検証）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.1（move tab swap: position不一致〔postcondition〕→ VerificationFailed 7）/§2.4（postcondition: position交換・id/name不変をlist-tabsのid追跡で検証）"
 description = "tab交換のpostcondition検証: 2d-1回のmove_tab呼び出し完了後にlist-tabsを再取得し、両tabのposition交換・id/name不変をid基準で検証する。positionが期待どおり交換されていない系列はVerificationFailed（無検証の成功を返さない）"
@@ -173,6 +193,7 @@ expect_return = "Err（ErrorClass=VerificationFailed・exit 7・期待/実測の
 
 [[condition]]
 id = "move.companion-postcondition-verification-failed"
+source_lines = "tests/fake_backend/move.rs:878"
 target_function = "move_::run_pane_to_tab / run_pane_swap（完了後検証不一致）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §3.3（step4: postcondition = 完了条件 + pane id不変〔M8実測実証: 方向・rotate系全操作でpane id・title不変。companion系break-idのid不変はE6実証済み〕。完了後の検証不一致〔pane id不変違反等〕→ VerificationFailed exit 7）/§4.1 + TASK-88 body【M8】 + tmp/tasks/tm-88/m8_result.log"
 description = "companion系のpostcondition検証: polling完了条件（tab所属）は成立しても、完了後の検証でpane id不変に違反する系列（対象pane idが入れ替わる等）はVerificationFailedとする。M8実測「方向・rotate系全操作でpane id・title不変」を基準とした無検証成功の防止"
@@ -181,6 +202,7 @@ expect_return = "Err（ErrorClass=VerificationFailed・exit 7）"
 
 [[condition]]
 id = "move.backend-failure-operation-failed"
+source_lines = "tests/fake_backend/move.rs:896"
 target_function = "move_::run_pane_native / move_::run_tab_swap（backend呼出失敗）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.1（move pane native: zellij非zero → OperationFailed 5 / move tab swap: move-tab呼出失敗 → OperationFailed 5）"
 description = "backend呼出の非zero終了: native系のmove_pane（zellij action move-pane系の非zero終了）とtab交換のmove_tab（move-tab呼出失敗）はいずれもOperationFailedとして報告する（exit code 5。geometry比較・postcondition検証には進まない）"

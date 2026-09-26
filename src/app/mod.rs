@@ -2,6 +2,7 @@ pub mod add;
 pub mod attach;
 pub mod docs;
 pub mod list;
+pub mod move_;
 pub mod read;
 pub mod remap;
 pub mod remove;

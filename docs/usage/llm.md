@@ -32,6 +32,10 @@ zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F 
 zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab [TAB...] [--empty] [--yes] [--dry-run] [--json]
+zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
+zelper move pane PANE --to-tab TABSPEC [--json]        （3形式は相互排他かつちょうど1つ）
+zelper move pane PANE --swap-with PANE [--json]
+zelper move tab TABSPEC --swap-with TABSPEC [--json]
 zelper [--session NAME] attach [--json]
 zelper [--session NAME] detach [--json]
 zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
@@ -47,10 +51,19 @@ zelper docs readme | llm usage|skill|snippet
 - `add tab`: `--layout` / `--path` / `--inline` は相互排他
 - `send` / `add` のcommand textは `--` 以降（`last = true`。`--`より前のoptionと混在可）
 - `watch` のPATTERNは `--` 以降（v1はちょうど1件・空文字列拒否）。`--json` 等`--`より後ろはPATTERNと解釈されるためoptionは `--` の前に置く。`--interval` は1.0以上の有限値（Durationへ変換不能な巨大値も拒否）・`--max` は1以上・`--regex` のcompile errorはusage error
+- `move pane`: action positional（direction/rotate）/ `--to-tab` / `--swap-with` は**三者相互排他かつちょうど1つ必須**。`--backwards` はaction=rotateとのみ併用可。`--swap-with` の相手と同一対象（自分自身）はusage error
 - 引数検証（usage error, exit 2）はapp層でbackend初期化（version確認・session解決）の後に行われるため、zellij不在時は引数不正より `ZellijUnavailable`（exit 4）が優先する（全verb共通）
 - `remove tab --empty` はTAB省略可。省略時は全空tab（selectable paneが0個のtab）が対象
 
 既定値: `add pane/tab --count 1`、`resize pane STEPS 1`、`watch --interval 1.0 --max 30`。
+
+`move` の意味論（単一対象の移動・交換・DD-13）:
+
+- `move pane P (left|right|up|down|rotate)` はzellij `move-pane`のwrap。slot幾何はそのままにpaneの付け替えswapとして動き、pane ID・titleは不変。移動方向の端にいる場合はrc=0でも何も変わらないため、実行後に幾何を再取得して比較しno-opならwarning行 + exit 0（`data.noop=true`）
+- `move pane P --to-tab T` はcompanion plugin（remapと共用）によるプロセス保存のtab間移動。pane ID不変（実行後検証・違反は `VerificationFailed` exit 7）。宛先==現tabならpipeなしのno-op（warning + exit 0）
+- `move pane A --swap-with B` は2回のtab間移動によるpane交換（**cross-tabのみ**。同一tab内の位置交換はzellijに機構がなく `Preflight` exit 7 + remap誘導）。両paneとも当該tabの最後のselectable paneである構成（両singleton tab）は順序を変えてもtab自動closeを回避できないため `Preflight` exit 7で拒否し、`move tab --swap-with`（tab名・tab IDの帰属は入れ替わらない点がpane交換と異なる）か`remap`を案内。途中失敗は移動済み/未移動+手動完了hint（`zelper move pane B --to-tab T`）を報告し、**atomicityは主張しない**
+- `move tab A --swap-with B` は `move-tab -t` の繰返し合成（距離dに対しright×d + left×(d-1)の2d-1回）で両tabのpositionを入れ替える。tab ID・tab名は不変（実行後検証）。focusは不変
+- move対象はtiled terminal paneのみ: floating paneは `Preflight` exit 7（`remap --embed-floating` でtiled化してから）。plugin pane・exited/held paneも事前遮断
 
 `watch` の意味論: 対象pane（複数可・any-hit）の出力を`--interval`秒間隔でpolling（`dump-screen`反復）し、`-- PATTERN`を含む行が出現したら即hit（exit 0）。attempt 1はsleepなし即時実行のため開始前の既出テキストもhit（`--full`でscrollback込み）。照合はdump-screen生テキストの行単位（既定は固定substring・`--regex`で正規表現。ANSI正規化なし）。hit paneはvisual order最初の1件。`--max`回到達でno hitなら失敗。
 
@@ -87,6 +100,7 @@ zelper docs readme | llm usage|skill|snippet
 - `list sessions` のみJSONをzellijが提供しないためテキストparse。name / created（zellijの相対表記）/ current / panes_per_tab（tab毎tiled pane数。取得失敗時null）を返す。EXITED（dead session）は表示・session解決から除外される
 - `list layouts` の `layouts` は `{name, size, modified_epoch}` の配列（stat失敗時はsize/modified_epochがnull）
 - `watch` のhit時 `data` は `{ target, pattern, regex, attempts_used, elapsed_secs, matched_lines, pane_errors }`（DD-15）。**multi-targetでもresults[]でなくhit pane単一のobject**（DD-4.2一般規定の例外）。回数切れの `error.data` は `{ attempts_used, elapsed_secs, pattern }`（一部pane消失を伴うPartialFailure時は失敗paneのみの `results[]`）
+- `move pane` の方向移動・rotateの成功 `data` は `{ target, action }`（rotateは `backwards` 追加・no-op時は `noop: true` 追加）。`--to-tab` は `{ target, action: "to-tab", tab, tab_name }`。pane交換は `{ action: "swap-pane", panes: [{id, tab}, ...] }`。tab交換は `{ action: "swap-tab", tabs: [{id, position}, ...] }`（DD-13）
 - `attach` / `detach` の成功 `data` は `{ "session": "NAME" }`。`add session` の成功 `data` は `{ "session": "NAME", "created": true }`（DD-14）
 
 ## exit codeとerror class対応
@@ -132,6 +146,8 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 | `zelper remap three --inline '...'` | layout名と `--inline` は排他。どちらか一方 |
 | `zelper send --keys Enter -- y` | `--keys` とtextは排他 |
 | `zelper watch 3 READY` / `zelper watch 3 -- READY --json` | PATTERNは `--` 以降のためoptionは `--` の前へ: `zelper watch 3 --json -- READY` |
+| `zelper move pane 3 left --to-tab 1` | directionと `--to-tab` は三者排他。どちらか一方 |
+| `zelper move pane 3 --swap-with 3`（自分自身）/ 同一tab内の2 pane交換 | 自身との交換はusage error。同一tab内は機構がなく `Preflight` exit 7（`remap` を使う） |
 | 非TTY環境（script/agent実行）での `zelper attach` | `Preflight` exit 7で拒否される。session作成は `zelper add session NAME`（非対話）を使い、attachは実TTYで行う |
 | 対象名が曖昧なまま再試行 | errorの `candidates` のIDを使う |
 
@@ -140,6 +156,7 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 - remapのslot割当はgroup（block×tab所属）とrun（command+args+cwd）が一意なpaneのslot対応に限り決定的。同一runの複数pane間・複数shell pane間のslot順は保証外
 - `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpane・shell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差によりpane_cwd≠起動時cwdとなったpaneは照合を外しうる
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
+- `move` は単一対象操作（全体再配置は `remap`）。pane交換（`--swap-with`）のatomicityは主張しない（2回の移動の間で失敗しうる。部分状態の報告と手動完了hintで補完）。対象はtiled terminal paneのみ（floatingは `remap --embed-floating` でtiled化してから）
 - `watch` はpolling実装（`dump-screen`反復・既定1s間隔）。最小intervalは1sのため高速pollは不可能。対象解決は開始時1回のみ（監視中に追加されたpaneは対象外）。照合はdump-screen生テキストの行単位でANSI escapeの正規化は行わない
 - `attach` は対話clientのため実TTY前提（stdin・stdout両方）。複数clientがattach中のsessionへの `detach` はzellijの仕様として最新のattach clientのみ切断し、先発clientは画面凍結のまま残る（M3実測: 反復detachでも先発clientは残留）。`add session` で作成直後のsessionは空（tab 1・pane 0件）で、first attach時にdefault layoutが具現化する。作成直後に `remap` する場合は空session（M=0）への適用になる点に注意
 - tab IDはclose後に再利用される。取得したtab IDは即時使用のみ

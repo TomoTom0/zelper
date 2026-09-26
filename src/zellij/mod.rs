@@ -78,6 +78,35 @@ pub enum ResizeOp {
     Shrink(ResizeDirection),
 }
 
+/// move pane操作の種別（DD-13。設計§2.3）。directionは`ResizeDirection`（left/
+/// right/up/down）を再利用し、rotateはforwards/backwardsの2値。argvは
+/// `move-pane <dir> -p <spec>` / `move-pane -p <spec>`（bare = rotate forwards）/
+/// `move-pane-backwards -p <spec>`（M1実測確定）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovePaneOp {
+    Direction(ResizeDirection),
+    RotateForwards,
+    RotateBackwards,
+}
+
+/// move-tabの方向（DD-13。M2実測確定: direction positional必須・`-t <tab_id>`で
+/// 非active tabをfocus不変で1 position移動）。Left/Rightのみの専用表現
+/// （`ResizeDirection`流用は4値として型過大のため不採用）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabMoveDirection {
+    Left,
+    Right,
+}
+
+impl TabMoveDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TabMoveDirection::Left => "left",
+            TabMoveDirection::Right => "right",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OverrideSpec {
     pub source: LayoutSpec,
@@ -110,6 +139,14 @@ pub trait ZellijBackend {
     fn close_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
     fn close_tab(&self, tab: TabId) -> Result<(), ZelperError>;
     fn resize(&self, pane: Option<&PaneKindId>, op: ResizeOp) -> Result<(), ZelperError>;
+    /// native move-pane系（DD-13）。argv: `move-pane <dir> -p <spec>` /
+    /// `move-pane -p <spec>`（rotate forwards）/ `move-pane-backwards -p <spec>`。
+    /// M1実測: edge方向移動はrc=0・出力空のsilent no-opのため、成否はcallerが
+    /// list-panes再取得の幾何比較で判定する
+    fn move_pane(&self, pane: &PaneKindId, op: MovePaneOp) -> Result<(), ZelperError>;
+    /// native move-tab wrap（DD-13）。argv: `move-tab <left|right> -t <tab_id>`。
+    /// M2実測: 1回の呼び出しで非active tabをfocus不変で1 position移動
+    fn move_tab(&self, tab: TabId, direction: TabMoveDirection) -> Result<(), ZelperError>;
     fn override_layout(&self, spec: &OverrideSpec) -> Result<(), ZelperError>;
     fn go_to_tab(&self, tab: TabId) -> Result<(), ZelperError>;
     /// action focus-pane-id <PANE_ID>（DD-10.7 step 6 v2.2。PANE_ID形式は

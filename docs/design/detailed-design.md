@@ -6,24 +6,26 @@
 
 ## DD-1. CLI grammar
 
-### 1.1 凍結されたtop-level verb set（v1）
+### 1.1 凍結されたtop-level verb set（v2・12 verb）
 
 ```text
-list  read  send  rename  resize  remap  add  remove  attach  detach  watch
+list  read  send  rename  resize  remap  add  remove  move  attach  detach  watch
 ```
 
-（`watch`はTASK-86・`attach`/`detach`はTASK-89・いずれも2026-09-25 user指示により追加〔TASK-87設計〕。操作設計はそれぞれDD-15・DD-14。verb set v2=12への改訂条文の適用はTASK-88が担うため本節の政策条文は改訂時点まで未適用）
+（`watch`はTASK-86・`attach`/`detach`はTASK-89・`move`はTASK-88・いずれも2026-09-25 user指示により追加〔TASK-87設計〕。操作設計はそれぞれDD-15・DD-14・DD-13）
 
 例外的にtop-levelに許容する非verbコマンド: `completion`（shell補完生成。`zelper completion bash|zsh|fish`）。helpの発見性目的で、文書化された例外として扱う。`docs`（agent向け配布物の出力。`zelper docs readme | llm usage|skill|snippet`）も同様の文書化された例外（配布物の取り出し経路。zellij sessionに触れない純粋出力）。
 
-verb setの拡張方針（TASK-72・2026-09-19確定）: verb setは基準付きの凍結として運用する。拡張の第一経路は既存verbのnoun/resource拡張（例: `remove session`）であり、verb数を増やさず語彙を育てる。新規top-level verbの追加は、以下の基準をすべて満たす場合のみ検討する:
+verb setの拡張方針（v2・TASK-87改訂・2026-09-25 user指示。TASK-88適用）: verb setは基準付きの凍結として運用する。拡張の第一経路は既存verbのnoun/resource拡張（例: `add session`・`remove session`）であり、verb数を増やさず語彙を育てる。新規top-level verbの追加は、以下の基準をすべて満たす場合のみ検討する:
 
-1. agent primitiveとして独立した価値がある
+1. agent/user primitiveとして独立した価値がある
 2. 既存grammar（verb×noun構造・共通target optionとPANESPEC等の共有target grammar）に自然に載らない
-3. 対話操作の複製でない
-4. 共有契約（JSON envelope・exit status・dry-run方針）を継承する
+3. 対話操作の一対一の複製にとどまらない（session解決・共有契約・非対話経路の提供など、zelperとしての付加価値を伴う）
+4. 共有契約（JSON envelope・exit status・error class）を継承する
 
-明示的除外（TASK-72棚卸しで確定）: `attach`本体・`watch`等のUI継続コマンド、scroll/theme/focus/move系等の対話的に容易な操作の一対一wrapはzelperが提供しない（agentは外部から構造化操作を行う前提。画面読み取りはread、継続監視は将来のwatch/wait semantics〔要件P1〕が担う）。zellij操作の全未カバー項目の分類と見送り理由の詳細はTASK-72（tm）に記録する。（`watch`は2026-09-25 user指示により除外から昇格しTASK-86で実装済み。DD-15参照。`attach`/`detach`も同日指示により除外から昇格しTASK-89で実装済み——session lifecycle・human handoff・非対話作成経路（`add session`）の提供が対話複製を超える付加価値となるため。DD-14参照）
+除外の位置づけ: 従来の「明示的除外」（TASK-72・2026-09-19）は恒久除外ではなく凍結時点の見送り分類である。user指示・要件変更により再評価でき、基準1〜4への適合確認と本節のverb表・§1.2構文木の更新を経て追加する。TASK-87（2026-09-25 user指示）により `move`（単一pane/tabの移動・交換。remap=全体再配置と対をなすlightweight操作）・`attach` / `detach`（session lifecycle・human handoff。作成は`add session`へ分離）・`watch`（pane出力のpattern監視・要件P1）を追加する。scroll/theme・focus系等の残る見送り項目は継続（TASK-72分類を参照）。
+
+remapとの役割分担（DD-1.1とDD-10の双方へ）: 「remapはlayoutを基準とした全pane再配置（companion plugin・KDL生成・検証を伴うheavyweight操作）・moveは単一対象の即時・可逆な相対位置変更（lightweight操作）」。
 
 ### 1.2 構文木（全体）
 
@@ -58,6 +60,14 @@ add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path PATH | --
 remove pane PANESPEC... [--yes] [--dry-run] [--json]
 remove tab  TABSPEC...  [--yes] [--dry-run] [--json]
 remove tab TABSPEC... [--empty] [--yes] [--dry-run] [--json]   # --empty時はTABSPEC省略可（指定時はその範囲の空tabのみ）
+move pane PANESPEC (left|right|up|down|rotate) [--backwards] [--json]   # 以下3形式は相互排外
+move pane PANESPEC --to-tab TABSPEC [--json]
+move pane PANESPEC --swap-with PANESPEC [--json]
+move tab TABSPEC --swap-with TABSPEC [--json]
+attach [--json]          # session解決は--session共通（DD-1.2冒頭）
+detach [--json]
+add session NAME [--json]
+watch [PANESPEC...] [filter群] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
 completion bash|zsh|fish
 ```
 
@@ -89,6 +99,9 @@ completion bash|zsh|fish
 - `--tab`（絞り込み）と`--all`は併合（--tab内のall）
 - `resize`: `equalize`と`grow|shrink`構文は相互排他
 - `--dry-run`と`--yes`の併用は可（--yesは無視される旨を出力）
+- `move pane`: action positional（direction/rotate）/ `--to-tab` / `--swap-with` は三者相互排他かつちょうど1つ必須
+- `move pane`: `--backwards`はaction=rotateとのみ併用可
+- `watch`: `--`以降はPATTERNのみ・数は1（v1）
 - `remap`廃止option（`--session-scope` / `--overflow nest|tabs`）: v2では意味を持たないためv0.1.xで削除済み。指定はusage error（exit 2。DD-10.2 #11）
 
 ### 1.6 例と非例
@@ -107,6 +120,13 @@ zelper remap agents                 # 全paneをagents layoutへ再配置（ceil
 zelper remap --path ./three.kdl --dry-run
 zelper add pane --count 2 --tab 4
 zelper remove tab --empty --dry-run
+zelper move pane 5 left                    # 1つ左のslotへ移動（端ではno-op warning）
+zelper move pane 5 --to-tab 3              # tab 3へ移動（companion・pane id不変）
+zelper move pane 5 --swap-with terminal_9  # pane交換（cross-tabのみ）
+zelper move tab 2 --swap-with 5            # tabのposition交換
+zelper watch --command codex -- READY      # codex paneのいずれかにREADY出現まで待つ
+zelper add session work                    # detached session作成（非対話）
+zelper --session work attach               # 対話attach（TTY必須）
 ```
 
 非例（すべてerror）:
@@ -116,6 +136,7 @@ zelper read pane:12            # selector接頭辞DSLはv1に存在しない
 zelper remap ./three.kdl       # pathのpositional渡しは不可（--pathを使う）
 zelper send 1 2 y              # -- がないためusage error
 zelper read --json --json     # 重複option
+zelper move pane 5 left --to-tab 3   # directionと--to-tabは三者排他違反
 ```
 
 ### 1.7 shell completion
@@ -186,6 +207,8 @@ pub trait ZellijBackend {
     fn close_pane(&self, pane: &PaneKindId) -> Result<()>;
     fn close_tab(&self, tab: TabId) -> Result<()>;
     fn resize(&self, pane: Option<&PaneKindId>, op: ResizeOp) -> Result<()>; // increase|decrease × direction
+    fn move_pane(&self, pane: &PaneKindId, op: MovePaneOp) -> Result<()>;    // move-pane <dir> -p / move-pane -p / move-pane-backwards -p（DD-13）
+    fn move_tab(&self, tab: TabId, direction: TabMoveDirection) -> Result<()>; // move-tab <left|right> -t <tab_id>（DD-13）
     fn override_layout(&self, spec: OverrideSpec) -> Result<()>;         // §3.3
     fn go_to_tab(&self, tab: TabId) -> Result<()>;                       // remapの--tab用
     fn dump_layout(&self) -> Result<String>;
@@ -416,6 +439,7 @@ break-new <pane_id_csv>                 -> break_panes_to_new_tab(panes, None, t
 
   - `probe`は**状態変更前の応答性・権限確認**（設計レビューR3）: 権限（ChangeApplicationState）を要するがuserのpane/tab構成を変えない操作（plugin自身のnon-selectable paneのtitle書換え。E6で権限付与時に動作確認済みの操作）を使う。zelperはnonce込みのtitle出現をlist-panesでpollingし、pluginが権限付きで応答したことを確認してから状態変更へ進む（10.7 step 3）。nonceは実行毎に一意とし、前回実行のtitle残留による偽陽性を防ぐ
   - `should_change_focus=true`はE6実証値（falseは未検証のため不使用）。tab名はbreak-newのname引数（未検証）ではなく`rename-tab-by-id`で付与する
+  - **move系との共用（DD-13・TASK-88）**: plugin binary・protocol・permissions seed・probe機構をremapと完全共用（変更なし）。moveの`--to-tab`/`--swap-with`は既存`break-id`の部分利用のみ（新command追加なし・version skew riskゼロ）。runtime orchestration側（companion setup + probe pipe・polling定数・break-id payload組み立て・権限hint）は`src/companion.rs`へ切り出し済みでremap/move双方から利用する
 
 ### 10.4 permissions.kdl seed（自動grant）
 
@@ -615,7 +639,36 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 - atomicity: 主張しない。部分失敗時は (a) 実行済み操作の一覧 (b) 未実行の一覧 (c) 推奨復旧操作（例: 再度remap、またはdump-layoutからの再構成）を報告
 - remap実行中失敗の扱い: 移動・layout適用のどこで失敗しても、既に適用済みの変更は保持（戻さない）。失敗手順以降を未実行として報告（DD-10.11）。resurrection（session serialize）が保険として機能する旨を文書化
 - **自spawn複製paneのclose（TASK-81）**: 要件2.6 kill/recreate禁止（L93相当項）の適用対象は「remap実行開始前のlist-panesに存在したpane」であり、**zelperが当該実行内にrun一致不成立でspawnした複製pane（実行開始前snapshotに存在しないid・安定観測後・対応規則〔exited/held化したdupを含む。DD-10.7 step 6多段規則〕でdupと特定されたもの）のcloseは自己副作用の除去としてkill制約の対象外**と定義する。closeしたpane id・対応slot・理由は成功・失敗双方のJSON data（`closed_duplicates[]`）とhuman出力で報告する（報告義務。DD-10.9）
+- **move（DD-13・TASK-88）**: dry-run対象外（単一対象の即時操作であり計画表示の意味が薄い。`remap --dry-run`で全体計画を確認してからmoveする運用）。pane交換（`--swap-with`）の**atomicityは主張しない**（2 pipeの間で失敗しうる。順序規則によるtab自動closeの構造回避 + 部分状態の正確な報告 + 手動完了hintで緩和。DD-13）。対象はtiled terminal paneのみ（floating/plugin paneは状態変更前にPreflight error。DD-13）
 - 廃止optionのtest固定（設計レビューR6。TASK-43で即時削除に方針変更）: `--session-scope` / `--overflow nest|tabs` はv0.1.xで削除済み。指定はusage error（exit 2・clap経由のstderr出力。`--json`併用時もstdoutには何も出ない）であることと、clap helpに出現しないことをtestで固定する
+
+## DD-13. `move` 操作設計（TASK-88・2026-09-25追加。TASK-87設計書が元。実測M1/M2/M8反映）
+
+5操作を1 verb `move`に載せる（verb×noun構造維持。remapとの役割分担はDD-1.1）:
+
+```text
+zelper move pane PANESPEC (left|right|up|down|rotate) [--backwards]   # native wrap（方向移動・rotate）
+zelper move pane PANESPEC --to-tab TABSPEC                            # tab間移動（companion break-id）
+zelper move pane PANESPEC --swap-with PANESPEC                        # pane交換（companion break-id ×2）
+zelper move tab TABSPEC --swap-with TABSPEC                           # tab交換（native move-tab合成）
+```
+
+- **排他規則（DD-1.5）**: action positional / `--to-tab` / `--swap-with` は三者相互排他かつちょうど1つ必須（clap conflicts + app層のexactly one検証〔LayoutSpec::validate_exclusiveと同一pattern〕）。`--backwards`はaction=rotateとのみ併用可（runtime検証）。`--swap-with`の相手と同一対象（自分自身）はusage error
+- **対象はtiled terminal paneのみ（本節で確定した規則）**: floating paneはM1実測で方向移動がrc=0の座標shiftとして動作し（slot swapでない）rotateがno-opになるため、companion系と同一に**全経路で状態変更前にPreflight error（exit 7）**とし`remap --embed-floating`併用（tiled化してから移動）をhintする。plugin paneはpipe経路で対象を特定できないため同じくPreflight error。exited/held pane・non-selectable paneも`is_remap_source`相当の単一pane版検査で事前遮断する
+- **native系（方向移動・rotate）**: argvは`move-pane <dir> -p <spec>`（direction positionalが先。`-p`で非focus paneを移動可・focusは元paneに追従しzeller側のfocus制御は不要）/ `move-pane -p <spec>`（bare = rotate forwards）/ `move-pane-backwards -p <spec>`。M1実測: `move-pane`は**slot幾何完全不変のpane id付け替えswap**で、edge方向移動はrc=0・出力空の**silent no-op**。そのためexit codeのみでは成否判別不能であり、postconditionとしてlist-panesを再取得して対象paneの幾何を比較し、不変ならno-op warning報告 + exit 0（resizeのno-op報告規約に準拠）。pane id・title不変はM8実測基準（title不変も検証）
+- **tab間移動（`--to-tab`）**: 対象・宛先（`selector::resolve_tab`共通解決）解決 → preflight → **宛先==現tabならpipeなしwarning付きexit 0（no-op）** → companion setup + probe（`src/companion.rs`の共用helper。不成立は状態変更前にOperationFailed + 権限hint） → `break-id <宛先tab_id> <単一pane_id>` pipe + list-panes polling（250ms/10s。完了条件 = pane.tab_id == 宛先） → postcondition（pane id不変。M8基準）。polling timeoutはOperationFailed（権限hint + pipe遅延実行の注意 + 未移動報告。remap 10.7と同一文面規則）
+- **pane交換（`--swap-with`）**: 2 pane解決 → preflight → **同一tab内はPreflight error**（break系はtab間移動のみで、tab内位置交換の機構がzellijに存在しない。`remap`をhint） → **順序規則**（移動元tab自動close〔E6事実1〕の構造回避。singleton判定は当該tabのselectable pane数==1基準）:
+  - 両tab非singleton → A→T_Bが先（決定論的tie-break）
+  - Aのみsingleton → B→T_Aが先（T_AはBの到着後も空にならない）
+  - Bのみsingleton → A→T_Bが先（対称）
+  - **両singleton → Preflight error（exit 7）**: どちらのtabも閉じて再作成が必要になりtab位置・idを保存できない。hintは`move tab --swap-with`（tab交換。**pane内容の位置関係は入れ替わるが、tab名・tab idの帰属は入れ替わらない点がpane交換と異なる**）か`remap`
+  - 各stepは`break-id` pipe + polling（相手の元tab idへの到着）で追跡
+  - **途中失敗は移動済み/未移動の正確な報告 + 手動完了hint**（`zelper move pane <B> --to-tab <T_A>`）+ pipe遅延実行の注意。**atomicityは主張しない**（DD-12準拠）
+  - postcondition: 両pane id不変・互いの元tabへ所属（不一致はVerificationFailed）
+- **tab交換（`move tab --swap-with`）**: 2 tab解決（同一指定はusage error）→ position取得（i<j・d=j-i）→ **隣接transposition合成**: 左側tab Aを`move-tab right`×d、相手Bを`move-tab left`×(d-1)の計**2d-1回**の`move_tab -t`呼び出しで純position交換（M2実測「`move-tab -t`は1回で非active tabをfocus不変で1 position移動・隣接とは1回で純swap」からの導出。各呼び出しはedgeを越えないためwrap〔全体rotation〕は不発火。d=1はright×1の1回）。step毎にlist-tabsでid存在確認（id基準追跡）。`-t`がfocus不変のためgo-to-tab併用・focus復帰は不要（M2確定）。postcondition: position交換・tab id/name不変をlist-tabsのid追跡で検証（不一致はVerificationFailed・期待/実測差分付き）
+- **error/exit対応**（新classなし・全verb既存11 class）: 構文違反（三者排他・`--backwards`単独・自己swap）はUsage 2 / pane不在・tab不在・曖昧はNoTarget・AmbiguousTarget 3 / floating・plugin pane・同一tab swap・両singleton swap・companion setup失敗はPreflight 7 / zellij非zero・probe不成立・polling timeout・move-tab呼出失敗はOperationFailed 5 / 完了後検証不一致（pane id不変違反・position不一致）はVerificationFailed 7
+- **JSON/human報告**（DD-4.2/4.3の変更系1行サマリ規約）: `moved terminal_3 left` / `rotated terminal_3 backwards` / `moved terminal_3 -> tab 5 (agents)` / `swapped terminal_3 <-> terminal_4` / `swapped tab 2 <-> tab 5`。no-opはwarning行 + exit 0。JSON dataは各操作の対象・結果（swap-paneは`panes[]`・swap-tabは`tabs[]`の配列）
+- **実測記録**（podman sandbox・zellij 0.44.3・2026-09-25）: M1（move-pane系。`tmp/tasks/tm-88/m1_result.log`・`m1c_result.log`）・M2（move-tab。`m2_result.log`・`m2b_result.log`）・M8（pane id/title不変。`m8_result.log`）・M9（E2E acceptance。`m9_result.log`）
 
 ## DD-14. `attach` / `detach` / `add session` 操作設計（session lifecycle。TASK-89・2026-09-25追加。TASK-87設計書が元）
 
@@ -654,8 +707,12 @@ plugin/                            # cargo workspace member zelper-companion-plu
                                    # bin crate・zellij-tile =0.44.3・wasm32-wasip1 release buildを
                                    # zelperのbuild.rsがbinaryへ埋込
 src/
-  main.rs  cli/  app/{list,read,send,rename,resize,remap,add,remove,attach,watch}.rs
-  companion.rs                     # wasm extract・permissions.kdl seed（DD-10.3/10.4）
+  main.rs  cli/  app/{list,read,send,rename,resize,remap,add,remove,move_,attach,watch}.rs
+                                   # move_（`move`はRust keywordのためfile名はmove_。DD-13）
+  companion.rs                     # wasm extract・permissions.kdl seed（DD-10.3/10.4）+
+                                   # runtime orchestration（companion setup + probe pipe・
+                                   # polling定数・break-id payload・権限hint。remap/move共用。
+                                   # DD-10.7 step 3・TASK-88設計§2.8）
   domain/  zellij/{process,parser,capabilities}.rs
   layout/{resolver,generator}.rs   # generator: KDL生成（改行区切り・slot正規化。DD-10.8）
   output/{human,json}.rs  error.rs

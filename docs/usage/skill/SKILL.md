@@ -37,6 +37,9 @@ zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F 
 zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
+zelper move pane PANE --to-tab TAB | --swap-with PANE   （3形式は相互排他）
+zelper move tab TAB --swap-with TAB [--json]
 zelper [--session NAME] attach [--json]      （対話attach。TTY必須）
 zelper [--session NAME] detach [--json]
 zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
@@ -51,6 +54,7 @@ zelper docs readme | llm usage|skill|snippet
 - `rename` はnoun形式: `zelper rename pane 3 build` / `zelper rename tab agents work`
 - `resize` は方向まで指定: `zelper resize pane 3 grow right 2`
 - `remap` のlayout指定は名前 / `--path` / `--inline` の3source相互排他。併用はusage error
+- `move` は単一pane/tabの移動・交換（全体再配置はremap）: `zelper move pane 3 left`（方向移動・rotate。slot間swap・端ではno-op warning+exit 0）/ `zelper move pane 3 --to-tab 1`（tab間移動・pane ID不変）/ `zelper move pane 3 --swap-with 5`（pane交換・cross-tabのみ）/ `zelper move tab 1 --swap-with 3`（tab交換・position入替）。direction・--to-tab・--swap-withは三者排他かつちょうど1つ。同一tab内のpane交換・両tab最後のpane同士の交換はexit 7（remapかtab交換を案内）。floating paneはexit 7（`remap --embed-floating`でtiled化してから）
 - `watch` のPATTERNは `--` 区切り必須で1件（`zelper watch --command codex -- READY`）。optionは `--` の前に置く。 pollingは既定1s間隔・最大30回で、開始前の既出テキストもhitする
 - session lifecycle: `add session NAME` はdetached sessionの非対話作成（session 0件環境でも動作・同名runningはexit 7）。`attach` は実TTY前提（stdin・stdout両方がTTYでないとexit 7。agent実行からは使えない）。`detach` はclient不在でもno-op成功。複数clientがattach中のdetachは最新clientのみ切断される（先発clientは残る）
 - `--tab agents` のような名前指定は一意な名前のみ。同名tabが複数あればtab IDを使う
@@ -91,6 +95,8 @@ zelper list panes --json                      # 構造把握（最初の一歩�
 zelper read --tab agents                      # agents tabの全pane画面を読む
 zelper send --command codex -- y              # codex稼働pane全てにyを送る
 zelper watch --command codex -- READY         # いずれかのcodex paneにREADY出現まで待つ
+zelper move pane 3 --to-tab agents            # pane 3をagents tabへ移動（process保持）
+zelper move pane 3 --swap-with terminal_9     # pane交換（cross-tab）
 zelper add session work                       # detached session作成（非対話・0件環境可）
 zelper --session work add pane --name build   # 作成したsessionへのpane追加
 zelper remap three --dry-run --json           # 3分割layout再配置の計画確認

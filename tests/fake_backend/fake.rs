@@ -160,6 +160,23 @@ pub struct FakeBackend {
     pub probe_stdout_on_attach: Cell<bool>,
     /// arm_stdout_probe後のattach_session呼出時点のstdout内容
     pub stdout_at_attach: RefCell<Option<String>>,
+    /// move用（TASK-88）: 指定番目（1開始）のbreak-id pipeだけ成功扱いだが効果を
+    /// 反映しない（当該stepのpolling timeout模擬。swap部分失敗系列の注入）
+    pub mute_break_id_nth: Cell<Option<usize>>,
+    /// move用: 最初のbreak-id pipeより後のlist_panes_lenient応答の指定番目（1開始）
+    /// の呼び出し時に、直近のbreak-idで移動したpaneのidを採番し直す（polling完了
+    /// 後のpostcondition検証でpane id不変違反となる系列の注入。move.
+    /// companion-postcondition-verification-failed）
+    pub rename_moved_pane_after_break_nth: Cell<Option<usize>>,
+    /// move用: 直近のbreak-id pipeで移動させたpane（rename_moved_pane_after_break_nth
+    /// の適用対象追跡）
+    pub last_break_moved: RefCell<Option<PaneKindId>>,
+    /// move用: move_tabを記録・成功扱いにするがpositionを変えない（postcondition
+    /// 検証〔VerificationFailed〕系列の注入。move.tab-swap-verification-failed）
+    pub mute_move_tab: Cell<bool>,
+    /// move用: 最初のbreak-id pipeより後のlist_panes_lenient呼出回数（1開始。
+    /// rename_moved_pane_after_break_nthのarm用）
+    pub lenient_panes_after_break: Cell<usize>,
 }
 
 pub struct FakeState {
@@ -243,6 +260,11 @@ impl FakeBackend {
             mute_create_session: Cell::new(false),
             probe_stdout_on_attach: Cell::new(false),
             stdout_at_attach: RefCell::new(None),
+            mute_break_id_nth: Cell::new(None),
+            rename_moved_pane_after_break_nth: Cell::new(None),
+            last_break_moved: RefCell::new(None),
+            mute_move_tab: Cell::new(false),
+            lenient_panes_after_break: Cell::new(0),
         }
     }
 
@@ -464,6 +486,27 @@ impl FakeBackend {
         self.stdout_at_attach.borrow().clone()
     }
 
+    /// move用: 指定番目（1開始）のbreak-id pipeを成功扱いだが効果不出現にする
+    /// （TASK-88。swap 2step目失敗の部分状態報告系列）
+    #[allow(dead_code)]
+    pub fn mute_break_id_nth(&self, nth: usize) {
+        self.mute_break_id_nth.set(Some(nth));
+    }
+
+    /// move用: 最初のbreak-id pipeより後の指定番目（1開始）のlist_panes_lenient
+    /// 呼出時に、直近のbreak-id移動paneのidを採番し直す（polling完了後のpane id
+    /// 不変違反系列）
+    #[allow(dead_code)]
+    pub fn rename_moved_pane_after_break_nth(&self, nth: usize) {
+        self.rename_moved_pane_after_break_nth.set(Some(nth));
+    }
+
+    /// move用: move_tabを記録・成功扱いにするがpositionを変えない
+    #[allow(dead_code)]
+    pub fn mute_move_tab(&self) {
+        self.mute_move_tab.set(true);
+    }
+
     /// watch用: paneへのdump_screen呼び出し回数（記録から計上。-f付き呼び出しを
     /// 含む。TASK-86）
     pub fn dump_calls(&self, pane: &PaneKindId) -> usize {
@@ -504,6 +547,41 @@ impl FakeBackend {
             let mut s = self.state.borrow_mut();
             s.tabs.retain(|t| t.id != drop);
             s.panes.retain(|p| p.tab_id != drop);
+        }
+    }
+
+    /// move用（TASK-88）: 最初のbreak-id pipeより後のlist_panes系呼出を計数し、
+    /// 指定番目の呼び出し時に直近のbreak-id移動paneのidを採番し直す（polling完了
+    /// 条件はtab所属のみのため、完了後の再取得でpane id不変違反として検出される
+    /// 系列の注入。move.companion-postcondition-verification-failed）
+    fn apply_break_rename_injection(&self) {
+        let armed = self
+            .calls
+            .borrow()
+            .iter()
+            .any(|c| c.starts_with("pipe break-id"));
+        if !armed {
+            return;
+        }
+        let n = self.lenient_panes_after_break.get() + 1;
+        self.lenient_panes_after_break.set(n);
+        if let Some(nth) = self.rename_moved_pane_after_break_nth.get()
+            && n == nth
+        {
+            self.rename_moved_pane_after_break_nth.set(None);
+            if let Some(moved) = *self.last_break_moved.borrow() {
+                let mut s = self.state.borrow_mut();
+                let new_id = s.next_terminal_id;
+                s.next_terminal_id += 1;
+                let run = s.invoked_with.remove(&moved);
+                let renamed = s.panes.iter_mut().find(|p| p.id == moved).map(|p| {
+                    p.id = PaneKindId::Terminal(new_id);
+                    p.id
+                });
+                if let (Some(new_key), Some(run)) = (renamed, run) {
+                    s.invoked_with.insert(new_key, run);
+                }
+            }
         }
     }
 
@@ -721,6 +799,7 @@ impl ZellijBackend for FakeBackend {
                 ));
             }
         }
+        self.apply_break_rename_injection();
         Ok(self.state.borrow().panes.clone())
     }
 
@@ -766,6 +845,7 @@ impl ZellijBackend for FakeBackend {
                 spawn_shell_pane(&mut s, tab, "Pane (unstable)");
             }
         }
+        self.apply_break_rename_injection();
         Ok(Some(self.state.borrow().panes.clone()))
     }
 
@@ -1054,6 +1134,119 @@ impl ZellijBackend for FakeBackend {
         Ok(())
     }
 
+    /// TASK-88（DD-13）: native move-pane系のemulation。M1実測の基準値どおり
+    /// 「slot幾何完全不変・pane id付け替えswap」を再現する: 同一tabのtiled
+    /// selectable terminal paneをvisual order（y,x昇順）に並べ、方向移動は隣接
+    /// slotとの幾何swap（端ではno-op・幾何不変）・rotateは幾何の循環shift
+    /// （forwards=昇順方向へ1つ・backwards=逆）。pane id・titleは不変（M8）
+    fn move_pane(&self, pane: &PaneKindId, op: MovePaneOp) -> Result<(), ZelperError> {
+        let rec = match op {
+            MovePaneOp::Direction(d) => format!("move-pane {} -p {}", d.as_str(), pane.as_spec()),
+            MovePaneOp::RotateForwards => format!("move-pane -p {}", pane.as_spec()),
+            MovePaneOp::RotateBackwards => format!("move-pane-backwards -p {}", pane.as_spec()),
+        };
+        self.record(&rec)?;
+        let mut s = self.state.borrow_mut();
+        let Some(target) = s.panes.iter().find(|p| &p.id == pane).cloned() else {
+            return Ok(());
+        };
+        // 同一tabのtiled selectable terminal pane群（visual order）
+        let mut group: Vec<(PaneKindId, Geometry)> = s
+            .panes
+            .iter()
+            .filter(|p| {
+                p.tab_id == target.tab_id
+                    && p.is_selectable
+                    && !p.is_floating
+                    && matches!(p.id, PaneKindId::Terminal(_))
+            })
+            .map(|p| (p.id, p.geometry))
+            .collect();
+        group.sort_by_key(|(_, g)| (g.y, g.x));
+        let n = group.len();
+        let Some(idx) = group.iter().position(|(id, _)| *id == target.id) else {
+            return Ok(());
+        };
+        match op {
+            // 方向移動: 隣接slot（visual orderの前後）との幾何swap。端はno-op
+            MovePaneOp::Direction(d) => {
+                let neighbor = match d {
+                    ResizeDirection::Left | ResizeDirection::Up => idx.checked_sub(1),
+                    ResizeDirection::Right | ResizeDirection::Down => {
+                        (idx + 1 < n).then_some(idx + 1)
+                    }
+                };
+                if let Some(j) = neighbor {
+                    let (gid_a, geom_a) = group[idx];
+                    let geom_b = group[j].1;
+                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == gid_a) {
+                        p.geometry = geom_b;
+                    }
+                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == group[j].0) {
+                        p.geometry = geom_a;
+                    }
+                }
+            }
+            // rotate: 幾何の循環shift（単独paneのtabでは幾何不変=no-op）
+            MovePaneOp::RotateForwards => {
+                for i in 0..n {
+                    let src = group[(i + 1) % n].1;
+                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == group[i].0) {
+                        p.geometry = src;
+                    }
+                }
+            }
+            MovePaneOp::RotateBackwards => {
+                for i in 0..n {
+                    let src = group[(i + n - 1) % n].1;
+                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == group[i].0) {
+                        p.geometry = src;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// TASK-88（DD-13）: native move-tabのemulation。M2実測の基準値どおり
+    /// 「1回の呼び出しで1 position移動・隣接tabとは1回で純swap・edgeはwrap
+    /// （全体rotation）・tab id/name不変」。mute_move_tab注入時は記録のみで
+    /// positionを変えない（postcondition検証系列）
+    fn move_tab(&self, tab: TabId, direction: TabMoveDirection) -> Result<(), ZelperError> {
+        self.record(&format!("move-tab {} -t {}", direction.as_str(), tab.0))?;
+        if self.mute_move_tab.get() {
+            return Ok(());
+        }
+        let mut s = self.state.borrow_mut();
+        let Some(pos) = s.tabs.iter().position(|t| t.id == tab) else {
+            return Ok(());
+        };
+        let len = s.tabs.len();
+        let moved = s.tabs.remove(pos);
+        // edgeはwrap（M2実測: 最後尾rightは全体rotation）
+        let new_pos = match direction {
+            TabMoveDirection::Right => {
+                if pos + 1 >= len {
+                    0
+                } else {
+                    pos + 1
+                }
+            }
+            TabMoveDirection::Left => {
+                if pos == 0 {
+                    len - 1
+                } else {
+                    pos - 1
+                }
+            }
+        };
+        s.tabs.insert(new_pos, moved);
+        for (i, t) in s.tabs.iter_mut().enumerate() {
+            t.position = i as u32;
+        }
+        Ok(())
+    }
+
     fn override_layout(&self, spec: &OverrideSpec) -> Result<(), ZelperError> {
         self.record(&format!(
             "override-layout active_only={} retain_t={} retain_p={}",
@@ -1334,7 +1527,22 @@ impl ZellijBackend for FakeBackend {
                 let mut parts = payload.split_whitespace();
                 let tab_id = parts.next().unwrap_or_default().parse::<u32>().unwrap_or(0);
                 let ids = parse_pane_ids(&parts.collect::<Vec<_>>().join(" "));
+                // TASK-88: 指定番目（1開始）のbreak-id pipeのみ成功扱いだが効果を
+                // 反映しない（swap 2step目失敗のpolling timeout系列注入）
+                let seen_break_ids = self
+                    .calls
+                    .borrow()
+                    .iter()
+                    .filter(|c| c.starts_with("pipe break-id"))
+                    .count();
+                if let Some(nth) = self.mute_break_id_nth.get()
+                    && seen_break_ids == nth
+                {
+                    self.mute_break_id_nth.set(None);
+                    return Ok(());
+                }
                 FakeBackend::move_panes(&mut s, &ids, TabId(tab_id));
+                *self.last_break_moved.borrow_mut() = ids.first().copied();
             }
             // break-new <pane_id_csv>: 新規tab作成 + 移動
             "break-new" => {

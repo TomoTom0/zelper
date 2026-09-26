@@ -1,3 +1,4 @@
+use crate::companion::{PERMISSION_HINT, break_id_payload, poll, setup_and_probe};
 use crate::domain::{LayoutRef, PaneKindId, PaneState, TabId};
 use crate::error::{ErrorClass, ZelperError};
 use crate::layout;
@@ -5,12 +6,6 @@ use crate::layout::TabTemplate;
 use crate::layout::generator::{RunSpec, SlotRun, generate_instance_kdl_v2};
 use crate::zellij::{LayoutSpec, NewTabSpec, OverrideSpec, ZellijBackend};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
-
-/// polling定数（DD-10.7）: 250ms間隔・10s deadline（list-panes再取得で条件判定）
-const POLL_INTERVAL: Duration = Duration::from_millis(250);
-const POLL_DEADLINE: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // planner（DD-10.6 v2.2）
@@ -333,25 +328,6 @@ fn needs_shell_c_warning(cmd: &str) -> bool {
     is_shell && words.next() == Some("-c")
 }
 
-/// nonce連番（実行毎に一意なprobe titleのための後付けエントロピー。DD-10.3）
-static NONCE_SEQ: AtomicU64 = AtomicU64::new(0);
-
-fn new_nonce() -> String {
-    let seq = NONCE_SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{nanos:x}-{seq}-{}", std::process::id())
-}
-
-/// 権限hint（DD-10.4。probe不成立・移動polling timeout時に付与）
-const PERMISSION_HINT: &str = "the companion plugin may lack permissions: the \
-permissions.kdl seed may not be picked up by a session started before seeding, the \
-permission dialog may be pending, or the plugin protocol may be incompatible \
-(proven combination: zellij 0.44.3 + zellij-tile 0.44.3 only). restart the session \
-after seeding, or grant permissions to the companion plugin manually, then re-run";
-
 /// remap実行。戻り値は成功時の報告（leftover tab報告・closed_duplicates・warnings。
 /// DD-10.9）
 pub fn run(backend: &dyn ZellijBackend, args: &RemapArgs) -> Result<RemapOutcome, ZelperError> {
@@ -546,46 +522,9 @@ fn execute(
     });
     let uses_break_pipes = plan.k > 1 || uses_break_new || !group00_outbound.is_empty();
     let wasm = if uses_break_pipes {
-        let path = crate::companion::ensure_companion_wasm()?;
-        crate::companion::ensure_permissions(
-            &crate::companion::permissions_path()?,
-            &path.to_string_lossy(),
-            None,
-        )?;
-        // probe pipe: 状態変更前の応答性・権限確認（設計レビューR3）。
-        // probe不成立（timeout）は一切の状態変更前に中断する
-        let nonce = new_nonce();
-        let want_title = format!("zelper-probe-{nonce}");
-        backend.pipe_plugin(&path, "probe", &nonce).map_err(|e| {
-            ZelperError::new(
-                ErrorClass::OperationFailed,
-                format!(
-                    "probe pipe did not complete; no session state was changed. {e}. \
-{PERMISSION_HINT}"
-                ),
-            )
-        })?;
-        poll(
-            || {
-                let Some(panes) = backend.list_panes_lenient()? else {
-                    return Ok(None);
-                };
-                // lenient取得の戻り値で直接判定する。空stdoutは未成立として扱い、
-                // 1 tick 1回のbackend呼出でstrict再取得によるfatal窓を作らない。
-                Ok(panes.iter().any(|p| p.title == want_title).then_some(()))
-            },
-            || {
-                ZelperError::new(
-                    ErrorClass::OperationFailed,
-                    format!(
-                        "probe not observed within 10s (companion plugin did not respond); \
-screen may be busy and its 1s list response timeout may have produced empty output. no \
-session state was changed. {PERMISSION_HINT}"
-                    ),
-                )
-            },
-        )?;
-        Some(path)
+        // companion setup + probe pipe（状態変更前の応答性・権限確認。設計レビューR3。
+        // helper切り出し: src/companion.rs。TASK-88設計§2.8）
+        Some(setup_and_probe(backend)?)
     } else {
         None
     };
@@ -608,12 +547,7 @@ session state was changed. {PERMISSION_HINT}"
     //      空になり自動closeする事態を構造的に排除する不変条件の一般化。
     //      DD-10.7 5-a。M>=1なら逐次充填によりgroup (0,0)は必ず1 pane以上を持つ）
     if !group00_outbound.is_empty() {
-        let ids = group00_outbound
-            .iter()
-            .map(|p| p.as_spec())
-            .collect::<Vec<_>>()
-            .join(",");
-        let payload = format!("{} {ids}", anchor.0);
+        let payload = break_id_payload(anchor, &group00_outbound);
         let wasm = wasm.as_deref().expect("move needed implies companion wasm");
         backend
             .pipe_plugin(wasm, "break-id", &payload)
@@ -1593,29 +1527,6 @@ fn membership_matches(panes: &[PaneState], tab: TabId, ids: &[PaneKindId]) -> bo
         .map(|p| p.id)
         .collect();
     in_tab.len() == ids.len() && ids.iter().all(|p| in_tab.contains(p))
-}
-
-/// polling（DD-10.7: 250ms間隔・10s deadline）。条件は最初に評価するため、
-/// 即座に成立する場合はsleepしない。成立時に条件値（例: 新規tab id）を返す。
-/// deadlineは条件評価（list_panes等のbackend呼出）の所要時間を含めて保証する:
-/// 呼出し後にdeadlineを再検査し、超過後の条件成立は成立扱いにしない（遅延実行を
-/// 成功と誤認しない）。sleepは残時間を超えない
-fn poll<T>(
-    mut cond: impl FnMut() -> Result<Option<T>, ZelperError>,
-    timeout: impl FnOnce() -> ZelperError,
-) -> Result<T, ZelperError> {
-    let deadline = Instant::now() + POLL_DEADLINE;
-    loop {
-        let hit = cond()?;
-        if Instant::now() >= deadline {
-            return Err(timeout());
-        }
-        if let Some(v) = hit {
-            return Ok(v);
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        std::thread::sleep(remaining.min(POLL_INTERVAL));
-    }
 }
 
 fn move_pipe_error(op: &str, j: usize, e: ZelperError, plan: &V2Plan) -> ZelperError {

@@ -127,6 +127,7 @@ detailed-design.md（Phase 3成果物）の章番号を以下のように規定�
 | DD-10 | `remap`アルゴリズム（v2: companion plugin・配置・移動・検証） | preservation・overflow・順序・plugin扱い |
 | DD-11 | `add`/`remove`操作設計 | 追加/削除・空tab cleanup |
 | DD-12 | safety model（dry-run・確認・部分失敗・error分類/exit status） | dry-run・clear error handling |
+| DD-13 | `move`操作設計（単一pane/tabの移動・交換。TASK-88・2026-09-25追加） | move pane（方向移動・rotate・tab間移動・pane交換）/ move tab（tab交換）・remap対比（user指示による追加。条件書: tests/design/move.toml 22条件 + cli-grammar.toml move系5条件） |
 | DD-14 | `attach`/`detach`/`add session`操作設計（session lifecycle。TASK-89・2026-09-25追加） | attach/detach/session lifecycle（user指示による追加。条件書: tests/design/attach-detach.toml 12条件） |
 | DD-15 | `watch`操作設計（polling pattern監視。TASK-86・2026-09-25追加） | watch pane output（元P1。user指示により実装。条件書: tests/design/watch.toml 16条件） |
 
@@ -154,11 +155,12 @@ Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 | dry-run（§3.7） | DD-12 | remap/remove | L2 / L3 | S8・S5 | implemented with documented limitation（`resize equalize`/`add`はP1: MR-7） |
 | watch pane output（元P1。2026-09-25 user指示により昇格・TASK-86） | DD-15 | app/watch.rs | L2 fake_watch / L3 cli shim（条件書watch.toml 16条件） | -（fake zellij shimのみで完結・実zellijはdump-screen反復のため新規L4要件なし） | implemented |
 | attach/detach/add session（session lifecycle。2026-09-25 user指示・TASK-89） | DD-14 | app/attach.rs, app/add.rs run_session, zellij/process.rs run_interactive, main.rs例外dispatch | L2 fake_attach / L3 cli shim / src内process test（条件書attach-detach.toml 12条件） | -（実zellij実測M3/M4/M5はpodman sandboxで実施済み〔tmp/tasks/tm-89/〕。実TTY対話領域は条件書excluded参照） | implemented |
+| move pane/tab（単一対象の移動・交換。2026-09-25 user指示・TASK-88） | DD-13 | app/move_.rs, zellij/process.rs move_pane/move_tab, companion.rs runtime orchestration切り出し（remap共用）, main.rs dispatch | L2 fake_move / L3 cli shim（条件書move.toml 22条件 + cli-grammar.toml move系5条件〔L3〕） | M1/M2/M8実測・M9 acceptance（podman sandbox・`tmp/tasks/tm-88/`。companion系move・tab交換のE2E） | implemented |
 | AC-1〜6・9〜11・13・14 | 上記対応行と同一 | - | - | S1〜S6, S10 | implemented（AC-14はhelp文言test無し、実装と--help出力で確認） |
 
 **AC-7（kill/recreateなしのremap）**: L4 S7・S-v2-1で実証（保存対象paneのheartbeat pidと連番が途切れなく継続、pane ID同一、geometry変化）。v2には再作成paneが存在しないため、旧S9のrecreated pane検証は廃止。S-v3-2〜4でもsource pane全生存（remap前後のpane id集合一致・最大15 pane）を再実証。
 **AC-8（overflow決定性）**: S-v2-1で実証（9 pane→k=3・visual order割当・連番tab）。v2.2（TASK-75）後の実装は反復単位がlayout全体（S=sum(N_t)）へ一般化され、tab名はlayout由来（名前あり鋳型名/base幹 + `-<b+1>` block接尾。anchor名保持例外）へ変更。block反復はS-v3-4（M=15 > S=12 → k=2・block 1 tabの`-2`接尾・6 tab）で実証。v2は要件2.6の文言どおりの実装（§4-1）。旧S9時点の `--overflow tabs` による代替設計は廃止済み。
-**not implemented**: なし（P0範囲）。P1のうちwatch（pane出力のpattern監視）は2026-09-25 user指示によりTASK-86で実装済み（DD-15・条件書tests/design/watch.toml 16条件・L2 fake_watch + L3 cli shim。run block系wait semantics〔process終了待ち〕は要件P1留保のまま別管理）。同日指示によりTASK-72明示的除外の`attach`/`detach`もTASK-89で昇格・実装済み（DD-14・session lifecycle。条件書tests/design/attach-detach.toml 12条件）。残るP1（bulk rename・`--no-fill`・equalize/add dry-run等）はrequirements P1リストのまま未実装。
+**not implemented**: なし（P0範囲）。P1のうちwatch（pane出力のpattern監視）は2026-09-25 user指示によりTASK-86で実装済み（DD-15・条件書tests/design/watch.toml 16条件・L2 fake_watch + L3 cli shim。run block系wait semantics〔process終了待ち〕は要件P1留保のまま別管理）。同日指示によりTASK-72明示的除外の`attach`/`detach`もTASK-89で昇格・実装済み（DD-14・session lifecycle。条件書tests/design/attach-detach.toml 12条件）。同じく除外分類から再評価された`move`（単一pane/tabの移動・交換）もTASK-88で実装済み（DD-13・条件書tests/design/move.toml 22条件 + cli-grammar.toml move系5条件。verb set v2=12が確定）。残るP1（bulk rename・`--no-fill`・equalize/add dry-run等）と見送り分類の残り（scroll/theme・focus系）はrequirements P1リスト・TASK-72分類のまま未実装。
 
 ## 4. 制約と設計への指示（impossible要件の代替）
 

@@ -24,6 +24,8 @@ L4の実行形: Phase 1と同一のpodman構成（docs/research/zellij-capabilit
 
 TASK-74改訂（2026-09-15）: R13/R14/R15/R18/R20/R48/R49の定義はremap照合key変更（terminal_command〔invoked_with序列化〕基準・quoting warning対象変更）・default_tab_template反映・dry-run出力改訂に伴い条件書側で更新済み（該当: layout-generator.r13〜r15/r18・layout-generator.template-children-substitution・layout-planner.r20系・layout-planner.run-derives-from-invoked-with・remap-cli.r48/r49。設計書 remap-v2-matching-fix-task74.md §2/§3）。§5等の歴史的参照（fail-first履歴）は改訂前定義を指す。
 
+TASK-87/88改訂（2026-09-26・verb拡張の条件書）: `watch`（TASK-86）・`attach`/`detach`/`add session`（TASK-89）に続き`move`（TASK-88）の条件書tests/design/move.toml（22条件）を追加。L2はtests/fake_backend/move.rs（fake_move binary。Cargo.toml [[test]]登録）でnative系argv形式・edge no-op検出（M1基準値）・companion系実行sequence（probe→break-id）・pane交換の順序規則（singleton判定）・部分失敗報告・tab交換の隣接transposition合成（2d-1回・M2基準値）・postcondition検証（pane id不変=M8基準値・position交換）を検証する。polling timeout系条件（to-tab-poll-timeout・swap-partial-failure）は10s deadlineを実時間で消費する（fake_remap r36と同一方式）。L3はshim拡張: FAKE_FAIL_MOVE_PANE / FAKE_FAIL_MOVE_TAB（非zero終了のexit 5分類）・FAKE_TABS_JSON（4-tab応答のmove-tab状態管理）・FAKE_LOG全argv記録（argv列担保）。cli-grammar.tomlへmove系5条件（parse排他・native argv/no-op JSON・fail exit 5・tab swap argv列・help出現）・docs-verb.tomlへ2条件（配布物のmove文法・verb set v2=12記載）を追加（TASK-88がwatch/attach/detach分のhelp出現・配布物条件も継承）。実測との対応: M1→move.pane-*のfake基準値・M2→move.tab-swap-argv-sequence・M8→move.companion-postcondition-verification-failed等・M9（acceptance）→§3.3記録。
+
 旧節番号（§2.1〜§2.11）は条件書source欄のlocaterとして下表の行で存続させる:
 
 | 旧節 | 領域 | 条件書 | 主なtest target |
@@ -90,6 +92,15 @@ TASK-74改訂（2026-09-15）: R13/R14/R15/R18/R20/R48/R49の定義はremap照�
   - 全巡でdry-run緩和（floating保有でもexit 0・仮想embed計画・状態不変）と`--embed-floating`なし実行のPreflight error維持を確認
   - 既知の検証限界（TASK-81で確定。DD-10.13幾何検証の対象外）: bare pane群（shell pane・空slot正規spawn）のswap・配置は検証(e')の位置照合対象外（run一意割当のみ検査。E2E幾何比較でのみ観察可能）・対象tab内に残留するsource外held pane（`source_excluded_panes`報告対象）は当該tabの幾何を巻き込みうるが、巻き込み自体は検証対象外
 - 既知の検証限界: zellij 0.44.3では空tabを作成できない（new-tabが必ずpaneを作る）ため、`remove tab --empty`の実削除は代替検証（dry-run計画・非空tab保護・error契約）のみ
+- **TASK-88 move系実測（M1/M2/M8・2026-09-25・podman sandbox〔§1構成〕。一次記録: `tmp/tasks/tm-88/`）**: M1（`m1_result.log`・`m1c_result.log`）= `move-pane <dir> -p`はslot幾何完全不変のpane id付け替えswap・`-p`で非focus paneを移動可（focusは元paneに追従）・bare `move-pane -p`はrotate forwards・`move-pane-backwards -p`はサイクル逆回し・全操作でpane id/tab id不変・floating paneはrc=0の座標shift（slot swapでない）・rotateはno-op・edge方向移動はsilent no-op（rc=0・出力空・幾何不変）。M2（`m2_result.log`・`m2b_result.log`）= `move-tab <left|right>`はdirection positional必須・`-t <tab_id>`が存在し非active tabをfocus不変で1 position移動・隣接tabとは1回で純swap（A0B1→B0A1）・edgeはwrap（全体rotation）・tab id/name不変。M8（`m8_result.log`）= 方向・rotate系全操作でpane id・title不変
+- **TASK-88 M9 E2E acceptance（2026-09-26・podman sandbox・zellij 0.44.3 + musl static zelper実binary。一次記録: `tmp/tasks/tm-88/m9_result.log`・`m9_podman_run.log`。5-tab layout〔A/B各2 pane・C/D各1 pane・P=terminal 1+tiled compact-bar 1〕）全CHECK PASS**:
+  - S1 break-id単独（`zelper move pane terminal_0 --to-tab B`）: rc=0・移動先tab所属・pane id不変（zellerのpostcondition検証込み）。focus観察: active tabは移動先へ遷移・移動先tab内のpane focusは移動paneでない（should_change_focusはtab単位の遷移。zellerはpane focusを保証しない——設計どおり対象外）
+  - S2 pane swap 2連発（両tab非singleton）: rc=0・両pane交換・pane id不変・両tab残存
+  - S3 両singleton tabのswap: exit 7で事前拒否（hint文面を確認）
+  - S3b 片方のみsingletonのswap: rc=0・順序規則（非singleton側が先）で移動元tab自動close回避・両tab残存
+  - S4 tab交換（`zelper move tab A --swap-with D`）: rc=0・position 0↔3交換・tab id/name不変（id基準追跡）
+  - **S5 singleton判定/自動close基準（設計§3.3の想定を実証）**: 最後のselectable pane（terminal）が抜けたtabは、tiled non-selectableなplugin pane（compact-bar）のみ残っていても**自動closeする**——zellijのtab自動closeはselectable pane不在基準であり、設計・実装のsingleton判定（selectable基準）と一致する。順序規則はこの基準の下で移動元tabのselectable空虚を構造回避している
+  - 副観察: 新規sessionにzellij:link pane（selectableなplugin pane）が現れる場合がある——zelperのsingleton判定はselectable pane全数（plugin込み）を数えるため保守側（tabを非singleton扱い）に働き、安全方向
 
 ## 4. tests/構成（tests/README.mdで管理。MR-8で実態に合わせ更新）
 

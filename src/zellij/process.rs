@@ -1,5 +1,8 @@
 use super::parser;
-use super::{MIN_SUPPORTED, NewPaneSpec, NewTabSpec, OverrideSpec, ResizeOp, ZellijBackend};
+use super::{
+    MIN_SUPPORTED, MovePaneOp, NewPaneSpec, NewTabSpec, OverrideSpec, ResizeOp, TabMoveDirection,
+    ZellijBackend,
+};
 use crate::domain::{PaneKindId, SessionRef, TabId, TabState};
 use crate::error::{ErrorClass, ZelperError};
 use std::io::{Read, Seek, Write};
@@ -403,6 +406,29 @@ impl ZellijBackend for ZellijCliBackend {
         args.push(dir.as_str().to_string());
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         self.run_action(&refs)?;
+        Ok(())
+    }
+
+    fn move_pane(&self, pane: &PaneKindId, op: MovePaneOp) -> Result<(), ZelperError> {
+        // argv（M1実測確定）: 方向移動は `move-pane <dir> -p <spec>`（direction
+        // positionalが先・-pで非focus paneを指定。focusは元paneに追従するため
+        // zeller側のfocus制御は不要）・rotate forwardsはbare `move-pane -p <spec>`・
+        // rotate backwardsは別action名 `move-pane-backwards -p <spec>`
+        let p = pane.as_spec();
+        let args: Vec<&str> = match op {
+            MovePaneOp::Direction(d) => vec!["move-pane", d.as_str(), "-p", p.as_str()],
+            MovePaneOp::RotateForwards => vec!["move-pane", "-p", p.as_str()],
+            MovePaneOp::RotateBackwards => vec!["move-pane-backwards", "-p", p.as_str()],
+        };
+        self.run_action(&args)?;
+        Ok(())
+    }
+
+    fn move_tab(&self, tab: TabId, direction: TabMoveDirection) -> Result<(), ZelperError> {
+        // argv（M2実測確定）: `move-tab <left|right> -t <tab_id>`。direction positional
+        // 必須・-t指定はfocus不変で非active tabを1 position移動するためgo-to-tab
+        // 併用・focus復帰は不要
+        self.run_action(&["move-tab", direction.as_str(), "-t", &tab.0.to_string()])?;
         Ok(())
     }
 

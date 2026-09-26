@@ -83,6 +83,14 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
+zelper move pane PANE --to-tab TAB | --swap-with PANE   （3形式は相互排他）
+zelper move tab TAB --swap-with TAB [--json]
+                                        （単一pane/tabの移動・交換。方向移動・rotateは
+                                         slot間swap〔端ではno-op warning〕・tab間移動と
+                                         pane交換はcompanion plugin・tab交換はmove-tab合成。
+                                         対象はtiled terminal paneのみ: floating paneは
+                                         remap --embed-floatingでtiled化してから）
 zelper [--session NAME] attach [--json]     （対話attach。TTY必須: 非TTYはexit 7）
 zelper [--session NAME] detach [--json]     （対象sessionのattach clientをdetach）
 zelper add session NAME [--json]            （detached session作成。session 0件環境でも動作）
@@ -116,7 +124,15 @@ zelper docs readme | llm usage|skill|snippet
 - `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。複数clientがattachしている場合、zellijの仕様としてdetachは最新のattach clientのみ切断し、先発clientは画面凍結のまま残留します（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しません）
 - `add session NAME` はdetached sessionを作成します（`zellij attach -b NAME` 相当）。sessionが1つも存在しない環境でも動作し、同名running sessionが既にあれば作成前にexit 7で拒否、作成後のlist-sessions出現を検証してから `created session 'NAME' (detached)` を報告します。作成直後は空session（tab 1・pane 0件）で、最初のattach時にdefault layoutが具現化します。layoutを適用したい場合は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行います
 
+## moveの意味論（単一対象の移動・交換）
 
+- remapがlayout基準の全体再配置（heavyweight）であるのに対し、moveは単一pane/tabの即時・可逆な相対位置変更（lightweight）です
+- 方向移動・rotate（`move pane P left` 等）はzellijの`move-pane`wrapで、slot幾何はそのままにpaneの付け替えswapとして動きます。移動方向の端にいる場合はrc=0でも何も変わらないため、実行後に幾何を再取得して比較し、no-opならwarning行を出してexit 0します（無検証の成功を返しません）
+- `move pane P --to-tab T` はcompanion plugin（remapと共用）によるプロセス保存移動です。pane IDは不変（実行後に検証）。宛先が現tabと同じならpipeなしのno-op（warning + exit 0）
+- `move pane A --swap-with B` は2回の移動でpaneを交換します（cross-tabのみ。同一tab内の位置交換はzellijに機構がないためexit 7 + remap誘導）。どちらかのtabの最後のselectable paneである構成では、順序を変えてもtabの自動closeを回避できないため実行前にexit 7で拒否し、`move tab --swap-with`（tab名・tab IDの帰属は入れ替わらない点がpane交換と異なる）か`remap`を案内します。2回の移動の間で失敗した場合は移動済み/未移動を正確に報告し、atomicityは主張しません
+- `move tab A --swap-with B` は`move-tab -t`の繰返し合成（距離dに対し2d-1回）で両tabのpositionを入れ替えます。tab ID・tab名は不変（実行後に検証）
+
+## remapの意味論
 
 既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置します。対象はsession全体のselectable・tiledなterminal pane（`--tab T` 指定時はそのtabのpaneに絞り込み、かつそのtabが再配置のanchorになる）。
 
