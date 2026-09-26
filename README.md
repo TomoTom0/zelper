@@ -129,7 +129,7 @@ zelper docs readme | llm usage|skill|snippet
 - remapがlayout基準の全体再配置（heavyweight）であるのに対し、moveは単一pane/tabの即時・可逆な相対位置変更（lightweight）です
 - 方向移動・rotate（`move pane P left` 等）はzellijの`move-pane`wrapで、slot幾何はそのままにpaneの付け替えswapとして動きます。移動方向の端にいる場合はrc=0でも何も変わらないため、実行後に幾何を再取得して比較し、no-opならwarning行を出してexit 0します（無検証の成功を返しません）
 - `move pane P --to-tab T` はcompanion plugin（remapと共用）によるプロセス保存移動です。pane IDは不変（実行後に検証）。宛先が現tabと同じならpipeなしのno-op（warning + exit 0）
-- `move pane A --swap-with B` は2回の移動でpaneを交換します（cross-tabのみ。同一tab内の位置交換はzellijに機構がないためexit 7 + remap誘導）。どちらかのtabの最後のselectable paneである構成では、順序を変えてもtabの自動closeを回避できないため実行前にexit 7で拒否し、`move tab --swap-with`（tab名・tab IDの帰属は入れ替わらない点がpane交換と異なる）か`remap`を案内します。2回の移動の間で失敗した場合は移動済み/未移動を正確に報告し、atomicityは主張しません
+- `move pane A --swap-with B` は2回の移動でpaneを交換します（cross-tabのみ。同一tab内の位置交換はzellijに機構がないためexit 7 + remap誘導）。片方だけが所属tabの最後のselectable paneである構成では移動順序を調整してtabの自動closeを回避します。両paneがそれぞれ所属tabの最後のselectable pane（両側singleton）である構成では、順序を変えてもtabの自動closeを回避できないため実行前にexit 7で拒否し、`move tab --swap-with`（tab名・tab IDの帰属は入れ替わらない点がpane交換と異なる）か`remap`を案内します。2回の移動の間で失敗した場合は移動済み/未移動を正確に報告し、atomicityは主張しません
 - `move tab A --swap-with B` は`move-tab -t`の繰返し合成（距離dに対し2d-1回）で両tabのpositionを入れ替えます。tab ID・tab名は不変（実行後に検証）
 
 ## remapの意味論

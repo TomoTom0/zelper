@@ -1118,10 +1118,7 @@ fn tab_swap_mid_vanish_reports_partial_progress() {
     let err = run_tab_swap(&b, "0", "2").unwrap_err();
     assert_eq!(*err.class(), ErrorClass::OperationFailed);
     let msg = err.message();
-    assert!(
-        msg.contains("after 2 of 3"),
-        "完了step数の報告: {msg}"
-    );
+    assert!(msg.contains("after 2 of 3"), "完了step数の報告: {msg}");
     assert!(
         msg.contains("may be changed") && !msg.contains("are unchanged"),
         "位置が変化しうる旨（不変と断定しない）: {msg}"

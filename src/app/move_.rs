@@ -302,10 +302,9 @@ observed within the polling deadline",
                         pane.as_spec(),
                         dest.0
                     ),
-                    Some(p) if p.tab_id == from => format!(
-                        "the pane was not moved (still on tab {})",
-                        p.tab_id.0
-                    ),
+                    Some(p) if p.tab_id == from => {
+                        format!("the pane was not moved (still on tab {})", p.tab_id.0)
+                    }
                     Some(p) => format!(
                         "the pane is on tab {}, neither its source tab {} nor the \
 destination {}",
@@ -506,31 +505,30 @@ are NOT swapped, unlike a pane swap) or `remap` instead",
     let wasm = companion::setup_and_probe(backend)?;
     // 移動1件の完了状態を、失敗時に可能なら再取得して正確に報告する（設計§3.3
     // 「移動済み/未移動の正確な報告」。REVIEW-3指摘2: 確認できない系列を断定しない）
-    let move_state_note =
-        |backend: &dyn ZellijBackend, pane: &PaneState, dest: TabId| -> String {
-            match backend.list_panes() {
-                Ok(panes) => match panes.iter().find(|p| p.id == pane.id) {
-                    Some(p) if p.tab_id == dest => format!(
-                        "{} actually completed the move to tab {}",
-                        pane.id.as_spec(),
-                        dest.0
-                    ),
-                    Some(p) => format!(
-                        "{} was not moved and remains on tab {}",
-                        pane.id.as_spec(),
-                        p.tab_id.0
-                    ),
-                    None => format!(
-                        "{} could not be found; its move's completion is unconfirmed",
-                        pane.id.as_spec()
-                    ),
-                },
-                Err(_) => format!(
-                    "{}'s move completion is unconfirmed (list-panes did not respond)",
+    let move_state_note = |backend: &dyn ZellijBackend, pane: &PaneState, dest: TabId| -> String {
+        match backend.list_panes() {
+            Ok(panes) => match panes.iter().find(|p| p.id == pane.id) {
+                Some(p) if p.tab_id == dest => format!(
+                    "{} actually completed the move to tab {}",
+                    pane.id.as_spec(),
+                    dest.0
+                ),
+                Some(p) => format!(
+                    "{} was not moved and remains on tab {}",
+                    pane.id.as_spec(),
+                    p.tab_id.0
+                ),
+                None => format!(
+                    "{} could not be found; its move's completion is unconfirmed",
                     pane.id.as_spec()
                 ),
-            }
-        };
+            },
+            Err(_) => format!(
+                "{}'s move completion is unconfirmed (list-panes did not respond)",
+                pane.id.as_spec()
+            ),
+        }
+    };
     // step 1: firstを相手tabへ（firstは必ず非singleton側）
     let first_dest = if first.id == a.id { b.tab_id } else { a.tab_id };
     if let Err(e) = move_pane_via_break_id(backend, &wasm, first, first_dest) {

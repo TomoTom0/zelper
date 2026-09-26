@@ -93,14 +93,15 @@ TASK-87/88改訂（2026-09-26・verb拡張の条件書）: `watch`（TASK-86）�
   - 既知の検証限界（TASK-81で確定。DD-10.13幾何検証の対象外）: bare pane群（shell pane・空slot正規spawn）のswap・配置は検証(e')の位置照合対象外（run一意割当のみ検査。E2E幾何比較でのみ観察可能）・対象tab内に残留するsource外held pane（`source_excluded_panes`報告対象）は当該tabの幾何を巻き込みうるが、巻き込み自体は検証対象外
 - 既知の検証限界: zellij 0.44.3では空tabを作成できない（new-tabが必ずpaneを作る）ため、`remove tab --empty`の実削除は代替検証（dry-run計画・非空tab保護・error契約）のみ
 - **TASK-88 move系実測（M1/M2/M8・2026-09-25・podman sandbox〔§1構成〕。一次記録: `tmp/tasks/tm-88/`）**: M1（`m1_result.log`・`m1c_result.log`）= `move-pane <dir> -p`はslot幾何完全不変のpane id付け替えswap・`-p`で非focus paneを移動可（focusは元paneに追従）・bare `move-pane -p`はrotate forwards・`move-pane-backwards -p`はサイクル逆回し・全操作でpane id/tab id不変・floating paneはrc=0の座標shift（slot swapでない）・rotateはno-op・edge方向移動はsilent no-op（rc=0・出力空・幾何不変）。M2（`m2_result.log`・`m2b_result.log`）= `move-tab <left|right>`はdirection positional必須・`-t <tab_id>`が存在し非active tabをfocus不変で1 position移動・隣接tabとは1回で純swap（A0B1→B0A1）・edgeはwrap（全体rotation）・tab id/name不変。M8（`m8_result.log`）= 方向・rotate系全操作でpane id・title不変
-- **TASK-88 M9 E2E acceptance（2026-09-26・podman sandbox・zellij 0.44.3 + musl static zelper実binary。一次記録: `tmp/tasks/tm-88/m9_result.log`・`m9_podman_run.log`。5-tab layout〔A/B各2 pane・C/D各1 pane・P=terminal 1+tiled compact-bar 1〕）全CHECK PASS**:
+- **TASK-88 M9 E2E acceptance（2026-09-26・podman sandbox・zellij 0.44.3 + musl static zelper実binary。一次記録: `tmp/tasks/tm-88/m9_result.log`・`m9_podman_run.log`〔M9〕・`m9b_podman_run.log`〔M9b〕。5-tab layout〔A/B各2 pane・C/D各1 pane・P=terminal 1+tiled compact-bar 1〕）。S1〜S4・S3bは全PASS。S5・M9bは観察記録（PASS/FAIL判定でなく自動close基準の実証観察）**:
   - S1 break-id単独（`zelper move pane terminal_0 --to-tab B`）: rc=0・移動先tab所属・pane id不変（zellerのpostcondition検証込み）。focus観察: active tabは移動先へ遷移・移動先tab内のpane focusは移動paneでない（should_change_focusはtab単位の遷移。zellerはpane focusを保証しない——設計どおり対象外）
   - S2 pane swap 2連発（両tab非singleton）: rc=0・両pane交換・pane id不変・両tab残存
   - S3 両singleton tabのswap: exit 7で事前拒否（hint文面を確認）
   - S3b 片方のみsingletonのswap: rc=0・順序規則（非singleton側が先）で移動元tab自動close回避・両tab残存
   - S4 tab交換（`zelper move tab A --swap-with D`）: rc=0・position 0↔3交換・tab id/name不変（id基準追跡）
-  - **S5 singleton判定/自動close基準（設計§3.3の想定を実証）**: 最後のselectable pane（terminal）が抜けたtabは、tiled non-selectableなplugin pane（compact-bar）のみ残っていても**自動closeする**——zellijのtab自動closeはselectable pane不在基準であり、設計・実装のsingleton判定（selectable基準）と一致する。順序規則はこの基準の下で移動元tabのselectable空虚を構造回避している
-  - 副観察: 新規sessionにzellij:link pane（selectableなplugin pane）が現れる場合がある——zelperのsingleton判定はselectable pane全数（plugin込み）を数えるため保守側（tabを非singleton扱い）に働き、安全方向
+  - S5（観察）: 最後のselectable pane（terminal）が抜けたtabは、tiled non-selectableなplugin pane（compact-bar）のみ残っていても自動closeした（実証された構成）
+  - **M9b（REVIEW-3指摘7追加実測・観察）**: tiledなselectable plugin pane（`zellij:link`・is_selectable=true）のみ残るtab（layoutで明示的に配置）は自動closeしなかった。S5とM9bの対により**zellijのtab自動closeは「selectable pane不在」基準であることが確定**し、設計§3.3・実装のsingleton判定（selectable基準）と一致する（順序規則はこの基準の下で移動元tabのselectable空虚を構造回避している）
+  - 副観察: 新規sessionにzellij:link pane（selectableなplugin pane）が現れる場合がある——zelperのsingleton判定はselectable pane全数（plugin込み）を数えるため保守側（tabを非singleton扱い）に働く。M9bによりselectable pluginの残存するtabはcloseされないことが実証済みのため、この保守側判定は安全方向であることも実裏付けられた
 
 ## 4. tests/構成（tests/README.mdで管理。MR-8で実態に合わせ更新）
 

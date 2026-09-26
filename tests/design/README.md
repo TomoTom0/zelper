@@ -12,7 +12,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（19 file・259条件）
+## 条件書一覧（19 file・261条件）
 
 verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
 
@@ -36,7 +36,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（7件） | 7 | true |
 | 17 | watch | src/app/watch.rs | fake_watch（loop系6件）+ cli_list_read_send（部分10件） | 16 | true |
 | 18 | attach-detach | src/app/attach.rs | fake_attach（L2・2件）+ cli_list_read_send（部分9件）+ lib src/zellij/process.rs（部分2件） | 13 | true |
-| 19 | move | src/app/move_.rs | fake_move（22件）+ cli_list_read_send（部分5件・L3） | 22 | true |
+| 19 | move | src/app/move_.rs | fake_move（24件）+ cli_list_read_send（部分5件・L3） | 24 | true |
 
 source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
@@ -52,7 +52,7 @@ test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）
 - `tests/cli/list_read_send.rs` 53件 = cli-grammar 11 / read-send 11 / list-display 10 / json-contract 2 / watch 10（文法・出力契約・exit分類。loop系6件はfake_watch）/ attach-detach 9（L3層。TASK-89）/ move 5（L3層。TASK-88: parse排他・native argv/no-op JSON・fail exit5・tab swap argv列・verb set v2 help出現〔watch/attach/detachの継承分を含む〕）
 - `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
 - `tests/fake_backend/watch.rs` 6件 = watch（loop系: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。設計§5.2/§5.3の層帰属）
-- `tests/fake_backend/move.rs` 22件 = move（全条件。L2中心・1条件=1 test fn。TASK-88実装済み。polling timeout系2条件は10s deadlineを実時間消費）
+- `tests/fake_backend/move.rs` 24件 = move（全条件。L2中心・1条件=1 test fn。TASK-88実装済み。REVIEW-3でprobe送信失敗・tab交換途中消滅の2条件を追加。polling timeout系3条件は10s deadlineを実時間消費）
 - `tests/cli/docs.rs` 9件 = docs-verb（配布物出力一致7 + TASK-88のmove文法記載・verb set v2=12配布物記載2）
 - lib内test 12件（src/app/list.rs 3件・src/zellij/process.rs 9件〔TASK-89のrun_interactive系2件を含む〕）= list-display・backend-process・attach-detachへ帰属
 - `tests/fake_backend/attach.rs` 2件 + `tests/cli/list_read_send.rs` 9件 + lib src/zellij/process.rs 2件 = attach-detach 13件（TASK-89実装済み。層帰属は設計書§5.2/§5.3・低-9修正: run_interactive経路はsrc内#[cfg(test)]のみ〔L3実binaryはTTY検査が先に立ち到達しない〕・attachのTTY検査はL3実binary非TTY envelope検証+L2 tty_ok注入。detach/add sessionはL3 shim〔FAKE_DETACH_FAIL/FAKE_SESSIONS_CREATE・FAKE_SESSIONS_EMPTY・不在session名rc=1応答〕）

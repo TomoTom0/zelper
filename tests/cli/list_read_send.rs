@@ -1684,7 +1684,6 @@ fn move_tab_swap_argv_sequence_and_success() {
         "-tはfocus不変のためgo-to不使用: {:?}",
         calls(&log)
     );
-    let out = run_once();
     let v: &serde_json::Value = &out;
     assert_eq!(v["ok"], true);
     assert_eq!(v["data"]["action"], "swap-tab");
@@ -1697,7 +1696,11 @@ fn move_tab_swap_argv_sequence_and_success() {
         serde_json::json!({"id": 2, "position": 0})
     );
 
-    // 同一dirでの再実行: setupがtabs状態fileを初期化するため同一argv列・同一結果
+    // 同一dirでの再実行: setup_fake_zellijを再度呼ぶ（tag+PIDが同一のため同一dirを
+    // 再利用 = PID再利用の再現）。setupが ${FAKE_LOG}.tabs を初期化するため、
+    // 前回の交換後状態（tab 0がposition 2にある状態）でなく初期状態から再び
+    // 同一argv列・同一結果になる
+    let (_dir2, _log2) = setup_fake_zellij("move-tabswap");
     let out2 = run_once();
     let argv2: Vec<String> = calls(&log)
         .iter()
