@@ -33,7 +33,7 @@ expect_return_shape = "いずれもOk（exit 0）。humanは `attach session '<N
 
 [[condition]]
 id = "attach-detach.attach-run-interactive-stdio-inherit-no-timeout"
-source_lines = "src/zellij/process.rs:935"
+source_lines = "src/zellij/process.rs:957"
 target_function = "ZellijCliBackend::run_interactive（src/zellij/process.rs・attach_session実行経路）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.3（run_interactive新設: CommandをStdio::inherit()×3（stdin/stdout/stderr）でspawnし、timeout無しでchild.wait()完結。既存run()は無変更。attach_session() = run_interactive([\"attach\", <session>])）・§5.2（attachのrun_interactive経路はsrc内#[cfg(test)]によるfake program差し替え（with_program・backend-process条件書pattern）で担保。attach呼出のexit codeはFAKE_ATTACH_EXIT envで差し替えprogram側に制御。real binaryのL3はTTY検査が先に立ち当該経路へ到達しないためL3側には配置しない——低-9修正）・§6（DD-3.1へrun_interactive例外追記: stdio inherit・timeout無効・既存run()無変更）"
 description = "attachのbackend経路の実行特性: zellij attachはstdioをinherit（fd 0/1/2ともzellerの対応fdを子が継承）してspawnされ、run()のtimeout機構を適用せずchildの終了まで待つ。対話attachは時間無制限が本質（run()の10s timeoutでは対話sessionが打ち切られる）ため、timeout無効とstdio inheritの2点を検証する。backend-process条件書と同一のwith_program・fake zellij test mutex・staging+atomic rename patternでsrc内から検証"
@@ -42,7 +42,7 @@ expect_return_shape = "(a) 3 fdすべて親と同一（inherit検出・報告fil
 
 [[condition]]
 id = "attach-detach.attach-zellij-fail"
-source_lines = "src/zellij/process.rs:1024"
+source_lines = "src/zellij/process.rs:1047"
 target_function = "ZellijCliBackend::run_interactive（非zero終了）→ attach::run_attach_inner"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.3（run_interactive: 非zero終了はOperationFailed）・§4.1（attach: zellij attach非zero終了 OperationFailed 5）・§5.2（FAKE_ATTACH_EXIT） + 実測M3: tmp/tasks/tm-89/m3_result.log (b2)（不在session名はzellij側rc=1・stderr `Session 'm3ghost' not found. The following sessions are active:` + 候補行。attachも不在sessionで同一形式のzellij失敗になる） + src/app/mod.rs resolve_session（--session明示は存在確認せずpass-throughのため、不在名の検出はzellij側になる）"
 description = "attachのzellij非zero終了のerror mapping。代表が--session明示の不在session（zellijはrc=1・Session not found + 稼働session候補表示）で、これをOperationFailed（exit 5）へ変換しmessageへstderr本文を埋め込む。Session not foundをNoTarget（exit 3）へ切り替えない（stderr内容によるclass切替は設計上存在しない——backend-process.nonzero-exit-operation-failedと同一規則。--session明示時はzeller側の存在確認を行わないため不在検出はzellij側）。L3実binaryではTTY検査が先に立つため到達できず、src内#[cfg(test)]で検証する（低-9）"

@@ -165,6 +165,16 @@ impl ZellijCliBackend {
 
     /// 生のzellij呼び出し（list-sessions等のaction外コマンド用）。
     /// stdout/stderrは専用threadで読み取り、pipe buffer満杯によるdeadlockを防ぐ。
+    ///
+    /// 成功判定は「終了code 0 かつ stderr空」（TASK-90・DD-3.1）: rc=0でもstderr
+    /// 非空ならOperationFailedへ変換する。action系は対象session不在+他session生存時に
+    /// rc=0 + stdout（稼働session一覧）+ stderr（Session not found）で応答する
+    /// （実測52action・tmp/tasks/tm-90/）ため、rcのみの判定は書き込み系の誤成功・
+    /// read系の不正確なparse errorになる。正当系27測定（list/read/dump-screen/
+    /// 書き込み系12種・plugin稼働構成含む）でrc=0+stderr非空は皆無のため、stderr非空
+    /// は正当系に現れない。これはstderr内容によるclass切替ではなく、非zero終了と
+    /// 同一class（OperationFailed）での失敗判定の追加。この場合のstdoutは破棄する。
+    /// run_interactive（attach。対話系）は本判定の対象外
     fn run(&self, args: &[String]) -> Result<String, ZelperError> {
         let mut cmd = Command::new(&self.program);
         cmd.args(args)
@@ -216,13 +226,23 @@ impl ZellijCliBackend {
         let err = t_err.join().unwrap_or_default();
         let stdout = String::from_utf8_lossy(&out).into_owned();
         let stderr = String::from_utf8_lossy(&err).into_owned();
-        if status.success() {
-            Ok(stdout)
-        } else {
+        if !status.success() {
             Err(ZelperError::new(
                 ErrorClass::OperationFailed,
                 format!("zellij exited with {}: {}", status, stderr.trim()),
             ))
+        } else if !stderr.trim().is_empty() {
+            // rc=0 + stderr非空は失敗（TASK-90・DD-3.1）: messageへstderr本文を
+            // 埋め込む（非zero終了時の文面と整合）。stdout（稼働session一覧等）は破棄
+            Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!(
+                    "zellij exited with status 0 but wrote to stderr: {}",
+                    stderr.trim()
+                ),
+            ))
+        } else {
+            Ok(stdout)
         }
     }
 }
@@ -729,7 +749,9 @@ mod tests {
 
     /// test-plan §2.3・DD-5:265・DD-10.14:512: zellijの非zero exitは常に
     /// OperationFailedへ変換され、messageへexit statusとtrim済みstderr本文が埋め込まれる
-    /// （stderr内容によるclass切替は設計上存在しない）
+    /// （失敗判定はexit statusとstderr空否のみで行い、stderr内容によるclass切替は
+    /// 設計上存在しない。rc=0 + stderr非空も同一classの失敗判定〔TASK-90・
+    /// backend-process.rc0-stderr-nonempty-operation-failed〕であってclass切替ではない）
     // [covers:backend-process.nonzero-exit-operation-failed]
     #[test]
     fn nonzero_exit_becomes_operation_failed() {
@@ -1019,8 +1041,9 @@ exit 0
     /// not found + 稼働session候補表示）が埋め込まれる。Session not foundを
     /// NoTarget（exit 3）へ切り替えない（stderr内容によるclass切替は設計上存在
     /// しない——backend-process.nonzero-exit-operation-failedと同一規則。
-    /// --session明示時はresolve_sessionが存在確認せずpass-throughのため不在名の
-    /// 検出はzellij側になる）
+    /// rc=0 + stderr非空の失敗判定〔TASK-90〕もclass切替ではなく、かつ
+    /// run_interactiveはその対象外。--session明示時はresolve_sessionが存在確認
+    /// せずpass-throughのため不在名の検出はzellij側になる）
     // [covers:attach-detach.attach-zellij-fail]
     #[test]
     fn attach_nonzero_exit_becomes_operation_failed_with_stderr() {
@@ -1044,5 +1067,53 @@ exit 0
         assert!(msg.contains("Session 'ghost' not found"), "message: {msg}");
         assert!(msg.contains("sess-a"), "message: {msg}");
         assert!(msg.contains("sess-b"), "message: {msg}");
+    }
+
+    /// TASK-90（DD-3.1成功判定）: rc=0でもstderr非空の応答はOperationFailedへ
+    /// 変換される。action系は対象session不在+他session生存時にrc=0 + stdout
+    /// （稼働session一覧）+ stderr（Session not found + 候補list）で応答する
+    /// （52action実測・tmp/tasks/tm-90/）ため、rcのみの判定は誤成功になる。
+    /// messageへはstderr本文のみ埋め込まれ、stdout（稼働session一覧）は破棄
+    /// される。正当系（rc=0 + stderr空）は従来どおり成功しstdoutを返す
+    /// （正当系27測定でrc=0+stderr非空は皆無のため、この判定が正当系を
+    /// 偽陽性化しない）。class切替ではなく非zero終了と同一classの失敗判定
+    // [covers:backend-process.rc0-stderr-nonempty-operation-failed]
+    #[test]
+    fn rc0_with_stderr_becomes_operation_failed() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        // 対象session不在+他session生存時のaction系実測応答と同形:
+        // rc=0 + stdout非空（稼働session一覧）+ stderr非空（Session not found + 候補）
+        let script = "#!/usr/bin/env bash\n\
+            echo \"fake-sess [Created 1m ago] (current)\"\n\
+            echo \"Session 'ghost' not found. The following sessions are active:\" >&2\n\
+            echo \"sess-a\" >&2\n\
+            echo \"sess-b\" >&2\n\
+            exit 0\n";
+        let program = setup_fake_zellij("rc0-stderr", script);
+        let backend = ZellijCliBackend::new("s").with_program(program);
+        let err = backend
+            .run(&["list-sessions".to_string(), "-n".to_string()])
+            .unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::OperationFailed,
+            "message: {}",
+            err.message()
+        );
+        let msg = err.message();
+        assert!(
+            msg.contains("zellij exited with status 0 but wrote to stderr"),
+            "message: {msg}"
+        );
+        assert!(msg.contains("Session 'ghost' not found"), "message: {msg}");
+        assert!(msg.contains("sess-a"), "message: {msg}");
+        assert!(msg.contains("sess-b"), "message: {msg}");
+        // stdout（稼働session一覧）は使われない（破棄。messageへ混入しない）
+        assert!(!msg.contains("fake-sess"), "message: {msg}");
+
+        // 正当系: rc=0 + stderr空は従来どおり成功（stdout返却）
+        let program = setup_fake_zellij("rc0-silent", "#!/usr/bin/env bash\necho \"ok\"\nexit 0\n");
+        let backend = ZellijCliBackend::new("s").with_program(program);
+        assert_eq!(backend.run(&["--version".to_string()]).unwrap(), "ok\n");
     }
 }

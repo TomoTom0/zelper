@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書19file・261条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
+- `design/` — テスト設計条件書19file・262条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -26,7 +26,7 @@
   - `move.rs` — move.toml（24条件。TASK-88+REVIEW-3: native系argv形式（M1実配置の全pane照合）〔move-pane <dir> -p / move-pane -p / move-pane-backwards -p〕・edge no-op検出・companion系実行sequence〔permissions seed→probe→break-id〕・no-op/不在/曖昧・floating/plugin pane preflight・pane交換の順序規則〔singleton判定〕・同一tab/両singleton拒否・部分失敗報告・tab交換の隣接transposition合成〔2d-1回〕・postcondition検証〔pane id不変・position交換〕・backend失敗・REVIEW-3追加（probe効果抑制と送信失敗の分離・timeout時の再取得による移動済み/未移動/確認不能の正確報告・tab交換途中消滅の部分進捗報告）。polling timeout系3条件は10s deadlineを実時間消費〔fake_remap r36と同一方式〕）
 - `fixtures/zellij/` — 実zellij 0.44.3出力fixture 11file: panes.json / tabs.json（汎用）・panes-three.json（3 pane基本remap）・panes-remap.json / tabs-remap.json（remap dry-run）・panes-hetero.json / tabs-hetero.json（M=15・T=3 dry-run検証用の合成fixture）・panes-floating.json（TASK-81: 3 tiled + selectable floating terminal）・panes-cwd.json（TASK-81: terminal_command+pane_cwd付きpane）・panes-two.json（TASK-81: M=2<N=3検証失敗系列）・panes-three-dup.json（TASK-81: dup pane入り・FAKE_DUP_AFTER_OVERRIDEと併用）
 
-lib内test 12件（`src/app/list.rs` 3件・`src/zellij/process.rs` 9件〔TASK-89のrun_interactive系2件を含む〕）はlist-display.toml・backend-process.toml・attach-detach.tomlが管轄（src/のままtag付け。条件数の内訳13条件・7条件・13条件に含む）。
+lib内test 13件（`src/app/list.rs` 3件・`src/zellij/process.rs` 10件〔TASK-89のrun_interactive系2件・TASK-90のrc0+stderr系1件を含む〕）はlist-display.toml・backend-process.toml・attach-detach.tomlが管轄（src/のままtag付け。条件数の内訳13条件・8条件・13条件に含む）。
 
 ## L4統合テスト（実zellij）
 
@@ -35,8 +35,8 @@ lib内test 12件（`src/app/list.rs` 3件・`src/zellij/process.rs` 9件〔TASK-
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（261テスト）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。261条件でexit 0）
+cargo test          # L1〜L3（262テスト）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。262条件でexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）

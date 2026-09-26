@@ -12,7 +12,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（19 file・261条件）
+## 条件書一覧（19 file・262条件）
 
 verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
 
@@ -33,7 +33,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 13 | remap-sequence | src/app/remap.rs | fake_remap（47件） | 47 | true |
 | 14 | remap-cli | src/app/remap.rs | cli_remap（15件） | 15 | true |
 | 15 | docs-verb | src/app/docs.rs | cli_docs（9件） | 9 | true |
-| 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（7件） | 7 | true |
+| 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（8件） | 8 | true |
 | 17 | watch | src/app/watch.rs | fake_watch（loop系6件）+ cli_list_read_send（部分10件） | 16 | true |
 | 18 | attach-detach | src/app/attach.rs | fake_attach（L2・2件）+ cli_list_read_send（部分9件）+ lib src/zellij/process.rs（部分2件） | 13 | true |
 | 19 | move | src/app/move_.rs | fake_move（24件）+ cli_list_read_send（部分5件・L3） | 24 | true |
@@ -54,7 +54,7 @@ test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）
 - `tests/fake_backend/watch.rs` 6件 = watch（loop系: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。設計§5.2/§5.3の層帰属）
 - `tests/fake_backend/move.rs` 24件 = move（全条件。L2中心・1条件=1 test fn。TASK-88実装済み。REVIEW-3でprobe送信失敗・tab交換途中消滅の2条件を追加。polling timeout系3条件は10s deadlineを実時間消費）
 - `tests/cli/docs.rs` 9件 = docs-verb（配布物出力一致7 + TASK-88のmove文法記載・verb set v2=12配布物記載2）
-- lib内test 12件（src/app/list.rs 3件・src/zellij/process.rs 9件〔TASK-89のrun_interactive系2件を含む〕）= list-display・backend-process・attach-detachへ帰属
+- lib内test 13件（src/app/list.rs 3件・src/zellij/process.rs 10件〔TASK-89のrun_interactive系2件・TASK-90のrc0+stderr系1件を含む〕）= list-display・backend-process・attach-detachへ帰属
 - `tests/fake_backend/attach.rs` 2件 + `tests/cli/list_read_send.rs` 9件 + lib src/zellij/process.rs 2件 = attach-detach 13件（TASK-89実装済み。層帰属は設計書§5.2/§5.3・低-9修正: run_interactive経路はsrc内#[cfg(test)]のみ〔L3実binaryはTTY検査が先に立ち到達しない〕・attachのTTY検査はL3実binary非TTY envelope検証+L2 tty_ok注入。detach/add sessionはL3 shim〔FAKE_DETACH_FAIL/FAKE_SESSIONS_CREATE・FAKE_SESSIONS_EMPTY・不在session名rc=1応答〕）
 
 ## R番号→条件id対応表
@@ -127,5 +127,5 @@ TASK-81（DD-10 2026-09-19改訂: cwd注入・reconciliation・dup close・dry-r
 - `tests/fake_backend/fake.rs`: test支援資産（fake backend実装）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
 - `tests/fixtures/`（`tests/fixtures/zellij/*.json`等）: fixtures。scanner走査対象外
 - L4統合test harness（podman・実zellij）: repo管理外。要件・実施記録は`docs/testing/test-plan.md`のL4節へ集約（設計書§6.1）。該当要求は各条件書の`[[excluded]]`から参照行で指す
-- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の7件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
+- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の8件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
 - companion plugin実装（`plugin/src/`）: 現在test fnなし。test追加時はremap系の関連条件書へ条件化し、scanner走査対象（`plugin/src/**/*.rs`）に含まれる
