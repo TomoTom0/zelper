@@ -78,13 +78,58 @@ fn tab_at(id: u32, name: &str, active: bool) -> TabState {
     }
 }
 
-/// M1実測の3-slot layout相当（同一tab・横1列3 pane）
-fn three_column_tab() -> Vec<PaneState> {
+/// M1/M8実測の3-slot layout（mixed orientation: 左1 pane〔左半分全体〕+ 右上/右下。
+/// REVIEW-3指摘1: 実配置そのものを基準値にする）。幾何は実測値（100x30画面）:
+/// A=terminal_0 (y=0,x=0, 29x50) focus・B=terminal_1 (y=0,x=50, 15x50)・
+/// C=terminal_2 (y=15,x=50, 14x50)
+fn m1_layout_panes() -> Vec<PaneState> {
     vec![
-        pane_at(0, "a", 0, "T0", 0, 0),
-        pane_at(1, "b", 0, "T0", 0, 100),
-        pane_at(2, "c", 0, "T0", 0, 200),
+        m1_pane(0, "a", 0, 0, 29, 50, true),
+        m1_pane(1, "b", 0, 50, 15, 50, false),
+        m1_pane(2, "c", 15, 50, 14, 50, false),
     ]
+}
+
+fn m1_pane(id: u32, title: &str, y: u32, x: u32, rows: u32, cols: u32, focused: bool) -> PaneState {
+    let mut p = pane_at(id, title, 0, "T0", y, x);
+    p.geometry.rows = rows;
+    p.geometry.cols = cols;
+    p.is_focused = focused;
+    p
+}
+
+/// 全paneの状態snapshot（id/title/focus/geometry。REVIEW-3指摘1: 対象paneだけで
+/// なく全paneの幾何・ID・title・focusを照合する）
+fn pane_snapshots(b: &FakeBackend) -> Vec<String> {
+    snapshot_of(&b.state.borrow().panes)
+}
+
+fn snapshot_of(panes: &[PaneState]) -> Vec<String> {
+    panes
+        .iter()
+        .map(|p| {
+            format!(
+                "{}|{}|focus={}|y={},x={},{}x{}",
+                p.id.as_spec(),
+                p.title,
+                p.is_focused,
+                p.geometry.y,
+                p.geometry.x,
+                p.geometry.rows,
+                p.geometry.cols
+            )
+        })
+        .collect()
+}
+
+/// M1実配置の期待snapshot構築helper: (id, title, y, x, rows, cols, focused) 列から
+fn expect_snapshots(entries: &[(u32, &str, u32, u32, u32, u32, bool)]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|(id, title, y, x, rows, cols, f)| {
+            format!("terminal_{id}|{title}|focus={f}|y={y},x={x},{rows}x{cols}")
+        })
+        .collect()
 }
 
 /// 2 tab構成（tab0にpane A=terminal_1とX=terminal_2・tab1にpane B=terminal_3と
@@ -132,12 +177,17 @@ fn tab_of(b: &FakeBackend, id: u32) -> TabId {
 // ---------------------------------------------------------------------------
 
 /// 方向指定（4方位）はMovePaneOp::Directionとしてmove_paneへ渡り、argvは
-/// `move-pane <dir> -p <spec>`に組み立てられる。M1基準値（slot幾何不変のpane id
-/// 付け替えswap）により対象paneの幾何は変化するためwarningなしで完了する
+/// `move-pane <dir> -p <spec>`に組み立てられる。M1実測の実配置（左1 pane +
+/// 右上/右下）で全paneの幾何・ID・title・focusを照合する（REVIEW-3指摘1:
+/// 対象paneだけでなく全paneを比較し、Left/Up・Right/Downを同一slot扱いしない
+/// fakeになっていることを検出できる形）。M1実測との対応: C left→A（左の大pane）・
+/// A right→C（右側の下段）・C up→B・B down→C
 // [covers:move.pane-direction-argv]
 #[test]
-fn pane_direction_argv_and_geometry_swap() {
-    let b = FakeBackend::new(three_column_tab(), vec![tab_at(0, "T0", true)]);
+fn pane_direction_argv_and_full_state_swap() {
+    let tabs = vec![tab_at(0, "T0", true)];
+    // CASE L（M1実測）: terminal_2 left → A(terminal_0)と交換
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
     let out = run_pane_native(
         &b,
         "2",
@@ -145,34 +195,111 @@ fn pane_direction_argv_and_geometry_swap() {
         false,
     )
     .unwrap();
-    assert!(!out.noop, "slot swapが起きた系列でno-op報告はしない");
-    let calls = b.calls();
+    assert!(!out.noop, "swapが起きた系列でno-op報告はしない");
     assert_eq!(
-        calls
+        b.calls()
             .iter()
             .filter(|c| *c == "move-pane left -p terminal_2")
             .count(),
         1,
-        "argv: move-pane left -p terminal_2（ちょうど1回）: {calls:?}"
+        "argv: move-pane left -p terminal_2（ちょうど1回）: {:?}",
+        b.calls()
     );
-    // 対象paneは隣接slot（terminal_1）の幾何へ移動（M1: slot幾何完全不変のswap）
-    let s = b.state.borrow();
-    let p2 = s
-        .panes
-        .iter()
-        .find(|p| p.id == PaneKindId::Terminal(2))
-        .unwrap();
-    assert_eq!(p2.geometry.x, 100, "swap先slotの幾何: {:?}", p2.geometry);
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 15, 50, 14, 50, false),
+            (1, "b", 0, 50, 15, 50, false),
+            (2, "c", 0, 0, 29, 50, true),
+        ]),
+        "CASE L: A(0)とC(2)が交換（slot幾何不変・id/title不変・focusは移動pane 2へ）"
+    );
+
+    // CASE R（M1実測）: terminal_0 right → C(terminal_2)と交換（右上Bでない）
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
+    run_pane_native(
+        &b,
+        "0",
+        PaneMoveAction::Direction(ResizeDirection::Right),
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 15, 50, 14, 50, true),
+            (1, "b", 0, 50, 15, 50, false),
+            (2, "c", 0, 0, 29, 50, false),
+        ]),
+        "CASE R: A(0)とC(2)が交換（M1実測: rightの相手は右側の下段C）"
+    );
+
+    // CASE U（M1実測）: terminal_2 up → B(terminal_1)と交換・focus pane(0)不参加のためfocus不変
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
+    run_pane_native(
+        &b,
+        "2",
+        PaneMoveAction::Direction(ResizeDirection::Up),
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 0, 0, 29, 50, true),
+            (1, "b", 15, 50, 14, 50, false),
+            (2, "c", 0, 50, 15, 50, false),
+        ]),
+        "CASE U: B(1)とC(2)が同一列で交換（M1実測）・focusはAのまま"
+    );
+
+    // CASE D（M1実測）: terminal_1 down → C(terminal_2)と交換
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
+    run_pane_native(
+        &b,
+        "1",
+        PaneMoveAction::Direction(ResizeDirection::Down),
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 0, 0, 29, 50, true),
+            (1, "b", 15, 50, 14, 50, false),
+            (2, "c", 0, 50, 15, 50, false),
+        ]),
+        "CASE D: B(1)とC(2)が交換（M1実測）・focusはAのまま"
+    );
+
+    // 幾何隣接則由来（未実測方向）: terminal_1 left → 左でy重複するAと交換
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
+    run_pane_native(
+        &b,
+        "1",
+        PaneMoveAction::Direction(ResizeDirection::Left),
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 0, 50, 15, 50, false),
+            (1, "b", 0, 0, 29, 50, true),
+            (2, "c", 15, 50, 14, 50, false),
+        ]),
+        "1 left: A(0)と交換（相手がfocusならfocusは移動pane 1へ）"
+    );
 
     // 4方位のargv形式（up/downも同一形式）
     for (dir, want) in [
-        (ResizeDirection::Left, "move-pane left -p terminal_1"),
-        (ResizeDirection::Right, "move-pane right -p terminal_1"),
-        (ResizeDirection::Up, "move-pane up -p terminal_1"),
-        (ResizeDirection::Down, "move-pane down -p terminal_1"),
+        (ResizeDirection::Left, "move-pane left -p terminal_2"),
+        (ResizeDirection::Right, "move-pane right -p terminal_2"),
+        (ResizeDirection::Up, "move-pane up -p terminal_2"),
+        (ResizeDirection::Down, "move-pane down -p terminal_2"),
     ] {
-        let b = FakeBackend::new(three_column_tab(), vec![tab_at(0, "T0", true)]);
-        run_pane_native(&b, "1", PaneMoveAction::Direction(dir), false).unwrap();
+        let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
+        run_pane_native(&b, "2", PaneMoveAction::Direction(dir), false).unwrap();
         assert!(
             b.calls().iter().any(|c| c == want),
             "{want}: {:?}",
@@ -181,11 +308,15 @@ fn pane_direction_argv_and_geometry_swap() {
     }
 }
 
-/// rotate（forwards）: argvはbareの`move-pane -p <spec>`（方向引数なし）
+/// rotate（forwards）: argvはbareの`move-pane -p <spec>`（方向引数なし）。
+/// m8実測基準: 対象paneと視覚順序上の「次」の1つとのみ交換（全pane循環でない。
+/// m8 move3: 対象0〔順序1番目〕→0↔1交換で2不変・move2: 末尾対象→先頭とwrap交換）
 // [covers:move.rotate-argv]
 #[test]
 fn rotate_forwards_argv() {
-    let b = FakeBackend::new(three_column_tab(), vec![tab_at(0, "T0", true)]);
+    let tabs = vec![tab_at(0, "T0", true)];
+    // 対象0（視覚順序1番目）→ 0↔1交換・2不変（m8 move3基準）
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
     let out = run_pane_native(&b, "0", PaneMoveAction::Rotate, false).unwrap();
     assert!(!out.noop);
     assert_eq!(
@@ -197,26 +328,39 @@ fn rotate_forwards_argv() {
         "argv: move-pane -p terminal_0: {:?}",
         b.calls()
     );
-    // M8基準: pane id・title不変（幾何のみ循環shift）
-    let s = b.state.borrow();
-    let p0 = s
-        .panes
-        .iter()
-        .find(|p| p.id == PaneKindId::Terminal(0))
-        .unwrap();
-    assert_eq!(p0.title, "a");
     assert_eq!(
-        p0.geometry.x, 100,
-        "forwards昇順方向へ1つ: {:?}",
-        p0.geometry
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 0, 50, 15, 50, true),
+            (1, "b", 0, 0, 29, 50, false),
+            (2, "c", 15, 50, 14, 50, false),
+        ]),
+        "0↔1交換・2不変（全pane循環shiftでない）・focusは対象0に追従"
+    );
+
+    // 対象2（視覚順序の末尾）→ wrapして先頭の0と交換（m8 move2基準）
+    let b = FakeBackend::new(m1_layout_panes(), tabs);
+    let out = run_pane_native(&b, "2", PaneMoveAction::Rotate, false).unwrap();
+    assert!(!out.noop);
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 15, 50, 14, 50, false),
+            (1, "b", 0, 50, 15, 50, false),
+            (2, "c", 0, 0, 29, 50, true),
+        ]),
+        "末尾の対象は先頭(0)とwrap交換・1不変"
     );
 }
 
-/// rotate --backwards: argvは別action名`move-pane-backwards -p <spec>`
+/// rotate --backwards: argvは別action名`move-pane-backwards -p <spec>`。
+/// 対象と視覚順序上の「前」の1つとのみ交換（先頭は末尾とwrap。m8 move4の対称）
 // [covers:move.rotate-backwards-argv]
 #[test]
 fn rotate_backwards_argv() {
-    let b = FakeBackend::new(three_column_tab(), vec![tab_at(0, "T0", true)]);
+    let tabs = vec![tab_at(0, "T0", true)];
+    // 対象2（視覚順序3番目）→ 前の1と交換・0不変
+    let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
     let out = run_pane_native(&b, "2", PaneMoveAction::Rotate, true).unwrap();
     assert!(!out.noop);
     assert_eq!(
@@ -228,32 +372,59 @@ fn rotate_backwards_argv() {
         "argv: move-pane-backwards -p terminal_2: {:?}",
         b.calls()
     );
-    let s = b.state.borrow();
-    let p2 = s
-        .panes
-        .iter()
-        .find(|p| p.id == PaneKindId::Terminal(2))
-        .unwrap();
-    assert_eq!(p2.geometry.x, 100, "逆回し: {:?}", p2.geometry);
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 0, 0, 29, 50, true),
+            (1, "b", 15, 50, 14, 50, false),
+            (2, "c", 0, 50, 15, 50, false),
+        ]),
+        "1↔2交換・0不変"
+    );
+
+    // 対象0（先頭）→ wrapして末尾の2と交換
+    let b = FakeBackend::new(m1_layout_panes(), tabs);
+    run_pane_native(&b, "0", PaneMoveAction::Rotate, true).unwrap();
+    assert_eq!(
+        pane_snapshots(&b),
+        expect_snapshots(&[
+            (0, "a", 15, 50, 14, 50, true),
+            (1, "b", 0, 50, 15, 50, false),
+            (2, "c", 0, 0, 29, 50, false),
+        ]),
+        "先頭の対象は末尾(2)とwrap交換・1不変"
+    );
 }
 
 /// edge方向移動のno-op検出: 対象paneが移動方向の端にいる系列ではmove_paneはrc=0
 /// で完了するが幾何が不変のため、list-panes再取得の幾何比較でno-op warning報告
-/// （exit 0相当。warningなしの成功報告でない）
+/// （exit 0相当。warningなしの成功報告でない）。M1実測のedge 4系列（EL/EU/ER/ED）
+/// ＋幾何隣接則由来の端（A up/down・B right・C down）で全pane状態完全不変を照合
 // [covers:move.pane-edge-noop-warning]
 #[test]
 fn edge_direction_is_noop_with_warning_report() {
-    let b = FakeBackend::new(three_column_tab(), vec![tab_at(0, "T0", true)]);
-    // terminal_0はx=0（最左）。leftはedge方向（M1: rc=0・出力空のsilent no-op）
-    let out = run_pane_native(
-        &b,
-        "0",
-        PaneMoveAction::Direction(ResizeDirection::Left),
-        false,
-    )
-    .unwrap();
-    assert!(out.noop, "幾何不変 = no-op報告");
-    // rotate単独pane tabもno-op（循環shiftの対象が自分のみ）
+    let tabs = vec![tab_at(0, "T0", true)];
+    let initial = snapshot_of(&m1_layout_panes());
+    // (target, direction): M1実測 EL/EU/ER/ED + 幾何則由来の端
+    for (target, dir) in [
+        ("0", ResizeDirection::Left),  // EL実測: A左端
+        ("1", ResizeDirection::Up),    // EU実測: B上端
+        ("2", ResizeDirection::Right), // ER実測: C右端
+        ("2", ResizeDirection::Down),  // ED実測: C下端
+        ("0", ResizeDirection::Up),    // 幾何則: Aの上にx重複なし
+        ("0", ResizeDirection::Down),  // 幾何則: Aの下にx重複なし（tiled terminal内）
+        ("1", ResizeDirection::Right), // 幾何則: Bの右にy重複なし
+    ] {
+        let b = FakeBackend::new(m1_layout_panes(), tabs.clone());
+        let out = run_pane_native(&b, target, PaneMoveAction::Direction(dir), false).unwrap();
+        assert!(out.noop, "target {target} {dir:?}: 幾何不変 = no-op報告");
+        assert_eq!(
+            pane_snapshots(&b),
+            initial,
+            "target {target} {dir:?}: edgeは状態完全不変（M1: rc=0・出力空）"
+        );
+    }
+    // rotate単独pane tabもno-op（交換相手がいない）
     let b1 = FakeBackend::new(
         vec![pane_at(5, "solo", 0, "T0", 0, 0)],
         vec![tab_at(0, "T0", true)],
@@ -543,19 +714,26 @@ fn to_tab_same_tab_is_noop() {
     assert_eq!(tab_of(&b, 1), TabId(0), "pane Aはtab 0に留まる");
 }
 
-/// probe不成立の安全側中断: probe pipeがbackend失敗する系列では、一切の状態変更
-/// （break-id pipe等）前にOperationFailed + 権限hintで中断する
+/// probe不成立の安全側中断: probe pipeの送信は成功するがcompanion pluginのtitle
+/// 出現が起こらない系列（probe効果だけ抑制）では、polling timeout後に一切の状態
+/// 変更（break-id pipe等）なくOperationFailed + 権限hintで中断する（条件書given
+/// 「probe pipe後のtitle出現が起こらない失敗注入」との整合。REVIEW-3指摘5）
 // [covers:move.probe-failure]
 #[test]
 fn probe_failure_aborts_before_state_change() {
     let (panes, tabs) = two_tabs_two_panes_each();
     let b = FakeBackend::new(panes, tabs);
-    b.inject_failure("pipe"); // 最初のpipe（= probe）が失敗する
+    b.mute_pipe("probe"); // pipe送信は成功するがtitleが出現しない（効果だけ抑制）
     let err = with_isolated_xdg(|_| run_pane_to_tab(&b, "1", "T1").unwrap_err());
     assert_eq!(*err.class(), ErrorClass::OperationFailed);
     assert!(
         err.message().to_lowercase().contains("permission"),
         "権限hint: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("probe not observed"),
+        "probe polling timeoutであること: {}",
         err.message()
     );
     let calls = b.calls();
@@ -568,6 +746,81 @@ fn probe_failure_aborts_before_state_change() {
         "break-id pipe不発: {calls:?}"
     );
     assert_eq!(tab_of(&b, 1), TabId(0), "pane Aは移動しない");
+}
+
+/// probe pipe送信自体がbackend失敗する系列（pipe CLIの非zero終了・block模擬）でも
+/// 状態変更前にOperationFailed + 権限hintで中断する（move.probe-failureの送信失敗
+/// 側。REVIEW-3指摘5: 効果抑制と送信失敗を別条件として分離）
+// [covers:move.probe-pipe-send-failure]
+#[test]
+fn probe_pipe_send_failure_aborts_before_state_change() {
+    let (panes, tabs) = two_tabs_two_panes_each();
+    let b = FakeBackend::new(panes, tabs);
+    b.inject_failure("pipe"); // 最初のpipe（= probe）の送信が失敗する
+    let err = with_isolated_xdg(|_| run_pane_to_tab(&b, "1", "T1").unwrap_err());
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
+    assert!(
+        err.message().to_lowercase().contains("permission"),
+        "権限hint: {}",
+        err.message()
+    );
+    assert!(
+        err.message().contains("probe pipe did not complete"),
+        "probe送信失敗であること: {}",
+        err.message()
+    );
+    assert!(
+        !b.calls().iter().any(|c| c.starts_with("pipe break-id")),
+        "break-id pipe不発: {:?}",
+        b.calls()
+    );
+    assert_eq!(tab_of(&b, 1), TabId(0), "pane Aは移動しない");
+}
+
+/// 移動は実際に完了しているがlenient観測だけ失敗する系列（REVIEW-3指摘2）:
+/// polling timeout後の再取得で移動済みが観測された場合は「実際には完了していたが
+/// deadline内に確認できなかった」と報告する（未移動と断定しない。pollのC3規則に
+/// よりdeadline超過後の成立は成功扱いにしないためerrorのまま）
+// [covers:move.to-tab-poll-timeout]
+#[test]
+fn to_tab_poll_timeout_reports_accurately() {
+    let (panes, tabs) = two_tabs_two_panes_each();
+    let b = FakeBackend::new(panes, tabs);
+    b.mute_pipe("break-id"); // pipeは成功するが効果が現れない
+    let err = with_isolated_xdg(|_| run_pane_to_tab(&b, "1", "T1").unwrap_err());
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
+    let msg = err.message().to_lowercase();
+    assert!(msg.contains("permission"), "権限hint: {}", err.message());
+    assert!(
+        msg.contains("delay") || msg.contains("late"),
+        "遅延実行の注意: {}",
+        err.message()
+    );
+    assert!(
+        msg.contains("the pane was not moved"),
+        "未移動の正確な報告: {}",
+        err.message()
+    );
+    assert_eq!(tab_of(&b, 1), TabId(0), "pane Aはtab 0に留まる");
+
+    // 移動自体は反映・lenient観測だけ失敗する系列: timeout後の再取得（strict）で
+    // 移動済みが見えるため「実際には完了した」と報告する
+    let (panes, tabs) = two_tabs_two_panes_each();
+    let b = FakeBackend::new(panes, tabs);
+    b.hide_pane_in_lenient_after_break(PaneKindId::Terminal(1));
+    let err = with_isolated_xdg(|_| run_pane_to_tab(&b, "1", "T1").unwrap_err());
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
+    let msg = err.message();
+    assert!(
+        msg.contains("actually completed"),
+        "移動済み観測の報告: {msg}"
+    );
+    assert!(
+        msg.contains("not observed within the polling deadline"),
+        "deadline内に観測できなかった旨: {msg}"
+    );
+    // 実状態: pane Aは移動済み（移動自体は成功している）
+    assert_eq!(tab_of(&b, 1), TabId(1), "pane Aは実際にはtab 1へ移動済み");
 }
 
 /// companion setup失敗の事前中断: wasm extract（cache dir作成失敗）はprobe・
@@ -596,32 +849,6 @@ fn companion_setup_failure_is_preflight_error() {
     assert_eq!(*err.class(), ErrorClass::Preflight);
     assert!(pipes(&b).is_empty(), "probe・break-id不発: {:?}", b.calls());
     assert_eq!(tab_of(&b, 1), TabId(0));
-}
-
-/// to-tab完了pollingのtimeout: break-id pipe送信後にpane.tab_idが変わらない系列
-/// ではdeadline超過でOperationFailed。権限hint・pipe遅延実行の注意・未移動報告
-/// を含む（remap DD-10.7と同一文面規則）
-// [covers:move.to-tab-poll-timeout]
-#[test]
-fn to_tab_poll_timeout_reports_accurately() {
-    let (panes, tabs) = two_tabs_two_panes_each();
-    let b = FakeBackend::new(panes, tabs);
-    b.mute_pipe("break-id"); // pipeは成功するが効果が現れない
-    let err = with_isolated_xdg(|_| run_pane_to_tab(&b, "1", "T1").unwrap_err());
-    assert_eq!(*err.class(), ErrorClass::OperationFailed);
-    let msg = err.message().to_lowercase();
-    assert!(msg.contains("permission"), "権限hint: {}", err.message());
-    assert!(
-        msg.contains("delay") || msg.contains("late"),
-        "遅延実行の注意: {}",
-        err.message()
-    );
-    assert!(
-        msg.contains("was not moved"),
-        "移動済み/未移動の報告: {}",
-        err.message()
-    );
-    assert_eq!(tab_of(&b, 1), TabId(0), "pane Aはtab 0に留まる");
 }
 
 /// pane交換2連発の順序規則: singleton判定（当該tabのselectable pane数==1基準）で
@@ -774,8 +1001,8 @@ fn swap_partial_failure_reports_moved_and_unmoved() {
         "移動済み報告（A・T_B所属）: {msg}"
     );
     assert!(
-        msg.contains("terminal_3") && msg.contains("NOT moved") && msg.contains("tab 1"),
-        "未移動報告（B・元tab所属）: {msg}"
+        msg.contains("terminal_3 was not moved and remains on tab 1"),
+        "未移動報告（B・元tab所属。REVIEW-3指摘2: 再取得による正確な報告）: {msg}"
     );
     assert!(
         msg.contains("move pane terminal_3 --to-tab 0"),
@@ -873,6 +1100,44 @@ fn tab_swap_position_mismatch_is_verification_failed() {
     );
 }
 
+/// tab交換の途中消滅（REVIEW-3指摘3）: 先行stepのmove_tabが成功した後に相手tabが
+/// 消えた系列では、「生存tabの位置不変」と断定せず、完了step数（2 of 3）と現在の
+/// positionを報告するOperationFailedとして中断する
+// [covers:move.tab-swap-mid-vanish-operation-failed]
+#[test]
+fn tab_swap_mid_vanish_reports_partial_progress() {
+    let tabs = vec![
+        tab_at(0, "w", true),
+        tab_at(1, "x", false),
+        tab_at(2, "y", false),
+        tab_at(3, "z", false),
+    ];
+    let b = FakeBackend::new(Vec::new(), tabs);
+    // d=2（position 0と2の交換）: right×2完了後・left×1の存在確認で相手tab(2)が消える
+    b.vanish_tab_after_move_tab(2, TabId(2));
+    let err = run_tab_swap(&b, "0", "2").unwrap_err();
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
+    let msg = err.message();
+    assert!(
+        msg.contains("after 2 of 3"),
+        "完了step数の報告: {msg}"
+    );
+    assert!(
+        msg.contains("may be changed") && !msg.contains("are unchanged"),
+        "位置が変化しうる旨（不変と断定しない）: {msg}"
+    );
+    assert!(
+        msg.contains("current positions"),
+        "現在positionの添付: {msg}"
+    );
+    // 実状態: right×2が効いている（[0,1,2,3]→[1,0,2,3]→[1,2,0,3]の後、相手(2)消滅で
+    // [1,0,3]に正規化。tab 0はposition 2から1へ詰められているが初期position 0ではない）
+    let s = b.state.borrow();
+    let pos_of = |id: u32| s.tabs.iter().find(|t| t.id.0 == id).map(|t| t.position);
+    assert_eq!(pos_of(0), Some(1), "先行stepの移動は保持（rollbackなし）");
+    assert_eq!(pos_of(2), None, "相手tabは消滅");
+}
+
 /// companion系のpostcondition検証: polling完了条件（tab所属）は成立しても、
 /// 完了後のlist-panes再取得で対象pane idが変化している系列はVerificationFailed
 // [covers:move.companion-postcondition-verification-failed]
@@ -896,7 +1161,7 @@ fn companion_postcondition_pane_id_violation_is_verification_failed() {
 // [covers:move.backend-failure-operation-failed]
 #[test]
 fn backend_failure_is_operation_failed() {
-    let b = FakeBackend::new(three_column_tab(), vec![tab_at(0, "T0", true)]);
+    let b = FakeBackend::new(m1_layout_panes(), vec![tab_at(0, "T0", true)]);
     b.inject_failure("move-pane");
     let err = run_pane_native(
         &b,

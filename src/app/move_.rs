@@ -289,11 +289,41 @@ fn poll_pane_on_tab(
                 .then_some(()))
         },
         || {
+            // polling timeout時: 可能なら状態を再取得し、移動済み/未移動/確認不能を
+            // 正確に報告する（設計§3.3「移動済み/未移動の正確な報告」。REVIEW-3
+            // 指摘2: 確認できない系列を「未移動」と断定しない。deadline超過後の
+            // 条件成立はpollのC3規則により成功扱いにしないため、実際に移動が
+            // 完了していても本errorはOperationFailedのまま報告する）
+            let state_note = match backend.list_panes() {
+                Ok(panes) => match panes.iter().find(|p| p.id == pane) {
+                    Some(p) if p.tab_id == dest => format!(
+                        "the move actually completed (pane {} is now on tab {}) but was not \
+observed within the polling deadline",
+                        pane.as_spec(),
+                        dest.0
+                    ),
+                    Some(p) if p.tab_id == from => format!(
+                        "the pane was not moved (still on tab {})",
+                        p.tab_id.0
+                    ),
+                    Some(p) => format!(
+                        "the pane is on tab {}, neither its source tab {} nor the \
+destination {}",
+                        p.tab_id.0, from.0, dest.0
+                    ),
+                    None => "the pane could not be found; the move's completion could not \
+be confirmed (it may or may not have moved)"
+                        .to_string(),
+                },
+                Err(_) => "the move's completion could not be confirmed (list-panes did not \
+respond; the pane may or may not have moved)"
+                    .to_string(),
+            };
             ZelperError::new(
                 ErrorClass::OperationFailed,
                 format!(
-                    "timed out waiting for pane {} to move from tab {} to tab {}: the pane \
-was not moved. note: screen may be busy and its 1s list response timeout may have \
+                    "timed out waiting for pane {} to move from tab {} to tab {}: \
+{state_note}. note: screen may be busy and its 1s list response timeout may have \
 produced empty output. a piped command may be delayed and still execute server-side \
 after the CLI fails, so state may change later. {PERMISSION_HINT}",
                     pane.as_spec(),
@@ -306,7 +336,8 @@ after the CLI fails, so state may change later. {PERMISSION_HINT}",
 }
 
 /// break-id pipe 1回（payload = `<宛先tab_id> <単一pane_id>`）+ 完了polling。
-/// remapのanchor寄せと同一命令の部分利用（設計§3.2 P1）
+/// remapのanchor寄せと同一命令の部分利用（設計§3.2 P1）。pipe CLI失敗時も
+/// 「未移動」と断定しない（遅延実行されうるため完了状態は確認不能）
 fn move_pane_via_break_id(
     backend: &dyn ZellijBackend,
     wasm: &std::path::Path,
@@ -320,9 +351,9 @@ fn move_pane_via_break_id(
             ZelperError::new(
                 ErrorClass::OperationFailed,
                 format!(
-                    "break-id pipe failed for pane {} (target tab {}): {}. the pane was not \
-moved yet, but a piped command may be delayed and still execute server-side after the \
-CLI fails. {PERMISSION_HINT}",
+                    "break-id pipe failed for pane {} (target tab {}): {}. the move's \
+completion could not be confirmed — a piped command may be delayed and still execute \
+server-side after the CLI fails, so the pane may or may not have moved. {PERMISSION_HINT}",
                     pane.id.as_spec(),
                     dest.0,
                     e.message()
@@ -473,16 +504,44 @@ are NOT swapped, unlike a pane swap) or `remap` instead",
     // は非singleton側（相手tabに到着後も相手tabのpane構成が保たれる側）が先
     let (first, second) = if a_singleton { (&b, &a) } else { (&a, &b) };
     let wasm = companion::setup_and_probe(backend)?;
+    // 移動1件の完了状態を、失敗時に可能なら再取得して正確に報告する（設計§3.3
+    // 「移動済み/未移動の正確な報告」。REVIEW-3指摘2: 確認できない系列を断定しない）
+    let move_state_note =
+        |backend: &dyn ZellijBackend, pane: &PaneState, dest: TabId| -> String {
+            match backend.list_panes() {
+                Ok(panes) => match panes.iter().find(|p| p.id == pane.id) {
+                    Some(p) if p.tab_id == dest => format!(
+                        "{} actually completed the move to tab {}",
+                        pane.id.as_spec(),
+                        dest.0
+                    ),
+                    Some(p) => format!(
+                        "{} was not moved and remains on tab {}",
+                        pane.id.as_spec(),
+                        p.tab_id.0
+                    ),
+                    None => format!(
+                        "{} could not be found; its move's completion is unconfirmed",
+                        pane.id.as_spec()
+                    ),
+                },
+                Err(_) => format!(
+                    "{}'s move completion is unconfirmed (list-panes did not respond)",
+                    pane.id.as_spec()
+                ),
+            }
+        };
     // step 1: firstを相手tabへ（firstは必ず非singleton側）
     let first_dest = if first.id == a.id { b.tab_id } else { a.tab_id };
     if let Err(e) = move_pane_via_break_id(backend, &wasm, first, first_dest) {
         return Err(ZelperError::new(
             e.class().clone(),
             format!(
-                "{}. partial state: neither pane has moved yet (both panes remain on their \
-original tabs), but a piped command may be delayed and still execute server-side after \
-the CLI fails, so state may change later",
-                e.message()
+                "{}. partial state: {}; the second move was never started. a piped command \
+may be delayed and still execute server-side after the CLI fails, so state may change \
+later. atomicity is not claimed",
+                e.message(),
+                move_state_note(backend, first, first_dest)
             ),
         ));
     }
@@ -492,20 +551,19 @@ the CLI fails, so state may change later",
     } else {
         a.tab_id
     };
-    let second_from = second.tab_id;
     if let Err(e) = move_pane_via_break_id(backend, &wasm, second, second_dest) {
         return Err(ZelperError::new(
             ErrorClass::OperationFailed,
             format!(
-                "pane swap failed at the second move: {}. partial state: {} moved to tab \
-{}; {} was NOT moved and remains on tab {}. complete manually with `zelper move pane {} \
---to-tab {}`. a piped command may be delayed and still execute server-side after the CLI \
+                "pane swap failed at the second move: {}. partial state: the first move \
+completed ({} moved to tab {}); {}. complete manually with `zelper move pane {} \
+--to-tab {}` (if the completion is reported as unconfirmed, check the current state \
+first). a piped command may be delayed and still execute server-side after the CLI \
 fails, so state may change later. atomicity is not claimed",
                 e.message(),
                 first.id.as_spec(),
                 first_dest.0,
-                second.id.as_spec(),
-                second_from.0,
+                move_state_note(backend, second, second_dest),
                 second.id.as_spec(),
                 second_dest.0
             ),
@@ -595,30 +653,47 @@ pub fn run_tab_swap(
     } else {
         (b_id, a_id, pos_a - pos_b)
     };
-    let ensure_exists = |id: TabId, step: usize| -> Result<(), ZelperError> {
+    // step毎の存在確認（id基準追跡）。途中消滅時は完了step数と現在positionを報告
+    // する（REVIEW-3指摘3: 先行stepのmove_tabが効いていれば生存tabの位置は既に
+    // 変化しているため「位置不変」とは断定しない）
+    let total_calls = (2 * d - 1) as usize;
+    let mut done = 0usize;
+    let ensure_exists = |id: TabId, done: usize| -> Result<(), ZelperError> {
         let now = backend.list_tabs()?;
         if now.iter().any(|t| t.id == id) {
-            Ok(())
-        } else {
-            Err(ZelperError::new(
-                ErrorClass::OperationFailed,
-                format!(
-                    "tab {} disappeared during the swap (at step {}); positions of the \
-surviving tabs are unchanged. no rollback is performed",
-                    id.0, step
-                ),
-            ))
+            return Ok(());
         }
+        let positions = now
+            .iter()
+            .map(|t| format!("tab {} at position {}", t.id.0, t.position))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(ZelperError::new(
+            ErrorClass::OperationFailed,
+            format!(
+                "tab {} disappeared during the swap (after {done} of {total_calls} move-tab \
+calls completed). earlier moves have already taken effect, so some tab positions may be \
+changed{}no rollback is performed",
+                id.0,
+                if positions.is_empty() {
+                    "; the current tab list is empty".to_string()
+                } else {
+                    format!("; current positions: {positions}")
+                }
+            ),
+        ))
     };
     // 左側tabをright×d（各呼び出しは1 position移動。右端を越えないためwrap不発火）
-    for step in 0..d as usize {
-        ensure_exists(left, step + 1)?;
+    for _ in 0..d as usize {
+        ensure_exists(left, done)?;
         backend.move_tab(left, TabMoveDirection::Right)?;
+        done += 1;
     }
     // 相手側をleft×(d-1)（d=1〔隣接〕はこのphaseなし・right×1の1回のみで純swap）
-    for step in 0..d.saturating_sub(1) as usize {
-        ensure_exists(right, d as usize + step + 1)?;
+    for _ in 0..d.saturating_sub(1) as usize {
+        ensure_exists(right, done)?;
         backend.move_tab(right, TabMoveDirection::Left)?;
+        done += 1;
     }
     // postcondition: position交換・id/name不変をlist-tabsのid追跡で検証
     let after = backend.list_tabs()?;

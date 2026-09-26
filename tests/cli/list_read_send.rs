@@ -213,6 +213,11 @@ exit 0
     // setup時に初期化する（PID再利用で既存dirを再利用した際の前回作成分の残留を
     // 排除。空fileはshimの [[ -s ]] で「無し」と同一扱い）
     std::fs::write(dir.join("calls.log.sessions"), "").unwrap();
+    // TASK-88 REVIEW-3指摘4: FAKE_TABS_JSONのtab順序状態file（${FAKE_LOG}.tabs）も
+    // setup時に削除する（存在するとshimが入力JSONを無視して前回の交換後状態を
+    // 返すため、PID再利用でdirを再利用した際にargv列・期待positionがずれる。
+    // 削除によりshimがFAKE_TABS_JSONから再初期化する）
+    let _ = std::fs::remove_file(dir.join("calls.log.tabs"));
     (dir, log)
 }
 
@@ -1634,15 +1639,30 @@ fn move_backend_failure_is_exit5() {
 #[test]
 fn move_tab_swap_argv_sequence_and_success() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
-    let (mut cmd, log) = zelper("move-tabswap");
-    let out = cmd
-        .env("FAKE_TABS_JSON", FOUR_TABS_JSON)
-        .args(["move", "tab", "0", "--swap-with", "2", "--json"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+    // REVIEW-3指摘4: 同一dir（tag+PID再利用を模した同一setupの再実行）でも
+    // setupが ${FAKE_LOG}.tabs を初期化するため、初期状態（FAKE_TABS_JSON）から
+    // 再び同じ交換が成立する（前回の交換後状態が読み込まれない）
+    let (dir, log) = setup_fake_zellij("move-tabswap");
+    let run_once = || -> serde_json::Value {
+        let mut cmd = Command::cargo_bin("zelper").unwrap();
+        let path = format!(
+            "{}:{}",
+            dir.to_str().unwrap(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        cmd.env("PATH", path)
+            .env_remove("ZELLIJ_SESSION_NAME")
+            .env("FAKE_LOG", &log)
+            .env("FAKE_FIXTURES", fixture_dir())
+            .env("FAKE_TABS_JSON", FOUR_TABS_JSON)
+            .args(["move", "tab", "0", "--swap-with", "2", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+    let out = run_once();
     let argv: Vec<String> = calls(&log)
         .iter()
         .filter(|c| c.contains("action move-tab "))
@@ -1672,6 +1692,30 @@ fn move_tab_swap_argv_sequence_and_success() {
     assert_eq!(
         v["data"]["tabs"][1],
         serde_json::json!({"id": 2, "position": 0})
+    );
+
+    // 同一dirでの再実行: setupがtabs状態fileを初期化するため同一argv列・同一結果
+    let out2 = run_once();
+    let argv2: Vec<String> = calls(&log)
+        .iter()
+        .filter(|c| c.contains("action move-tab "))
+        .map(|c| c.rsplit("action ").next().unwrap().to_string())
+        .skip(argv.len())
+        .collect();
+    assert_eq!(
+        argv2,
+        vec![
+            "move-tab right -t 0",
+            "move-tab right -t 0",
+            "move-tab left -t 2"
+        ],
+        "再実行も同一argv列（状態fileのsetup時初期化）: {argv2:?}"
+    );
+    let v2: serde_json::Value = serde_json::from_slice(&out2).unwrap();
+    assert_eq!(
+        v2["data"]["tabs"][0],
+        serde_json::json!({"id": 0, "position": 2}),
+        "再実行も初期状態から交換（前回結果のposition 2→0が残留しない）"
     );
 }
 

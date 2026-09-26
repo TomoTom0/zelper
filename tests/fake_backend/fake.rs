@@ -177,6 +177,13 @@ pub struct FakeBackend {
     /// move用: 最初のbreak-id pipeより後のlist_panes_lenient呼出回数（1開始。
     /// rename_moved_pane_after_break_nthのarm用）
     pub lenient_panes_after_break: Cell<usize>,
+    /// move用（REVIEW-3指摘2）: 最初のbreak-id pipeより後のlist_panes_lenient応答から
+    /// 指定paneを除外する（移動自体は反映されるが観測だけ失敗する系列の注入。
+    /// polling timeout後の再取得〔strict〕では移動済みが見える）
+    pub hide_pane_in_lenient_after_break: Cell<Option<PaneKindId>>,
+    /// move用（REVIEW-3指摘3）: 指定番目（1開始）のmove_tab呼出成功後に指定tabを
+    /// paneごと除去する（tab交換の途中消滅系列の注入）
+    pub vanish_tab_after_move_tab: Cell<Option<(usize, TabId)>>,
 }
 
 pub struct FakeState {
@@ -265,6 +272,8 @@ impl FakeBackend {
             last_break_moved: RefCell::new(None),
             mute_move_tab: Cell::new(false),
             lenient_panes_after_break: Cell::new(0),
+            hide_pane_in_lenient_after_break: Cell::new(None),
+            vanish_tab_after_move_tab: Cell::new(None),
         }
     }
 
@@ -507,6 +516,20 @@ impl FakeBackend {
         self.mute_move_tab.set(true);
     }
 
+    /// move用（REVIEW-3指摘2）: 最初のbreak-id pipeより後のlist_panes_lenient応答から
+    /// 指定paneを除外する（移動は反映されるが観測だけ失敗する系列）
+    #[allow(dead_code)]
+    pub fn hide_pane_in_lenient_after_break(&self, pane: PaneKindId) {
+        self.hide_pane_in_lenient_after_break.set(Some(pane));
+    }
+
+    /// move用（REVIEW-3指摘3）: 指定番目（1開始）のmove_tab呼出成功後に指定tabを
+    /// paneごと除去する（tab交換の途中消滅系列）
+    #[allow(dead_code)]
+    pub fn vanish_tab_after_move_tab(&self, nth: usize, tab: TabId) {
+        self.vanish_tab_after_move_tab.set(Some((nth, tab)));
+    }
+
     /// watch用: paneへのdump_screen呼び出し回数（記録から計上。-f付き呼び出しを
     /// 含む。TASK-86）
     pub fn dump_calls(&self, pane: &PaneKindId) -> usize {
@@ -743,6 +766,60 @@ fn spawn_shell_pane(s: &mut FakeState, tab: TabId, title: &str) -> PaneKindId {
     PaneKindId::Terminal(pid)
 }
 
+/// 1次元範囲の重複判定（境界接続は隣接候補の条件に含めない——範囲の重複のみ）
+fn overlaps_1d(a0: u32, a1: u32, b0: u32, b1: u32) -> bool {
+    a0 < b1 && b0 < a1
+}
+
+/// M1実測基準の幾何隣接則（REVIEW-3指摘1）: 対象pane（group[idx]）の方向dにおける
+/// 交換相手のgroup内indexを返す。候補なし（端）はNone = no-op。
+/// left/right と up/down は直交軸の重複を要求するため同一視しない
+/// （M1実測: C left→A〔左の大pane〕だが C up→B〔同一列の上〕・A right→C〔右側の
+/// 下段〕——visual orderの前後とは異なる交換相手）
+fn neighbor_in_direction(
+    group: &[(PaneKindId, Geometry, bool)],
+    idx: usize,
+    d: ResizeDirection,
+) -> Option<usize> {
+    let (_, t, _) = group[idx];
+    let (tx0, tx1) = (t.x, t.x.saturating_add(t.cols));
+    let (ty0, ty1) = (t.y, t.y.saturating_add(t.rows));
+    let mut best: Option<(usize, (u32, u32))> = None; // (index, 優先key)
+    for (i, (_, g, _)) in group.iter().enumerate() {
+        if i == idx {
+            continue;
+        }
+        let (gx0, gx1) = (g.x, g.x.saturating_add(g.cols));
+        let (gy0, gy1) = (g.y, g.y.saturating_add(g.rows));
+        let key: Option<(u32, u32)> = match d {
+            // 左に位置（右端が対象の左端以下）しy範囲が重複: 右端が最大のもの
+            ResizeDirection::Left if gx1 <= tx0 && overlaps_1d(gy0, gy1, ty0, ty1) => {
+                Some((gx1, gy0))
+            }
+            // 右に位置（左端が対象の右端以上）しy範囲が重複: 左端が最小・
+            // 同値は上端が最大のもの（M1実測: A right は B でなく C）
+            ResizeDirection::Right if gx0 >= tx1 && overlaps_1d(gy0, gy1, ty0, ty1) => {
+                Some((u32::MAX - gx0, gy0))
+            }
+            // 上に位置しx範囲が重複: 下端が最大のもの
+            ResizeDirection::Up if gy1 <= ty0 && overlaps_1d(gx0, gx1, tx0, tx1) => {
+                Some((gy1, gx0))
+            }
+            // 下に位置しx範囲が重複: 上端が最小のもの
+            ResizeDirection::Down if gy0 >= ty1 && overlaps_1d(gx0, gx1, tx0, tx1) => {
+                Some((u32::MAX - gy0, gx0))
+            }
+            _ => None,
+        };
+        if let Some(key) = key
+            && best.is_none_or(|(_, bk)| key > bk)
+        {
+            best = Some((i, key));
+        }
+    }
+    best.map(|(i, _)| i)
+}
+
 impl ZellijBackend for FakeBackend {
     fn version(&self) -> Result<String, ZelperError> {
         self.record("version")?;
@@ -846,6 +923,26 @@ impl ZellijBackend for FakeBackend {
             }
         }
         self.apply_break_rename_injection();
+        // REVIEW-3指摘2: 移動自体は反映されているがlenient観測だけ失敗する系列の
+        // 注入（break-id pipe後のlenient応答から指定paneを除外。strict list_panes
+        // では見えるため、polling timeout後の再取得が「移動済み」を観測する）
+        if self
+            .calls
+            .borrow()
+            .iter()
+            .any(|c| c.starts_with("pipe break-id"))
+            && let Some(hidden) = self.hide_pane_in_lenient_after_break.get()
+        {
+            return Ok(Some(
+                self.state
+                    .borrow()
+                    .panes
+                    .iter()
+                    .filter(|p| p.id != hidden)
+                    .cloned()
+                    .collect(),
+            ));
+        }
         Ok(Some(self.state.borrow().panes.clone()))
     }
 
@@ -1134,11 +1231,22 @@ impl ZellijBackend for FakeBackend {
         Ok(())
     }
 
-    /// TASK-88（DD-13）: native move-pane系のemulation。M1実測の基準値どおり
-    /// 「slot幾何完全不変・pane id付け替えswap」を再現する: 同一tabのtiled
-    /// selectable terminal paneをvisual order（y,x昇順）に並べ、方向移動は隣接
-    /// slotとの幾何swap（端ではno-op・幾何不変）・rotateは幾何の循環shift
-    /// （forwards=昇順方向へ1つ・backwards=逆）。pane id・titleは不変（M8）
+    /// TASK-88（DD-13）: native move-pane系のemulation。M1/M8実測の基準値どおり
+    /// 「slot幾何完全不変・pane id/title不変の交換」を再現する（REVIEW-3指摘1:
+    /// 実測と同一の交換相手を選ぶ規則）:
+    /// - 方向移動: 対象paneの矩形と「その方向に位置し直交軸の範囲が重複する」
+    ///   paneのうち最も近いものと幾何をswap（left=左でy重複のうち右端が最大 /
+    ///   right=右でy重複のうち左端が最小・同値は上端が最大〔M1実測: A right→C〕 /
+    ///   up=上でx重複のうち下端が最大 / down=下でx重複のうち上端が最小）。
+    ///   候補なしはno-op（M1 edge実測 EL/EU/ER/ED: rc=0・出力空・状態完全不変）。
+    ///   M1実測との対応: C left→A（左の大pane）・A right→C（右側の下段）・
+    ///   C up→B・B down→C（同一列の上下）・Left/UpとRight/Downを同一扱いしない
+    /// - rotate: 対象paneと視覚順序（y,x昇順）上の「次/前」の1つとのみ交換
+    ///   （forwards=次・末尾は先頭とwrap / backwards=前・先頭は末尾とwrap。
+    ///   m8 move3基準: 対象0〔順序1番目〕→0↔1交換で2不変。全pane循環でない）
+    /// - focus（M1実測: Lでは相手がfocusなら移動paneへ遷移・U/Dではfocus pane
+    ///   不参加なら不変・移動pane自身がfocusなら維持）: 交換する2 paneのうち
+    ///   focus==trueがあればfocusは移動対象paneへ移る。いなければ不変
     fn move_pane(&self, pane: &PaneKindId, op: MovePaneOp) -> Result<(), ZelperError> {
         let rec = match op {
             MovePaneOp::Direction(d) => format!("move-pane {} -p {}", d.as_str(), pane.as_spec()),
@@ -1151,7 +1259,7 @@ impl ZellijBackend for FakeBackend {
             return Ok(());
         };
         // 同一tabのtiled selectable terminal pane群（visual order）
-        let mut group: Vec<(PaneKindId, Geometry)> = s
+        let mut group: Vec<(PaneKindId, Geometry, bool)> = s
             .panes
             .iter()
             .filter(|p| {
@@ -1160,48 +1268,34 @@ impl ZellijBackend for FakeBackend {
                     && !p.is_floating
                     && matches!(p.id, PaneKindId::Terminal(_))
             })
-            .map(|p| (p.id, p.geometry))
+            .map(|p| (p.id, p.geometry, p.is_focused))
             .collect();
-        group.sort_by_key(|(_, g)| (g.y, g.x));
+        group.sort_by_key(|(_, g, _)| (g.y, g.x));
         let n = group.len();
-        let Some(idx) = group.iter().position(|(id, _)| *id == target.id) else {
+        let Some(idx) = group.iter().position(|(id, _, _)| *id == target.id) else {
             return Ok(());
         };
-        match op {
-            // 方向移動: 隣接slot（visual orderの前後）との幾何swap。端はno-op
-            MovePaneOp::Direction(d) => {
-                let neighbor = match d {
-                    ResizeDirection::Left | ResizeDirection::Up => idx.checked_sub(1),
-                    ResizeDirection::Right | ResizeDirection::Down => {
-                        (idx + 1 < n).then_some(idx + 1)
-                    }
-                };
-                if let Some(j) = neighbor {
-                    let (gid_a, geom_a) = group[idx];
-                    let geom_b = group[j].1;
-                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == gid_a) {
-                        p.geometry = geom_b;
-                    }
-                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == group[j].0) {
-                        p.geometry = geom_a;
-                    }
+        let partner = match op {
+            // 方向移動: 幾何隣接則で交換相手を決める（候補なし=no-op）
+            MovePaneOp::Direction(d) => neighbor_in_direction(&group, idx, d),
+            // rotate: 視覚順序の前後の1つ（wrap）
+            MovePaneOp::RotateForwards => (n > 1).then(|| (idx + 1) % n),
+            MovePaneOp::RotateBackwards => (n > 1).then(|| (idx + n - 1) % n),
+        };
+        if let Some(j) = partner {
+            let (id_a, geom_a, _) = group[idx];
+            let (id_b, geom_b, _) = group[j];
+            let focused = group[idx].2 || group[j].2;
+            if let Some(p) = s.panes.iter_mut().find(|p| p.id == id_a) {
+                p.geometry = geom_b;
+                if focused {
+                    p.is_focused = true;
                 }
             }
-            // rotate: 幾何の循環shift（単独paneのtabでは幾何不変=no-op）
-            MovePaneOp::RotateForwards => {
-                for i in 0..n {
-                    let src = group[(i + 1) % n].1;
-                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == group[i].0) {
-                        p.geometry = src;
-                    }
-                }
-            }
-            MovePaneOp::RotateBackwards => {
-                for i in 0..n {
-                    let src = group[(i + n - 1) % n].1;
-                    if let Some(p) = s.panes.iter_mut().find(|p| p.id == group[i].0) {
-                        p.geometry = src;
-                    }
+            if let Some(p) = s.panes.iter_mut().find(|p| p.id == id_b) {
+                p.geometry = geom_a;
+                if focused {
+                    p.is_focused = false;
                 }
             }
         }
@@ -1243,6 +1337,24 @@ impl ZellijBackend for FakeBackend {
         s.tabs.insert(new_pos, moved);
         for (i, t) in s.tabs.iter_mut().enumerate() {
             t.position = i as u32;
+        }
+        // REVIEW-3指摘3: 指定番目（1開始）のmove_tab成功後に指定tabをpaneごと除去
+        // （tab交換の途中消滅系列。呼出回数は記録の"move-tab"接頭で計上）
+        if let Some((nth, tab)) = self.vanish_tab_after_move_tab.get() {
+            let called = self
+                .calls
+                .borrow()
+                .iter()
+                .filter(|c| c.starts_with("move-tab "))
+                .count();
+            if called == nth {
+                self.vanish_tab_after_move_tab.set(None);
+                s.tabs.retain(|t| t.id != tab);
+                s.panes.retain(|p| p.tab_id != tab);
+                for (i, t) in s.tabs.iter_mut().enumerate() {
+                    t.position = i as u32;
+                }
+            }
         }
         Ok(())
     }
