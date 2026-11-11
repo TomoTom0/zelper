@@ -49,7 +49,7 @@ source_fileの代表とnote欄記載の対応（設計書§2.2）:
 
 test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）:
 
-- `tests/cli/list_read_send.rs` 53件 = cli-grammar 11 / read-send 11 / list-display 10 / json-contract 2 / watch 10（文法・出力契約・exit分類。loop系6件はfake_watch）/ attach-detach 9（L3層。TASK-89）/ move 5（L3層。TASK-88: parse排他・native argv/no-op JSON・fail exit5・tab swap argv列・verb set v2 help出現〔watch/attach/detachの継承分を含む〕）
+- `tests/cli/list_read_send.rs` 67件 = cli-grammar 25（TASK-65: 残excluded 8件の条件化14件を含む——zellij不在実path exit4・plugin PANESPEC正例・remap positional path・--json重複・resize equalize×grow排他・session解決残り段〔--session/env優先・複数/0件error〕・rename/resize/add/remove parse→argv正例・--tab×--all併合・--dry-run×--yes注意行・completion zsh/fish種別）/ read-send 11 / list-display 10 / json-contract 2 / watch 10（文法・出力契約・exit分類。loop系6件はfake_watch）/ attach-detach 9（L3層。TASK-89）/ move 5（L3層。TASK-88: parse排他・native argv/no-op JSON・fail exit5・tab swap argv列・verb set v2 help出現〔watch/attach/detachの継承分を含む〕）
 - `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
 - `tests/fake_backend/watch.rs` 6件 = watch（loop系: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。設計§5.2/§5.3の層帰属）
 - `tests/fake_backend/move.rs` 24件 = move（全条件。L2中心・1条件=1 test fn。TASK-88実装済み。REVIEW-3でprobe送信失敗・tab交換途中消滅の2条件を追加。polling timeout系3条件は10s deadlineを実時間消費）

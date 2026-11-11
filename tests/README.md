@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書19file・262条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
+- `design/` — テスト設計条件書19file・276条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -12,7 +12,7 @@
   - `layout_planner.rs` — layout-planner.toml（remap v2 planner grouping。26条件。TASK-81のpane_cwd欠落skip+warning・shell -c高疑いheuristicsを含む）
   - `layout_generator.rs` — layout-generator.toml（remap v2 生成KDL。14条件。TASK-81のcwd注入・Run::Cwd slot表現・hold属性非併記を含む）
 - `cli/` — L3 CLI契約（assert_cmd + fake zellij shim。shimはtest実行時に生成: argv記録・fixture応答・FAKE_* envで応答差替え。shim公開はstaging+atomic rename・binary内直列化でETXTBSY対策。fail-first期のfail testによるmutex毒化にもlock取得側で回復）
-  - `list_read_send.rs` — cli-grammar（11）+ read-send（11。--tail/--full加工2件・失敗注入/複数行系列4件。shimのFAKE_DUMP_SCREEN応答差し替え・FAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入）+ list-display（10）+ json-contract（2）+ watch（10。文法・出力契約・exit分類。TASK-86: shimのFAKE_DUMP_SCREEN_FRAMES〔@@ATTEMPT@@区切り・pane毎呼出回数で内容が変わるdump-screen応答〕・FAKE_FAIL_DUMP_SCREEN_AFTER〔pane:成功回数で途中から失敗〕で多attempt・pane消滅系列を再現）+ attach-detach（9。L3層。TASK-89: shimのFAKE_DETACH_FAIL・FAKE_SESSIONS_CREATE〔attach -b応答制御・ok時は作成NAMEをlist-sessions応答へ反映する状態管理〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・不在session名へのaction rc=1 Session not found応答）+ move（5。L3層。TASK-88: parse排他・native argv/no-op JSON・fail exit5・tab swap argv列〔shimのFAKE_FAIL_MOVE_PANE/FAKE_FAIL_MOVE_TAB・FAKE_TABS_JSON〔move-tabでposition移動を反映するtabs状態管理〕〕・help出現）の53条件
+  - `list_read_send.rs` — cli-grammar（25。TASK-65: 残excluded 8件の条件化14件——zellij不在実path exit4・plugin PANESPEC正例・remap positional path・--json重複・resize equalize×grow排他・session解決残り段〔--session/env優先・複数/0件error〕・rename/resize/add/remove parse→argv正例・--tab×--all併合・--dry-run×--yes注意行・completion zsh/fish種別。shimのFAKE_PANES_JSON〔rename-pane/close-pane/new-paneをlist-panes応答へ反映するpane状態管理〕・FAKE_NEW_PANE_TEMPLATE〔new-pane応答id採番〕）+ read-send（11。--tail/--full加工2件・失敗注入/複数行系列4件。shimのFAKE_DUMP_SCREEN応答差し替え・FAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入）+ list-display（10）+ json-contract（2）+ watch（10。文法・出力契約・exit分類。TASK-86: shimのFAKE_DUMP_SCREEN_FRAMES〔@@ATTEMPT@@区切り・pane毎呼出回数で内容が変わるdump-screen応答〕・FAKE_FAIL_DUMP_SCREEN_AFTER〔pane:成功回数で途中から失敗〕で多attempt・pane消滅系列を再現）+ attach-detach（9。L3層。TASK-89: shimのFAKE_DETACH_FAIL・FAKE_SESSIONS_CREATE〔attach -b応答制御・ok時は作成NAMEをlist-sessions応答へ反映する状態管理〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・不在session名へのaction rc=1 Session not found応答）+ move（5。L3層。TASK-88: parse排他・native argv/no-op JSON・fail exit5・tab swap argv列〔shimのFAKE_FAIL_MOVE_PANE/FAKE_FAIL_MOVE_TAB・FAKE_TABS_JSON〔move-tabでposition移動を反映するtabs状態管理〕〕・help出現）の67条件
   - `remap.rs` — remap-cli.toml（15条件。dry-run multi-tab拡張・JSON n=S互換・preflight warning伝達経路〔preflight-warning-paths-stderr-and-json〕・TASK-81のdry-run floating緩和・KDL preview cwd・error.data拡張・成功data.closed_duplicatesを含む。shimはFAKE_DUP_AFTER_OVERRIDEでdup spawnのemulationも持つ）
   - `docs.rs` — docs-verb.toml（9条件。TASK-88のmove文法記載・verb set v2=12配布物記載2件を含む。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
 - `fake_backend/` — L2 決定的fake backend
@@ -35,8 +35,8 @@ lib内test 13件（`src/app/list.rs` 3件・`src/zellij/process.rs` 10件〔TASK
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（262テスト）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。262条件でexit 0）
+cargo test          # L1〜L3（276テスト）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。276条件でexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）
