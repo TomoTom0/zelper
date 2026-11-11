@@ -12,13 +12,13 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（19 file・262条件）
+## 条件書一覧（19 file・276条件）
 
 verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
-| 1 | cli-grammar | src/cli.rs | cli_list_read_send（部分11件） | 11 | true |
+| 1 | cli-grammar | src/cli.rs | cli_list_read_send（部分25件） | 25 | true |
 | 2 | selector | src/selector.rs | selector（10件） | 10 | true |
 | 3 | backend-parser | src/zellij/parser.rs | parser（8件） | 8 | false（再検証待ち） |
 | 4 | json-contract | src/output/json.rs | error_map（4件）+ cli_list_read_send（部分2件） | 6 | true |
