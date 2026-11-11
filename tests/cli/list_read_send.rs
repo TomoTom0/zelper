@@ -1984,7 +1984,8 @@ fn resize_equalize_grow_mix_is_usage_error() {
     cmd.args(["resize", "pane", "1", "grow", "left", "3", "equalize"])
         .assert()
         .failure()
-        .code(2);
+        .code(2)
+        .stderr(predicates::str::contains("unexpected argument"));
 }
 
 /// session解決の--session > env段: 両方指定時は--session優先・--sessionなしは
