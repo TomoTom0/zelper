@@ -1,5 +1,5 @@
-# CLI文法・排他・PANESPEC・session解決・completion（src/cli.rs）の検証条件。出典: test-plan §2.1・§2.9（zellij不在はexcluded）・DD-1.3〜1.7
-# 対応test: tests/cli/list_read_send.rs（部分6件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# CLI文法・排他・PANESPEC・session解決・completion（src/cli.rs）の検証条件。出典: test-plan §2.1・§2.9・DD-1.2〜1.7
+# 対応test: tests/cli/list_read_send.rs（部分25件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
 [meta]
 feature = "cli-grammar"
 source_file = "src/cli.rs"
@@ -8,7 +8,7 @@ verified_at = "2026-09-26"
 verified_by = "claude"
 test_command = "cargo test --test cli_list_read_send"
 source_hash = "f46ee2346252ddd4d6db9ef24f3958fead08eece"
-note = ""
+note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象"
 
 [[condition]]
 id = "cli-grammar.session-auto-resolve-single-live-with-exited"
@@ -64,61 +64,117 @@ description = "completionサブコマンドがshell補完scriptをstdoutへ出�
 given = "zelper completion bash の実行"
 expect_return_shape = "exit 0かつstdoutが空でない補完script（zelperを含む・100 bytes超）。検証限界: zsh/fish種別の出力と補完候補の内容（verb一覧の正確さ）は未assert"
 
-[[excluded]]
-item = "zellij不在（PATHに存在しない）でZellijUnavailable exit 4となる実行pathの検証"
-source = "docs/testing/test-plan.md §2.9"
-reason = "未test。exit code対応はjson-contract.class-exit-mapping-full-tableで検証済みだが、process起動失敗の実pathは未検証。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.zellij-unavailable-real-path-exit4"
+target_function = "zellij不在実pathのbackend起動（map_spawn_err → ZellijUnavailable）"
+source = "docs/testing/test-plan.md §2.9（failure injection: zellij不在） + docs/design/detailed-design.md DD-3.1/3.5 + backend-process条件書spawn-notfound系条件（機構側との分担: run()機構のmap_spawn_errはbackend-process.toml・CLI levelの実pathは本条件）"
+description = "zellij不在実pathのCLI表面: PATHにzellijが存在しない環境では操作系verbのbackend起動が失敗しZellijUnavailable（exit 4）として報告する。実binaryがPATH解決に失敗する実経路を検証する（機構側のunit条件と分担）"
+given = "PATHにzellij（shim含む）を置かない空dirを指定した状態でzelper read 1を実行"
+expect_return = "exit 4・stderrが\"zelper: zellij executable not found in PATH\"を含む"
 
-[[excluded]]
-item = "resizeのequalizeとgrow|shrink構文の併用拒否（排他規則の残り組合せ）"
-source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: resize equalize × grow/shrink 等） + docs/design/detailed-design.md DD-1.5（resize: equalizeとgrow|shrink構文は相互排他）"
-reason = "未test。既存133 testにresizeの構文排他を検証するtest fnが存在しないため本移行では条件化できない（移行は新規testを作らない）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.plugin-pane-spec-read-positive"
+target_function = "PANESPEC parse（plugin_N受理）"
+source = "docs/testing/test-plan.md §2.1（PANESPEC正規形: plugin_1受理） + docs/design/detailed-design.md DD-1.3（PANESPEC = pane IDのみ。terminal_3 / plugin_1 / bare 3）"
+description = "PANESPECのplugin_N形式受理の正例: plugin pane IDを対象にでき、dump-screen -p plugin_Nとして発行される。DD-1.6のplugin_1はplugin_N系列の代表例であり、既定fixtureがplugin_0（tab bar plugin pane）を持つためN=0で検証する（parse_specはplugin_接頭辞+N全体を受理しNの値で経路は変わらない）"
+given = "fake zellij shim（既定fixture・plugin_0のtab bar paneを含む）に対するzelper read plugin_0 --jsonの実行"
+expect_return = "exit 0・stdout JSON envelopeのdata.results[0].target == \"plugin_0\"・FAKE_LOGに--session fake-sess action dump-screen -p plugin_0を含む"
 
-[[excluded]]
-item = "PANESPECのplugin_1（plugin pane ID）受理"
-source = "docs/testing/test-plan.md §2.1（PANESPEC正規形: plugin_1受理） + docs/design/detailed-design.md DD-1.3（PANESPEC = terminal_3 / plugin_1 / bare 3）"
-reason = "未test。既存133 testにplugin pane IDをPANESPECへ渡すtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.remap-positional-path-is-usage-error"
+target_function = "remapのlayout positional（path誤渡しの構文段拒否）"
+source = "docs/testing/test-plan.md §2.1（非例の全パターン（DD-1.6非例）: exit 2 + usage error） + docs/design/detailed-design.md DD-1.6非例（zelper remap ./three.kdl） + DD-1.3（remapのpositional = layout名のみ。要件2.9の強制規則） + tmp/tasks/tm-65/design_cli-grammar-remaining-tests.md §2（突合判断: (a1) value_parser案）"
+description = "DD-1.6非例「remapへのpathのpositional渡し」の構文段拒否: layout名に'/'を含む値はlayout_dir直下のfile stemとして不成立のためvalue_parserでusage error（exit 2）とし、--pathへの案内文を出す。要件2.9がexit 2を要求するのは3source併用時のみであり、単独positional pathのexit 2はDD-1.6非例の意図（path誤渡しの構文段拒否）をsrc/cli.rsのvalue_parserで実現するもの（TASK-65設計§2の(a1)案・設計レビュー確定）。fail-first条件: value_parser適用前の現行実装ではremap::runのcurrent-tab-info応答欠落によりexit 5となり本条件は赤"
+given = "zelper remap ./three.kdl の実行"
+expect_return = "exit 2・stderrがlayout名として不成立の案内（\"--path\"を含む文面）を含む。backend呼出なし（純parse test・shim非依存）"
 
-[[excluded]]
-item = "DD-1.6非例の残り（zelper remap ./three.kdl（pathのpositional渡し）・zelper read --json --json（重複option））"
-source = "docs/testing/test-plan.md §2.1（非例の全パターン（DD-1.6非例）: exit 2 + usage error） + docs/design/detailed-design.md DD-1.6非例"
-reason = "未test。非例4件のうちpane:12とsend 1 2 yは条件化済み（invalid-pane-spec・send-requires-double-dash各条件）。実装の排他はconflicts_with_all（併用時発火）のため、remapへの単独positional path渡しはparseを通過しlayout名解決の失敗としてLayoutNotFound系（exit 7）になる見込み。--json重複の実際の挙動は未確認。新規test追加時に条件化する（tm起票済み。test化時に§2.1期待値（exit 2）と実装の突合が必要）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.duplicate-flag-is-usage-error"
+target_function = "option重複指定（clap ArgAction::SetTrueの重複拒否）"
+source = "docs/testing/test-plan.md §2.1（非例の全パターン（DD-1.6非例）: exit 2 + usage error） + docs/design/detailed-design.md DD-1.6非例（zelper read --json --json 重複option）"
+description = "DD-1.6非例の重複option: 同一flagの重複指定はclap ArgAction::SetTrueの重複拒否によりusage error（exit 2）"
+given = "zelper read --json --json（DD-1.6非例どおりの形式）の実行"
+expect_return = "exit 2・stderrが\"cannot be used multiple times\"を含む"
 
-[[excluded]]
-item = "session解決の残り段（--session NAME直接指定・ZELLIJ_SESSION_NAME環境変数・複数実行中session時のerror（候補列出））"
+[[condition]]
+id = "cli-grammar.resize-equalize-grow-mix-is-usage-error"
+target_function = "resize排他規則（equalize × grow|shrink構文）"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: resize equalize × grow/shrink） + docs/design/detailed-design.md DD-1.5（resize: equalizeとgrow|shrink構文は相互排他）"
+description = "equalize構文へのgrow|shrink語混入とpane構文への余剰positional（equalize語）はいずれもusage error（exit 2）。機構の注記: DD-1.5の当該排他はclapのsubcommand分離（ResizeTarget enum: pane/equalize）で構造的に実現されておりclapのconflicts_withは存在しない。混在指定はequalize側のPANESPEC検査（parse_pane_specs → Usage）または余剰positional（clap unexpected argument）で拒否され、結果契約（exit 2 usage error）はDD-1.5と同一"
+given = "zelper resize equalize grow left（equalize構文へgrow|shrink語を混入）とzelper resize pane 1 grow left 3 equalize（pane構文への余剰positional）の各実行"
+expect_return = "いずれもexit 2。前者は\"invalid pane spec 'grow'\"（equalizeのPANESPEC parse拒否）・後者はunexpected argument"
+
+[[condition]]
+id = "cli-grammar.session-flag-priority-and-env-resolution"
+target_function = "session解決（resolve_session: --session > env）"
 source = "docs/testing/test-plan.md §2.1（session解決: --session > env > 単一session > error（候補列出）の優先順） + docs/design/detailed-design.md DD-1.2（対象session解決の優先順）"
-reason = "未test。既存133 testにこれらの段を検証するtest fnが存在しないため本移行では条件化できない（session-auto-resolve条件は実行中1つの自動解決の正例のみ）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+description = "session解決優先順のうち--session直接指定とZELLIJ_SESSION_NAME環境変数の段: 両方指定時は--sessionが優先され、--sessionなしではenv変数で解決する。解決済みsession名がbackend argvの--session接頭へ現れることで検証する"
+given = "(i) FAKE_SESSIONS=other-sess（current）とenv-sessの2行のshimに対しZELLIJ_SESSION_NAME=env-sess注入+--session other-sess指定でzelper read 1 (ii) 同一FAKE_SESSIONS（env-sessを含む）のもとZELLIJ_SESSION_NAME=env-sessのみ注入してzelper read 1"
+expect_return = "(i) exit 0かつFAKE_LOGのargvが--session other-sess action ...（--sessionがenvに優先） (ii) exit 0かつargvが--session env-sess action ...（env解決）"
 
-[[excluded]]
-item = "DD-1.6のverb例のうちL2 test担当分（rename/resize/add/remove）のCLI parse（L2 testはapp層関数の直呼びでありCLI引数parseを経由しない）"
-source = "docs/testing/test-plan.md §2.1（各verbの正常系: DD-1.6の全exampleがparseされ意図するtyped requestになる） + docs/design/detailed-design.md DD-1.6（例）"
-reason = "未test。test-plan §2.1の「各verb正常系parse」は各verbの条件書へ分散帰属するが、rename/add-remove/resizeのL2 testはrun_pane/run_tab/run_equalize等の関数直呼びでありparse経路を検証しない。read/send/listのL3 testはfake shim経由でparseを検証済み。新規test追加時にL3側へ条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.session-multiple-and-none-running-error"
+target_function = "session解決（複数実行中・実行中0件のerror段）"
+source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.2（複数実行中はerror（候補表示）・実行中が無い場合もerror）"
+description = "session解決のerror段: 実行中sessionが複数ならAmbiguousTarget（候補列出）で、EXITEDのみで実行中0件ならNoTargetで失敗する。list-sessions自体がrc=1で失敗する完全0-session環境（FAKE_SESSIONS_EMPTY）はOperationFailed exit 5の別経路であり本条件では扱わない（(ii)はlist-sessions成功・実行中0件の環境でNoTarget段を撃つ）"
+given = "(i) FAKE_SESSIONS=live-a（current）とlive-b（実行中2件）でzelper read 1 (ii) FAKE_SESSIONS=dead-a（EXITEDのみ・実行中0件）でzelper read 1"
+expect_return = "(i) exit 3（AmbiguousTarget）・stderrが\"multiple zellij sessions running\"と\"candidates: live-a, live-b\"を含む (ii) exit 3（NoTarget）・stderrが\"no running zellij session found\"を含む"
 
-[[excluded]]
-item = "DD-1.5併用系の正例（--tab（絞り込み）と--allの併合（--tab内のall）・--dry-runと--yesの併用時の「--yesは無視される旨」注意出力（MR-30））"
-source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ） + docs/design/detailed-design.md DD-1.5（--tabと--allは併合・--dry-runと--yesの併用は可） + --dry-runと--yesの併用時は注意行を出力する"
-reason = "未test。既存133 testにこれらの併用正例・注意出力を検証するtest fnが存在しないため本移行では条件化できない（remove-pane-safety-gate条件は--yes併用dry-runの実行優先までを検証、注意出力は未assert）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.rename-parse-emits-typed-argv"
+target_function = "renameのCLI parse（clap → backend argv・postcondition通過）"
+source = "docs/testing/test-plan.md §2.1（各verbの正常系: DD-1.6の全exampleがparseされ意図するtyped requestになる） + docs/design/detailed-design.md DD-1.6（rename pane 12 worker-1 / rename tab 3 agents） + DD-8（plan: rename-pane -p / rename-tab-by-id・postcondition: title/name反映）"
+description = "rename verbのCLI parse表面: DD-1.6の例形式がtyped request（rename-pane -p / rename-tab-by-id argv）として発行され、shim状態のtitle/name書換によりpostcondition（反映確認）を通過してexit 0する。検証限界: postcondition（title/name反映）はshim状態拡張による模擬であり、実挙動のpostcondition検証はL2（rename.toml）とL4が担う"
+given = "(i) FAKE_PANES_JSON（terminal_1入り）でzelper rename pane terminal_1 worker-1 (ii) FAKE_TABS_JSON（1-tab）でzelper rename tab 0 agents"
+expect_return = "(i) exit 0・FAKE_LOGに--session fake-sess action rename-pane -p terminal_1 worker-1・stdout \"renamed pane terminal_1 -> worker-1\" (ii) exit 0・FAKE_LOGにaction rename-tab-by-id 0 agents・stdout \"renamed tab 0 -> agents\""
 
-[[excluded]]
-item = "completionのzsh/fish種別の出力（bash以外のshell種別）"
-source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（completion bash等）"
-reason = "未test。completion-generates-script条件はbash種別のみのassertのため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "cli-grammar.resize-parse-emits-typed-argv"
+target_function = "resizeのCLI parse（clap → backend argv・no-op報告契約）"
+source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（resize pane 5 grow right 3 / resize equalize --tab 2） + DD-9（resize <increase|decrease> <dir> -p・no-op 2連続打切り+warning・equalizeは近似）"
+description = "resize verbのCLI parse表面: pane構文はresize -p <spec> increase|decrease <dir> argvを発行し、幾何不変のshimではno-op 2連続検出（DD-9のno-op報告契約）でwarning+0 step適用のexit 0になる。equalize（PANESPEC形式）は静的幾何によるno-progress打切りでincrease/decrease argvを発行し、approximate注記を出す。--tab TABSPEC形式のequalizeはresize.toml（L2）の担当のため本条件ではPANESPEC形式のみ"
+given = "(i) 既定fixture（幾何不変）でzelper resize pane 1 grow left 3 (ii) FAKE_PANES_JSON（同一row・cols=10/30の2 pane）でzelper resize equalize 1 2"
+expect_return = "(i) exit 0・FAKE_LOGにaction resize -p terminal_1 increase leftがちょうど2回（no-op 2連続打切り）・stderr warning行・stdout \"0 step(s) applied\" (ii) exit 0・FAKE_LOGにresize -p terminal_1 increase right 2回+resize -p terminal_2 decrease right 2回（静的幾何のno-progress打切り。合計4回で決定的）・stdoutに\"approximate\""
+
+[[condition]]
+id = "cli-grammar.add-parse-emits-typed-argv"
+target_function = "add paneのCLI parse（clap → backend argv・postcondition通過）"
+source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（add pane --count 2 --tab 4） + DD-11（new-pane --tab-id・postcondition: 作成IDの存在確認）"
+description = "add pane verbのCLI parse表面: --count Nはnew-pane argvをN回発行し（--tab TABSPECは--tab-idへ写像・--name無し）、shimの採番応答（terminal_N）とpostcondition（作成ID存在確認）を通過してexit 0する。検証限界: --cwd/--name連番suffix/-- CMDのoption mapと部分失敗はadd-remove.toml（L2側）が担う"
+given = "FAKE_TABS_JSON（tab 0）+FAKE_PANES_JSON（terminal_1/2の2 pane）でzelper add pane --count 2 --tab 0"
+expect_return = "exit 0・FAKE_LOGに--session fake-sess action new-pane --tab-id 0が2回（--name無し）・stdout \"created pane terminal_3\" / \"created pane terminal_4\"（shimのnew-pane応答id）"
+
+[[condition]]
+id = "cli-grammar.remove-parse-emits-typed-argv"
+target_function = "removeのCLI parse（close-pane argv・--empty dry-run plan）"
+source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（remove tab --empty --dry-run） + DD-11（close-pane -p・close-tab-by-id・postcondition: 消失確認）"
+description = "remove verbのCLI parse表面: pane削除はclose-pane -p <spec> argvを発行し、shim状態の行除去によりpostcondition（消失確認）を通過する。tab --empty --dry-runは空tab（selectable pane 0個のtab）のみを対象にplan出力しclose-tab argvを発行しない。--empty TABSPEC解決・gate・部分失敗はadd-remove.toml（既存L2）が担う"
+given = "(i) FAKE_PANES_JSON（terminal_1入り）でzelper remove pane 1 --yes (ii) FAKE_TABS_JSON（tab0=非空・tab1=空）でzelper remove tab --empty --dry-run"
+expect_return = "(i) exit 0・FAKE_LOGにaction close-pane -p terminal_1・stdout \"removed pane terminal_1\" (ii) exit 0・close-tab系argvがFAKE_LOGに存在しない・stdout \"[plan] close tab 1\""
+
+[[condition]]
+id = "cli-grammar.tab-and-all-filter-merge-positive"
+target_function = "対象解決のfilter併合（--tab × --all）"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--tab（絞り込み）と--allは併合（--tab内のall）） + DD-1.4（--tab SPEC: tab指定・--all: 対象sessionの全selectable terminal pane）"
+description = "DD-1.5併用系の正例: --tabと--allの併合（--tab内のall）。--all単独なら全tab対象となるところを、--tab併合でそのtab内のみへ絞り込む（filter pool = selectable terminal pane → tab絞り込み → --allならname/command/cwd一致を適用しない）"
+given = "FAKE_TABS_JSON（tab 0/1）+FAKE_PANES_JSON（tab 0にterminal_1/2・tab 1にterminal_3/4）でzelper read --tab 1 --all --json"
+expect_return = "exit 0・resultsがterminal_3/terminal_4のみ（--all単独なら4件となる構成で併合を区別）・FAKE_LOGのdump-screenがterminal_3/terminal_4の2回のみ"
+
+[[condition]]
+id = "cli-grammar.dry-run-with-yes-note-output"
+target_function = "removeの--dry-run×--yes併用（注意行出力・dry-run優先）"
+source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--dry-runと--yesの併用は可（--yesは無視される旨を出力）） + MR-30（注意行出力の指摘）"
+description = "--dry-run×--yes併用の正例: 併用は可で--yesは無視され、その旨の注意行（stderr）を出力する。dry-runが優先されbackendのmutating呼出（close-pane）は不発・plan出力で終わる。add-remove.remove-pane-safety-gate（L2）が実行優先を検証済みに対し、本条件はL3の注意行出力・plan出力・非実行を担う"
+given = "既定fixtureでzelper remove pane 1 --yes --dry-run"
+expect_return = "exit 0・stderrに\"zelper: note: --yes is ignored when --dry-run is given\"を含む・stdoutに\"[plan] close pane terminal_1\"・FAKE_LOGにclose-pane argvが存在しない（dry-run優先・非実行）"
+
+[[condition]]
+id = "cli-grammar.completion-shell-variants"
+target_function = "completionサブコマンド（shell種別）"
+source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（clap_completeによる動的生成・stdoutへscript出力）"
+description = "completionのshell種別: zsh/fishもbashと同様に空でない補完scriptを出力し、内容はshell種別毎に相異する。非対応shell名（tcsh）はclap ValueEnum拒否でexit 2。検証限界: clap_complete::Shellの既定によりelvish/powershellも受理されるが、DD-1.7が文書化するのはbash|zsh|fishのため本条件では検証対象外"
+given = "zelper completion zsh・zelper completion fish・zelper completion tcsh（非対応shell）の各実行"
+expect_return = "zsh/fishともexit 0かつstdoutが100 bytes超・\"zelper\"を含み・互いに（およびbashとも）内容が異なる。tcshはexit 2"
 
 [[condition]]
 id = "cli-grammar.move-three-way-exclusive-usage-error"

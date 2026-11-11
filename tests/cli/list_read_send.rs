@@ -66,7 +66,26 @@ if [[ "$3" == "action" ]]; then
   shift 3
   action="$1"; shift
   case "$action" in
-    list-panes) cat "$FAKE_FIXTURES/panes.json"; exit 0;;
+    list-panes)
+      # TASK-65: FAKE_PANES_JSON設定時は行単位の状態file（1行=1pane object）で
+      # pane状態を管理し、rename-pane/close-pane/new-pane handlerの作用を
+      # list-panes応答へ反映する（未設定時は従来のfixture応答。FAKE_TABS_JSONの
+      # list-tabs分岐と同一のguard構造）
+      state="${FAKE_LOG}.panes"
+      if [[ -n "$FAKE_PANES_JSON" ]]; then
+        if [[ ! -f "$state" ]]; then
+          # 末尾はawkで行送りを保証（sed出力の最終行に改行が無いと、
+          # new-pane handlerのappendが前行へ連結し状態fileの行構造が壊れる）
+          printf '%s' "$FAKE_PANES_JSON" | tr -d '\n' \
+            | sed -e 's/^\[ *//' -e 's/ *\]$//' -e 's/}, *{/}\n{/g' \
+            | awk '{ print }' > "$state"
+        fi
+        echo '['
+        awk 'NR > 1 { printf "," } { printf "%s\n", $0 }' "$state"
+        echo ']'
+        exit 0
+      fi
+      cat "$FAKE_FIXTURES/panes.json"; exit 0;;
     list-tabs)
       if [[ -n "$FAKE_FAIL_LIST_TABS" ]]; then echo "boom" >&2; exit 1; fi
       # TASK-88: FAKE_TABS_JSON設定時は行単位の状態file（1行=1tab object）で
@@ -155,6 +174,92 @@ if [[ "$3" == "action" ]]; then
     move-pane|move-pane-backwards)
       if [[ -n "$FAKE_FAIL_MOVE_PANE" ]]; then echo "boom" >&2; exit 1; fi
       echo "ok"; exit 0;;
+    # TASK-65: FAKE_PANES_JSON状態file（${FAKE_LOG}.panes）が存在するときのみ
+    # 作用するpane状態変更handler群（未設定時は従来のcatch-all "ok"のまま）。
+    # pane行の特定は "id": N と "is_plugin": B の組（FAKE_PANES_JSONは
+    # fixture panes.jsonと同一のfield形式で与える）
+    rename-pane)
+      rspec=""; rname=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p) rspec="$2"; shift 2;;
+          *) rname="$1"; shift;;
+        esac
+      done
+      state="${FAKE_LOG}.panes"
+      if [[ -f "$state" && -n "$rspec" ]]; then
+        rplug=0
+        if [[ "$rspec" == plugin_* ]]; then rplug=1; fi
+        awk -v id="\"id\": ${rspec##*_}," -v plug="\"is_plugin\": $rplug," \
+            -v name="$rname" '
+          index($0, id) && index($0, plug) {
+            line = $0
+            gsub(/"title": *"[^"]*"/, "\"title\": \"" name "\"", line)
+            print line
+            next
+          }
+          { print }
+        ' "$state" > "${state}.new" && mv "${state}.new" "$state"
+      fi
+      echo "ok"; exit 0;;
+    close-pane)
+      cspec=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p) cspec="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      state="${FAKE_LOG}.panes"
+      if [[ -f "$state" && -n "$cspec" ]]; then
+        cplug=0
+        if [[ "$cspec" == plugin_* ]]; then cplug=1; fi
+        awk -v id="\"id\": ${cspec##*_}," -v plug="\"is_plugin\": $cplug," \
+            '! (index($0, id) && index($0, plug))' "$state" \
+          > "${state}.new" && mv "${state}.new" "$state"
+      fi
+      echo "ok"; exit 0;;
+    # TASK-65: new-pane。FAKE_PANES_JSON設定時はpanes状態fileが不在ならlazy init
+    # してから作用（list-panes分岐と同一の初期化）。id採番は既存terminal paneの
+    # id最大値+1（terminal_1/2が既存ならterminal_3開始）。採番した terminal_N を
+    # stdoutへechoし（parse_created_paneはstdout全体をpane specとしてparse）、
+    # FAKE_NEW_PANE_TEMPLATE（@ID@=数値placeholderの1 pane object JSON）の行をappend
+    new-pane)
+      state="${FAKE_LOG}.panes"
+      if [[ -n "$FAKE_PANES_JSON" ]]; then
+        if [[ ! -f "$state" ]]; then
+          # 末尾はawkで行送りを保証（appendの連結防止。list-panes分岐と同一）
+          printf '%s' "$FAKE_PANES_JSON" | tr -d '\n' \
+            | sed -e 's/^\[ *//' -e 's/ *\]$//' -e 's/}, *{/}\n{/g' \
+            | awk '{ print }' > "$state"
+        fi
+        next_id=$(awk '
+          /"is_plugin": *false/ && match($0, /"id": *[0-9]+/) {
+            v = substr($0, RSTART + 6, RLENGTH - 6) + 0
+            if (v > m) m = v
+          }
+          END { print m + 1 }' "$state")
+        printf '%s\n' "${FAKE_NEW_PANE_TEMPLATE//@ID@/$next_id}" >> "$state"
+        echo "terminal_$next_id"
+        exit 0
+      fi
+      echo "ok"; exit 0;;
+    # TASK-65: rename-tab-by-id <id> <name>。FAKE_TABS_JSONのtabs状態fileの
+    # id一致行のnameを書換（rename tabのpostcondition反映）
+    rename-tab-by-id)
+      state="${FAKE_LOG}.tabs"
+      if [[ -f "$state" && -n "$1" ]]; then
+        awk -v tid="$1" -v name="$2" '
+          $0 ~ ("\"tab_id\": *" tid "[,}]") {
+            line = $0
+            gsub(/"name": *"[^"]*"/, "\"name\": \"" name "\"", line)
+            print line
+            next
+          }
+          { print }
+        ' "$state" > "${state}.new" && mv "${state}.new" "$state"
+      fi
+      echo "ok"; exit 0;;
     # TASK-88: FAKE_FAIL_MOVE_TAB設定時はmove-tabを非zero終了させる。未設定時は
     # FAKE_TABS_JSONの状態file上で1 position移動（edgeはwrap）し、各行のposition
     # fieldを行番号へ再採番する（tab交換の2d-1回呼出に対してpostconditionの
@@ -218,6 +323,10 @@ exit 0
     // 返すため、PID再利用でdirを再利用した際にargv列・期待positionがずれる。
     // 削除によりshimがFAKE_TABS_JSONから再初期化する）
     let _ = std::fs::remove_file(dir.join("calls.log.tabs"));
+    // TASK-65: FAKE_PANES_JSONのpane状態file（${FAKE_LOG}.panes）もsetup時に
+    // 削除する（PID再利用で既存dirを再利用した際の前回のrename/close/new-pane
+    // 作用後状態の残留を排除。tabsと同一の理由）
+    let _ = std::fs::remove_file(dir.join("calls.log.panes"));
     (dir, log)
 }
 
@@ -250,7 +359,9 @@ fn calls(log: &PathBuf) -> Vec<String> {
 // [covers:json-contract.list-panes-json-success-envelope]
 #[test]
 fn list_panes_json_contract() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-panes");
     let out = cmd
         .args(["list", "panes", "--json"])
@@ -270,7 +381,9 @@ fn list_panes_json_contract() {
 // [covers:list-display.sessions-and-tabs-basic-output]
 #[test]
 fn list_sessions_and_tabs() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-sessions");
     let out = cmd
         .args(["list", "sessions", "--json"])
@@ -300,7 +413,9 @@ fn list_sessions_and_tabs() {
 // [covers:list-display.sessions-live-only-with-exited-present]
 #[test]
 fn list_sessions_works_with_exited_sessions() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-sessions-exited");
     let out = cmd
         .env(
@@ -336,7 +451,9 @@ fn list_sessions_works_with_exited_sessions() {
 // [covers:list-display.sessions-human-metadata-columns]
 #[test]
 fn list_sessions_human_shows_metadata_columns() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-sessions-human");
     cmd.env(
         "FAKE_SESSIONS",
@@ -353,7 +470,9 @@ fn list_sessions_human_shows_metadata_columns() {
 // [covers:cli-grammar.session-auto-resolve-single-live-with-exited]
 #[test]
 fn read_resolves_single_live_session_with_exited_present() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("read-exited-resolve");
     cmd.env(
         "FAKE_SESSIONS",
@@ -368,7 +487,9 @@ fn read_resolves_single_live_session_with_exited_present() {
 // [covers:list-display.panes-human-columns-with-cwd]
 #[test]
 fn list_panes_human_includes_cwd_column() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-panes-cwd");
     cmd.args(["list", "panes"]).assert().success().stdout(
         "PANE_ID\tTAB\tTITLE\tCOMMAND\tCWD\n\
@@ -383,7 +504,9 @@ fn list_panes_human_includes_cwd_column() {
 // [covers:list-display.layouts-without-session-resolution]
 #[test]
 fn list_layouts_works_without_session_resolution() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-layouts-nosession");
     let dir = std::env::temp_dir().join(format!("zelper-fake-layouts-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -428,7 +551,9 @@ fn list_layouts_works_without_session_resolution() {
 // [covers:read-send.read-single-and-multi-results]
 #[test]
 fn read_single_and_multi_with_tail() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("read-1");
     let out = cmd
         .args(["read", "1", "--json"])
@@ -448,7 +573,9 @@ fn read_single_and_multi_with_tail() {
 // [covers:read-send.read-nonexistent-pane-is-no-target-exit3]
 #[test]
 fn read_nonexistent_pane_is_no_target_exit3() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("read-miss");
     cmd.args(["read", "999", "--json"])
         .assert()
@@ -459,7 +586,9 @@ fn read_nonexistent_pane_is_no_target_exit3() {
 // [covers:json-contract.cli-error-envelope-on-failure]
 #[test]
 fn json_error_envelope_on_failure() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // レビュー回帰: --json指定時の失敗はstdoutにerror envelope（DD-4.2）
     let (mut cmd, _) = zelper("json-err");
     let out = cmd
@@ -479,7 +608,9 @@ fn json_error_envelope_on_failure() {
 // [covers:read-send.send-broadcast-visual-order-calls]
 #[test]
 fn send_broadcast_records_calls_in_visual_order() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("send-broadcast");
     cmd.args(["send", "2", "1", "--", "y"]).assert().success();
     let cs = calls(&log);
@@ -496,7 +627,9 @@ fn send_broadcast_records_calls_in_visual_order() {
 // [covers:read-send.send-enter-appends-cr-and-keys-use-send-keys]
 #[test]
 fn send_enter_appends_cr_and_keys_use_send_keys() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("send-enter");
     cmd.args(["send", "1", "--enter", "--", "hello"])
         .assert()
@@ -522,7 +655,9 @@ fn send_enter_appends_cr_and_keys_use_send_keys() {
 // [covers:cli-grammar.send-requires-double-dash-text-is-usage-error]
 #[test]
 fn send_without_double_dash_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("send-nodash");
     cmd.args(["send", "1", "y"]).assert().failure().code(2);
 }
@@ -530,7 +665,9 @@ fn send_without_double_dash_is_usage_error() {
 // [covers:cli-grammar.send-text-keys-conflict-is-usage-error]
 #[test]
 fn send_text_and_keys_conflict_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("send-conflict");
     cmd.args(["send", "1", "--keys", "Enter", "--", "y"])
         .assert()
@@ -541,7 +678,9 @@ fn send_text_and_keys_conflict_is_usage_error() {
 // [covers:cli-grammar.remap-layout-sources-conflict-is-usage-error]
 #[test]
 fn remap_layout_sources_conflict_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("remap-conflict");
     cmd.args(["remap", "three", "--path", "./x.kdl"])
         .assert()
@@ -552,7 +691,9 @@ fn remap_layout_sources_conflict_is_usage_error() {
 // [covers:cli-grammar.invalid-pane-spec-is-usage-error]
 #[test]
 fn invalid_pane_spec_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("bad-spec");
     cmd.args(["read", "pane:12"]).assert().failure().code(2);
 }
@@ -560,7 +701,9 @@ fn invalid_pane_spec_is_usage_error() {
 // [covers:cli-grammar.completion-generates-script]
 #[test]
 fn completion_generates_script() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("completion");
     let out = cmd
         .args(["completion", "bash"])
@@ -577,7 +720,9 @@ fn completion_generates_script() {
 // [covers:read-send.human-output-pane-headers]
 #[test]
 fn human_read_output_has_pane_headers() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("read-human");
     cmd.args(["read", "1"])
         .assert()
@@ -592,7 +737,9 @@ fn human_read_output_has_pane_headers() {
 // [covers:read-send.read-full-passes-dump-screen-f]
 #[test]
 fn read_full_passes_dump_screen_f() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("read-full");
     let out = cmd
         .args(["read", "1", "--full", "--json"])
@@ -620,7 +767,9 @@ fn read_full_passes_dump_screen_f() {
 // [covers:read-send.read-tail-applies-to-last-n-lines]
 #[test]
 fn read_tail_applies_to_last_n_lines() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let screen = "L1\nL2\nL3\nL4\nL5";
 
     let (mut cmd, _) = zelper("read-tail2");
@@ -672,7 +821,9 @@ fn read_tail_applies_to_last_n_lines() {
 // [covers:read-send.read-partial-failure-exit6]
 #[test]
 fn read_partial_failure_exit6() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("read-partial-fail");
     let out = cmd
         .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1")
@@ -711,7 +862,9 @@ fn read_partial_failure_exit6() {
 // [covers:read-send.read-all-failure-exit5]
 #[test]
 fn read_all_failure_exit5() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("read-all-fail");
     let out = cmd
         .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1 terminal_2")
@@ -734,7 +887,9 @@ fn read_all_failure_exit5() {
 // [covers:read-send.send-partial-failure-continues-remaining]
 #[test]
 fn send_partial_failure_continues_remaining() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("send-partial-fail");
     cmd.env("FAKE_FAIL_WRITE_CHARS", "terminal_1")
         .args(["send", "1", "2", "--", "hello"])
@@ -762,7 +917,9 @@ fn send_partial_failure_continues_remaining() {
 // [covers:read-send.send-multiline-text-single-write-chars]
 #[test]
 fn send_multiline_text_single_write_chars() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("send-multiline");
     cmd.args(["send", "1", "--", "first line\nsecond line"])
         .assert()
@@ -783,7 +940,9 @@ fn send_multiline_text_single_write_chars() {
 // [covers:list-display.sessions-summary-elides-beyond-four-tabs]
 #[test]
 fn list_sessions_panes_summary_elides_beyond_four_tabs() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-sessions-6tabs");
     let dir = std::env::temp_dir().join(format!("zelper-fake-tabs6-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -833,7 +992,9 @@ fn list_sessions_panes_summary_elides_beyond_four_tabs() {
 // [covers:list-display.sessions-tabs-fetch-failure-fallback]
 #[test]
 fn list_sessions_fallback_when_tabs_fetch_fails() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-sessions-tabsfail");
     cmd.env("FAKE_SESSIONS", "live-a [Created 1m ago] (current)")
         .env("FAKE_FAIL_LIST_TABS", "1")
@@ -861,7 +1022,9 @@ fn list_sessions_fallback_when_tabs_fetch_fails() {
 // [covers:list-display.panes-compact-shows-tab-and-short-cwd]
 #[test]
 fn list_panes_compact_shows_tab_and_short_cwd() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-panes-compact");
     let dir = std::env::temp_dir().join(format!("zelper-fake-panes-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -883,7 +1046,9 @@ fn list_panes_compact_shows_tab_and_short_cwd() {
 // [covers:list-display.compact-names-and-json-precedence]
 #[test]
 fn list_compact_names_and_json_precedence() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-tabs-compact");
     cmd.args(["list", "tabs", "--compact"])
         .assert()
@@ -914,7 +1079,9 @@ fn list_compact_names_and_json_precedence() {
 // [covers:list-display.layouts-compact-names-only]
 #[test]
 fn list_layouts_compact_shows_names_only() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("list-layouts-compact");
     let dir = std::env::temp_dir().join(format!("zelper-fake-layouts2-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -936,7 +1103,9 @@ fn list_layouts_compact_shows_names_only() {
 // [covers:watch.pattern-count-usage]
 #[test]
 fn watch_pattern_count_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // PATTERN 2件（READY GO相当の2語指定）
     let (mut cmd, _) = zelper("watch-two-patterns");
     cmd.args(["watch", "1", "--", "READY", "GO"])
@@ -959,7 +1128,9 @@ fn watch_pattern_count_is_usage_error() {
 // [covers:watch.empty-pattern-usage]
 #[test]
 fn watch_empty_pattern_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-empty");
     cmd.args(["watch", "1", "--", ""])
         .assert()
@@ -980,7 +1151,9 @@ fn watch_empty_pattern_is_usage_error() {
 // [covers:watch.interval-lower-bound-usage]
 #[test]
 fn watch_interval_lower_bound_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     for (tag, val) in [
         ("watch-interval-05", "0.5"),
         ("watch-interval-nan", "nan"),
@@ -999,7 +1172,9 @@ fn watch_interval_lower_bound_is_usage_error() {
 // [covers:watch.max-lower-bound-usage]
 #[test]
 fn watch_max_lower_bound_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-max0");
     cmd.args(["watch", "1", "--max", "0", "--", "READY"])
         .assert()
@@ -1012,7 +1187,9 @@ fn watch_max_lower_bound_is_usage_error() {
 // [covers:watch.regex-compile-usage]
 #[test]
 fn watch_regex_compile_error_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-bad-regex");
     cmd.args(["watch", "1", "--regex", "--", "[invalid"])
         .assert()
@@ -1026,7 +1203,9 @@ fn watch_regex_compile_error_is_usage_error() {
 // [covers:watch.no-target-exit3]
 #[test]
 fn watch_nonexistent_pane_is_no_target_exit3() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-miss");
     cmd.args(["watch", "999", "--", "READY"])
         .assert()
@@ -1040,7 +1219,9 @@ fn watch_nonexistent_pane_is_no_target_exit3() {
 // [covers:watch.hit-exit0-output]
 #[test]
 fn watch_hit_exit0_output_json_and_human() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let screen = "booting\nREADY one\nREADY two\nidle";
     // JSON: data 7 field・matched_linesはmatch行両方
     let (mut cmd, _) = zelper("watch-hit-json");
@@ -1085,7 +1266,9 @@ fn watch_hit_exit0_output_json_and_human() {
 // [covers:watch.exhaust-operationfailed]
 #[test]
 fn watch_exhaust_is_operation_failed_with_attempts() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-exhaust");
     let out = cmd
         .env(
@@ -1124,7 +1307,9 @@ fn watch_exhaust_is_operation_failed_with_attempts() {
 // [covers:watch.exhaust-partial-failure]
 #[test]
 fn watch_exhaust_with_pane_failure_is_partial_failure() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-exhaust-partial");
     let out = cmd
         .env("FAKE_FAIL_DUMP_SCREEN_AFTER", "terminal_1:1")
@@ -1165,7 +1350,9 @@ fn watch_exhaust_with_pane_failure_is_partial_failure() {
 // [covers:watch.exhaust-all-pane-failure-exit5]
 #[test]
 fn watch_exhaust_all_pane_failure_is_exit5() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("watch-exhaust-all");
     let out = cmd
         .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1 terminal_2")
@@ -1204,7 +1391,9 @@ fn watch_exhaust_all_pane_failure_is_exit5() {
 // [covers:attach-detach.attach-non-tty-preflight]
 #[test]
 fn attach_non_tty_is_preflight_exit7_fail_fast() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("attach-nontty");
     let out = cmd
         .args(["--session", "fake-sess", "attach", "--json"])
@@ -1233,7 +1422,9 @@ fn attach_non_tty_is_preflight_exit7_fail_fast() {
 // [covers:attach-detach.detach-argv]
 #[test]
 fn detach_records_session_action_detach_argv() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("detach-argv");
     cmd.args(["--session", "fake-sess", "detach"])
         .assert()
@@ -1273,7 +1464,9 @@ fn detach_records_session_action_detach_argv() {
 // [covers:attach-detach.detach-fail]
 #[test]
 fn detach_fail_is_operation_failed_with_stderr() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // (a) FAKE_DETACH_FAIL: action detachが非zero終了
     let (mut cmd, _) = zelper("detach-fail-generic");
     let out = cmd
@@ -1320,7 +1513,9 @@ fn detach_fail_is_operation_failed_with_stderr() {
 // [covers:attach-detach.add-session-argv-postcondition]
 #[test]
 fn add_session_creates_detached_and_reports() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // human: `created session 'NAME' (detached)` の1行
     let (mut cmd, log) = zelper("add-session-human");
     cmd.env("FAKE_SESSIONS_CREATE", "ok")
@@ -1362,7 +1557,9 @@ fn add_session_creates_detached_and_reports() {
 // [covers:attach-detach.add-session-already-exists]
 #[test]
 fn add_session_existing_running_name_is_preflight() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("add-session-exists");
     let out = cmd
         .env("FAKE_SESSIONS", "work [Created 2m ago] (current)")
@@ -1398,7 +1595,9 @@ fn add_session_existing_running_name_is_preflight() {
 // [covers:attach-detach.add-session-no-session-env]
 #[test]
 fn add_session_works_in_zero_session_environment() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("add-session-zeroenv");
     let out = cmd
         .env("FAKE_SESSIONS_EMPTY", "1")
@@ -1427,7 +1626,9 @@ fn add_session_works_in_zero_session_environment() {
 // [covers:attach-detach.add-session-create-fail-operation-failed]
 #[test]
 fn add_session_create_fail_is_operation_failed() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("add-session-createfail");
     let out = cmd
         .env("FAKE_SESSIONS_CREATE", "already-exists")
@@ -1457,7 +1658,9 @@ fn add_session_create_fail_is_operation_failed() {
 // [covers:attach-detach.add-session-postcondition-missing-verification-failed]
 #[test]
 fn add_session_postcondition_missing_is_verification_failed() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("add-session-postmiss");
     let out = cmd
         .env("FAKE_SESSIONS_CREATE", "ok-mute")
@@ -1487,7 +1690,9 @@ fn add_session_postcondition_missing_is_verification_failed() {
 // [covers:attach-detach.add-session-postcondition-empty-list-verification-failed]
 #[test]
 fn add_session_postcondition_empty_list_is_verification_failed() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("add-session-emptylist");
     let out = cmd
         .env("FAKE_SESSIONS_EMPTY", "1")
@@ -1524,7 +1729,9 @@ const FOUR_TABS_JSON: &str = "[{\"position\":0,\"name\":\"w\",\"active\":true,\"
 // [covers:cli-grammar.move-three-way-exclusive-usage-error]
 #[test]
 fn move_pane_three_way_exclusive_is_usage_error() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // (1) 3指定とも不在
     let (mut cmd, _log) = zelper("move-none");
     cmd.args(["move", "pane", "1"]).assert().failure().code(2);
@@ -1568,7 +1775,9 @@ fn move_pane_three_way_exclusive_is_usage_error() {
 // [covers:cli-grammar.move-native-argv-and-noop-warning]
 #[test]
 fn move_pane_native_argv_json_and_noop_warning() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, log) = zelper("move-left");
     let output = cmd
         .args(["move", "pane", "1", "left", "--json"])
@@ -1613,7 +1822,9 @@ fn move_pane_native_argv_json_and_noop_warning() {
 // [covers:cli-grammar.move-failure-exit5-operation-failed]
 #[test]
 fn move_backend_failure_is_exit5() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("move-fail-pane");
     cmd.env("FAKE_FAIL_MOVE_PANE", "1")
         .args(["move", "pane", "1", "left", "--json"])
@@ -1638,7 +1849,9 @@ fn move_backend_failure_is_exit5() {
 // [covers:cli-grammar.move-tab-swap-argv-sequence]
 #[test]
 fn move_tab_swap_argv_sequence_and_success() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // REVIEW-3指摘4: 同一dir（tag+PID再利用を模した同一setupの再実行）でも
     // setupが ${FAKE_LOG}.tabs を初期化するため、初期状態（FAKE_TABS_JSON）から
     // 再び同じ交換が成立する（前回の交換後状態が読み込まれない）
@@ -1729,7 +1942,9 @@ fn move_tab_swap_argv_sequence_and_success() {
 // [covers:cli-grammar.verb-set-v2-new-verbs-in-help]
 #[test]
 fn help_lists_verb_set_v2_new_verbs() {
-    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (mut cmd, _) = zelper("help-verbs");
     let out = cmd
         .arg("--help")
@@ -1747,4 +1962,533 @@ fn help_lists_verb_set_v2_new_verbs() {
 /// helper: 先頭行のみ（assert文面のコンパクト化用）
 fn first_line(s: &str) -> &str {
     s.lines().next().unwrap_or("")
+}
+
+// ---------------------------------------------------------------------------
+// TASK-65: cli-grammar残excluded 8件の条件化（14条件。設計書§1/§3。
+// FAKE_PANES_JSON系shim拡張〔pane状態管理〕とFAKE_NEW_PANE_TEMPLATEを使用）
+
+/// FAKE_PANES_JSON用のpane object 1件分（tests/fixtures/zellij/panes.jsonと
+/// 同一のfield形式。実zellij出力のfield名であり正規形domain schemaではない）
+fn pane_json(id: u32, title: &str, x: u32, cols: u32, tab_id: u32) -> String {
+    let tab_name = if tab_id == 0 { "Tab #1" } else { "Tab #2" };
+    format!(
+        r#"{{"id": {id}, "is_plugin": false, "is_focused": false, "is_fullscreen": false, "is_floating": false, "is_suppressed": false, "title": "{title}", "exited": false, "exit_status": null, "is_held": false, "pane_x": {x}, "pane_content_x": {x}, "pane_y": 1, "pane_content_y": 1, "pane_rows": 58, "pane_content_rows": 56, "pane_columns": {cols}, "pane_content_columns": {cols}, "cursor_coordinates_in_pane": null, "terminal_command": null, "plugin_url": null, "is_selectable": true, "index_in_pane_group": null, "tab_id": {tab_id}, "tab_position": {tab_id}, "tab_name": "{tab_name}", "pane_command": null, "pane_cwd": null}}"#
+    )
+}
+
+/// FAKE_TABS_JSON用のtab object 1件分（既存使用例FOUR_TABS_JSONと同一field形式）
+fn tab_json(pos: u32, name: &str, tiled: u32, tab_id: u32) -> String {
+    format!(
+        r#"{{"position": {pos}, "name": "{name}", "active": {}, "are_floating_panes_visible": false, "selectable_tiled_panes_count": {tiled}, "selectable_floating_panes_count": 0, "tab_id": {tab_id}}}"#,
+        pos == 0
+    )
+}
+
+/// shimのnew-pane handlerが状態fileへappendする1 pane object JSON
+/// （@ID@ = 採番されたid数値placeholder。postconditionの存在確認に必要な
+/// fieldのみでよいがpane_jsonと同一形式で与える）
+const FAKE_NEW_PANE_TEMPLATE: &str = r#"{"id": @ID@, "is_plugin": false, "is_focused": false, "is_fullscreen": false, "is_floating": false, "is_suppressed": false, "title": "new-pane", "exited": false, "exit_status": null, "is_held": false, "pane_x": 150, "pane_content_x": 151, "pane_y": 1, "pane_content_y": 1, "pane_rows": 58, "pane_content_rows": 56, "pane_columns": 50, "pane_content_columns": 50, "cursor_coordinates_in_pane": null, "terminal_command": null, "plugin_url": null, "is_selectable": true, "index_in_pane_group": null, "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1", "pane_command": null, "pane_cwd": null}"#;
+
+/// zellij不在実path: PATHにzellij（shim含む）が無ければ操作系verbは
+/// ZellijUnavailable（exit 4）。assert_cmdはcargo_binの絶対pathでzelper自身を
+/// 起動するため、PATHを空dirへ差し替えてもzelperの起動には影響しない
+// [covers:cli-grammar.zellij-unavailable-real-path-exit4]
+#[test]
+fn zellij_unavailable_real_path_exit4() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let empty = std::env::temp_dir().join(format!("zelper-empty-path-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).unwrap();
+    let mut cmd = Command::cargo_bin("zelper").unwrap();
+    cmd.env("PATH", &empty)
+        .env_remove("ZELLIJ_SESSION_NAME")
+        .args(["read", "1"])
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicates::str::contains(
+            "zelper: zellij executable not found in PATH",
+        ));
+}
+
+/// PANESPEC plugin_N受理の正例: 既定fixtureのplugin_0（tab bar）を対象に
+/// readが成立し、dump-screen -p plugin_0として発行される
+// [covers:cli-grammar.plugin-pane-spec-read-positive]
+#[test]
+fn read_plugin_pane_spec_positive() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("read-plugin0");
+    let out = cmd
+        .args(["read", "plugin_0", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["data"]["results"][0]["target"], "plugin_0");
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session fake-sess action dump-screen -p plugin_0"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// DD-1.6非例の重複option: 同一flagの重複はclapの重複拒否でusage error
+// [covers:cli-grammar.duplicate-flag-is-usage-error]
+#[test]
+fn duplicate_flag_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("dup-json");
+    cmd.args(["read", "--json", "--json"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("cannot be used multiple times"));
+}
+
+/// DD-1.6非例「remapへのpathのpositional渡し」の構文段拒否: layout名に'/'を
+/// 含む値はusage error（exit 2）で--pathへの案内を出す（純parse test・backend呼出不発）
+// [covers:cli-grammar.remap-positional-path-is-usage-error]
+#[test]
+fn remap_positional_path_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remap-pospath");
+    cmd.args(["remap", "./three.kdl"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("--path"));
+    // 純parse test: backend呼用は不発（shim非依存）
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.contains("list-panes") || c.contains("dump-layout")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// equalize×grow|shrink混在の拒否: equalize構文へのgrow語混入はPANESPEC検査で・
+/// pane構文への余剰positional（equalize語）はclap unexpected argumentでexit 2
+// [covers:cli-grammar.resize-equalize-grow-mix-is-usage-error]
+#[test]
+fn resize_equalize_grow_mix_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("resize-eq-grow");
+    cmd.args(["resize", "equalize", "grow", "left"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicates::str::contains("invalid pane spec 'grow'"));
+
+    let (mut cmd, _) = zelper("resize-pane-extra");
+    cmd.args(["resize", "pane", "1", "grow", "left", "3", "equalize"])
+        .assert()
+        .failure()
+        .code(2);
+}
+
+/// session解決の--session > env段: 両方指定時は--session優先・--sessionなしは
+/// ZELLIJ_SESSION_NAMEで解決する（解決名はbackend argvの--session接頭で観測）
+// [covers:cli-grammar.session-flag-priority-and-env-resolution]
+#[test]
+fn session_flag_priority_and_env_resolution() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let sessions = "other-sess [Created 1m ago] (current)\nenv-sess [Created 2m ago]";
+    // (i) 両方指定: --sessionがenvに優先
+    let (mut cmd, log) = zelper("sess-flag-prio");
+    cmd.env("FAKE_SESSIONS", sessions)
+        .env("ZELLIJ_SESSION_NAME", "env-sess")
+        .args(["--session", "other-sess", "read", "1"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c.starts_with("--session other-sess action ")),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) --sessionなし: env解決（shimのsession guardのためenv-sessをFAKE_SESSIONSへ含む）
+    let (mut cmd, log) = zelper("sess-env-resolve");
+    cmd.env("FAKE_SESSIONS", sessions)
+        .env("ZELLIJ_SESSION_NAME", "env-sess")
+        .args(["read", "1"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c.starts_with("--session env-sess action ")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// session解決のerror段: 実行中複数はAmbiguousTarget（候補列出）・EXITEDのみ
+/// （実行中0件）はNoTarget。いずれもexit 3
+// [covers:cli-grammar.session-multiple-and-none-running-error]
+#[test]
+fn session_multiple_and_none_running_error() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    // (i) 実行中2件
+    let (mut cmd, _) = zelper("sess-two-live");
+    cmd.env(
+        "FAKE_SESSIONS",
+        "live-a [Created 1m ago] (current)\nlive-b [Created 2m ago]",
+    )
+    .args(["read", "1"])
+    .assert()
+    .failure()
+    .code(3)
+    .stderr(
+        predicates::str::contains("multiple zellij sessions running")
+            .and(predicates::str::contains("candidates: live-a, live-b")),
+    );
+
+    // (ii) EXITEDのみ（list-sessions成功・実行中0件）
+    let (mut cmd, _) = zelper("sess-none-live");
+    cmd.env(
+        "FAKE_SESSIONS",
+        "dead-a [Created 2h ago] (EXITED - attach to resurrect)",
+    )
+    .args(["read", "1"])
+    .assert()
+    .failure()
+    .code(3)
+    .stderr(predicates::str::contains("no running zellij session found"));
+}
+
+/// rename verbのCLI parse表面: DD-1.6の例形式がrename-pane -p / rename-tab-by-id
+/// argvとして発行され、shim状態のtitle/name書換でpostconditionを通過してexit 0
+// [covers:cli-grammar.rename-parse-emits-typed-argv]
+#[test]
+fn rename_parse_emits_typed_argv() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    // (i) pane: FAKE_PANES_JSONのtitle書換状態管理でpostcondition通過
+    let (mut cmd, log) = zelper("rename-pane-argv");
+    cmd.env(
+        "FAKE_PANES_JSON",
+        format!("[{}]", pane_json(1, "agent-a", 0, 100, 0)),
+    )
+    .args(["rename", "pane", "terminal_1", "worker-1"])
+    .assert()
+    .success()
+    .stdout("renamed pane terminal_1 -> worker-1\n");
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session fake-sess action rename-pane -p terminal_1 worker-1"),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) tab: FAKE_TABS_JSONのname書換状態管理でpostcondition通過
+    let (mut cmd, log) = zelper("rename-tab-argv");
+    cmd.env(
+        "FAKE_TABS_JSON",
+        format!("[{}]", tab_json(0, "Tab #1", 2, 0)),
+    )
+    .args(["rename", "tab", "0", "agents"])
+    .assert()
+    .success()
+    .stdout("renamed tab 0 -> agents\n");
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session fake-sess action rename-tab-by-id 0 agents"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// resize verbのCLI parse表面: pane構文は幾何不変shimでno-op 2連続打切り
+/// （argv 2回・warning・0 step適用）。equalize（PANESPEC形式）は静的幾何の
+/// no-progress打切りでincrease/decrease right各2回の計4回
+// [covers:cli-grammar.resize-parse-emits-typed-argv]
+#[test]
+fn resize_parse_emits_typed_argv() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    // (i) pane構文（既定fixture・幾何不変）
+    let (mut cmd, log) = zelper("resize-pane-argv");
+    let output = cmd
+        .args(["resize", "pane", "1", "grow", "left", "3"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let resize_calls: Vec<String> = calls(&log)
+        .into_iter()
+        .filter(|c| c.contains(" action resize "))
+        .collect();
+    assert_eq!(
+        resize_calls,
+        vec![
+            "--session fake-sess action resize -p terminal_1 increase left",
+            "--session fake-sess action resize -p terminal_1 increase left",
+        ],
+        "no-op 2連続打切り: {resize_calls:?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("warning"), "stderr: {stderr}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("0 step(s) applied"), "stdout: {stdout}");
+
+    // (ii) equalize: 同一row・cols=10/30の2 pane（目標20との差で双方振動打切り）
+    let (mut cmd, log) = zelper("resize-equalize-argv");
+    let output = cmd
+        .env(
+            "FAKE_PANES_JSON",
+            format!(
+                "[{},{}]",
+                pane_json(1, "agent-a", 0, 10, 0),
+                pane_json(2, "agent-b", 10, 30, 0)
+            ),
+        )
+        .args(["resize", "equalize", "1", "2"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let argv: Vec<String> = calls(&log)
+        .iter()
+        .filter(|c| c.contains(" action resize "))
+        .map(|c| c.rsplit("action ").next().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        argv,
+        vec![
+            "resize -p terminal_1 increase right",
+            "resize -p terminal_1 increase right",
+            "resize -p terminal_2 decrease right",
+            "resize -p terminal_2 decrease right",
+        ],
+        "静的幾何のno-progress打切り: {argv:?}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("approximate"), "stdout: {stdout}");
+}
+
+/// add pane verbのCLI parse表面: --count 2はnew-pane --tab-id 0を2回発行し、
+/// shimの採番応答（terminal_3/4）とpostcondition存在確認を通過してexit 0
+// [covers:cli-grammar.add-parse-emits-typed-argv]
+#[test]
+fn add_parse_emits_typed_argv() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("add-pane-argv");
+    cmd.env(
+        "FAKE_TABS_JSON",
+        format!("[{}]", tab_json(0, "Tab #1", 2, 0)),
+    )
+    .env(
+        "FAKE_PANES_JSON",
+        format!(
+            "[{},{}]",
+            pane_json(1, "agent-a", 0, 50, 0),
+            pane_json(2, "agent-b", 50, 50, 0)
+        ),
+    )
+    .env("FAKE_NEW_PANE_TEMPLATE", FAKE_NEW_PANE_TEMPLATE)
+    .args(["add", "pane", "--count", "2", "--tab", "0"])
+    .assert()
+    .success()
+    .stdout("created pane terminal_3\ncreated pane terminal_4\n");
+    let new_panes: Vec<String> = calls(&log)
+        .into_iter()
+        .filter(|c| c.ends_with("action new-pane --tab-id 0"))
+        .collect();
+    assert_eq!(new_panes.len(), 2, "calls: {:?}", calls(&log));
+}
+
+/// remove verbのCLI parse表面: pane削除はclose-pane -p argvを発行し行除去で
+/// postcondition通過。tab --empty --dry-runは空tab（tab1）のみplan出力し
+/// close-tab argvは不発
+// [covers:cli-grammar.remove-parse-emits-typed-argv]
+#[test]
+fn remove_parse_emits_typed_argv() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    // (i) pane: FAKE_PANES_JSONの行除去状態管理でpostcondition通過
+    let (mut cmd, log) = zelper("remove-pane-argv");
+    cmd.env(
+        "FAKE_PANES_JSON",
+        format!("[{}]", pane_json(1, "agent-a", 0, 100, 0)),
+    )
+    .args(["remove", "pane", "1", "--yes"])
+    .assert()
+    .success()
+    .stdout("removed pane terminal_1\n");
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session fake-sess action close-pane -p terminal_1"),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) tab --empty --dry-run: tab0=非空（tiled 2）・tab1=空（tiled 0）
+    let (mut cmd, log) = zelper("remove-tab-empty-plan");
+    cmd.env(
+        "FAKE_TABS_JSON",
+        format!(
+            "[{},{}]",
+            tab_json(0, "work", 2, 0),
+            tab_json(1, "empty", 0, 1)
+        ),
+    )
+    .args(["remove", "tab", "--empty", "--dry-run"])
+    .assert()
+    .success()
+    .stdout("[plan] close tab 1\n");
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("close-tab")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// --tab×--all併合の正例（--tab内のall）: tab 1のterminal_3/4のみが対象となり、
+/// --all単独なら4件となる構成で併合絞り込みを区別する
+// [covers:cli-grammar.tab-and-all-filter-merge-positive]
+#[test]
+fn tab_and_all_filter_merge_positive() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("read-tab1-all");
+    let out = cmd
+        .env(
+            "FAKE_TABS_JSON",
+            format!(
+                "[{},{}]",
+                tab_json(0, "work", 2, 0),
+                tab_json(1, "agents", 2, 1)
+            ),
+        )
+        .env(
+            "FAKE_PANES_JSON",
+            format!(
+                "[{},{},{},{}]",
+                pane_json(1, "agent-a", 0, 50, 0),
+                pane_json(2, "agent-b", 50, 50, 0),
+                pane_json(3, "agent-c", 0, 50, 1),
+                pane_json(4, "agent-d", 50, 50, 1)
+            ),
+        )
+        .args(["read", "--tab", "1", "--all", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let targets: Vec<&str> = v["data"]["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(targets, vec!["terminal_3", "terminal_4"]);
+    let dumps: Vec<String> = calls(&log)
+        .into_iter()
+        .filter(|c| c.contains(" action dump-screen "))
+        .collect();
+    assert_eq!(dumps.len(), 2, "calls: {dumps:?}");
+    assert!(
+        dumps
+            .iter()
+            .all(|c| c.ends_with("-p terminal_3") || c.ends_with("-p terminal_4")),
+        "calls: {dumps:?}"
+    );
+}
+
+/// --dry-run×--yes併用の正例: 併用は可で--yesは無視され、注意行（stderr）を
+/// 出力する。dry-run優先でclose-paneは不発・plan出力で終わる
+// [covers:cli-grammar.dry-run-with-yes-note-output]
+#[test]
+fn dry_run_with_yes_note_output() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-dryrun-yes");
+    let output = cmd
+        .args(["remove", "pane", "1", "--yes", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("zelper: note: --yes is ignored when --dry-run is given"),
+        "stderr: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[plan] close pane terminal_1"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("close-pane")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// completionのshell種別: zsh/fishがbashと同様に空でないscriptを出力し内容は
+/// 種別毎に相異する。非対応shell名（tcsh）はclap ValueEnum拒否でexit 2
+// [covers:cli-grammar.completion-shell-variants]
+#[test]
+fn completion_shell_variants() {
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let get = |tag: &str, shell: &str| -> String {
+        let (mut cmd, _) = zelper(tag);
+        let out = cmd
+            .args(["completion", shell])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(out).unwrap()
+    };
+    let zsh = get("completion-zsh", "zsh");
+    let fish = get("completion-fish", "fish");
+    let bash = get("completion-bash2", "bash");
+    for (name, s) in [("zsh", &zsh), ("fish", &fish)] {
+        assert!(s.contains("zelper"), "{name}: {}", first_line(s));
+        assert!(s.len() > 100, "{name}: {} bytes", s.len());
+    }
+    assert_ne!(zsh, fish);
+    assert_ne!(zsh, bash);
+    assert_ne!(fish, bash);
+
+    let (mut cmd, _) = zelper("completion-tcsh");
+    cmd.args(["completion", "tcsh"]).assert().failure().code(2);
 }
