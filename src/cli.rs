@@ -83,6 +83,9 @@ pub enum Verb {
     /// 既存paneをlayoutに再配置（process保持・全pane対象）
     Remap {
         /// layout名（layout_dir解決。--path/--inlineと排他）
+        // '/'を含む値はlayout_dir直下のfile stemとして不成立なため構文段（exit 2）で
+        // 拒否し--pathへの案内を出す（DD-1.6非例「remap ./three.kdl」の意図。TASK-65）
+        #[arg(value_parser = parse_layout_name)]
         layout: Option<String>,
         #[arg(long, conflicts_with_all = ["layout", "inline"])]
         path: Option<std::path::PathBuf>,
@@ -363,4 +366,17 @@ pub struct FilterArgs {
     pub cwd: Option<String>,
     #[arg(long)]
     pub all: bool,
+}
+
+/// remapのpositional layout名検証: layout名はlayout_dir直下の平坦なfile stemであり
+/// '/'を含む値はpath誤渡しとみなす（要件2.9が排他（併用時exit 2）を要求するのに対し、
+/// 単独positional pathの構文段拒否はDD-1.6非例の意図を実装側で完結させる設計裁量）
+fn parse_layout_name(s: &str) -> Result<String, String> {
+    if s.contains('/') {
+        Err(format!(
+            "invalid layout name '{s}': layout names are looked up under the layout dir; use --path for a file path"
+        ))
+    } else {
+        Ok(s.to_string())
+    }
 }

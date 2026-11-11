@@ -4,11 +4,11 @@
 feature = "cli-grammar"
 source_file = "src/cli.rs"
 verified = true
-verified_at = "2026-09-26"
+verified_at = "2026-11-11"
 verified_by = "claude"
 test_command = "cargo test --test cli_list_read_send"
-source_hash = "f46ee2346252ddd4d6db9ef24f3958fead08eece"
-note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象"
+source_hash = "e7707d6ceed482e9dff3fb5ead235a05dfe14661"
+note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）・Remap::layoutへvalue_parser適用（remap-positional-path条件の緑化）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象"
 
 [[condition]]
 id = "cli-grammar.session-auto-resolve-single-live-with-exited"
