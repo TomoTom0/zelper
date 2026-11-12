@@ -48,6 +48,16 @@ pub fn run(
                 }
             } else {
                 println!("NAME\tCREATED\tCURRENT\tPANES");
+                if sessions.is_empty() {
+                    // 0-sessionは空一覧の正常系（TASK-93 D1/D2）: stdout契約は
+                    // headerのみのまま、作成案内をstderrのnote行へ出す（R4慣例。
+                    // NAMEはliteral placeholder。JSON/compactは契約不変のため
+                    // stderr空）
+                    eprintln!(
+                        "zelper: note: no running zellij sessions; \
+                         create one with 'zelper add session NAME'"
+                    );
+                }
                 for s in &sessions {
                     // 他sessionのlist-tabs失敗（実行中に消えた等）は一覧を落とさない
                     let panes = backend

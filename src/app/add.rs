@@ -147,10 +147,10 @@ pub fn run_tab(
 pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Result<(), ZelperError> {
     // 事前確認: 同名running sessionの存在はPreflightでfail-fast拒否する
     // （zellijのrc=1「Session already exists」を待たない）。EXITED行はrunningと
-    // みなさない（EXITED同名はzellijへ委ねる）。0-session環境ではlist-sessions
-    // 自体がrc=1で失敗する（M5 (0)実測）ため、その失敗は「0件」として扱い作成へ
-    // 進む——同名衝突はzellij本体のattach -bがrc=1で拒むため安全側
-    let sessions = backend.list_sessions().unwrap_or_default();
+    // みなさない（EXITED同名はzellijへ委ねる）。一覧取得の失敗は0件へ丸めず
+    // 元class/exitのまま伝播する（TASK-93 D5: 従来のrc=1一律0件扱い〔F7〕を
+    // backendの0件decode〔D1〕で解消し、真のbackend障害を表面化させる）
+    let sessions = backend.list_sessions()?;
     if sessions.iter().any(|s| !s.exited && s.name == name) {
         return Err(ZelperError::new(
             ErrorClass::Preflight,
@@ -160,11 +160,17 @@ pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Resul
     backend.create_session_detached(name)?;
     // postcondition: 作成後のlist_sessionsにNAMEがrunning出現（DD-11 addの存在
     // 確認規則に準拠。作成成否をexit codeのみで信用しない）。0-session環境の
-    // list-sessions rc=1（No active zellij sessions found.）も事前確認と同一に
-    // 「0件」として扱う（REVIEW-2指摘5: 作成rc=0かつ一覧0件はpostcondition不在
-    // としてVerificationFailedへ分類する。一般backend障害との区別に使える情報が
-    // error文面に無いため rc=1 は一律0件扱いとする）
-    let sessions = backend.list_sessions().unwrap_or_default();
+    // 作成直後はbackendの0件decode（D1）によりOk(空一覧)が返るため、作成rc=0
+    // かつ一覧0件はpostcondition不在としてVerificationFailedへ分類される
+    // （REVIEW-2指摘5）。事後確認の失敗は作成呼出（attach -b）が成功済みの
+    // 可能性があるため、元class/exitを保持したままmessageへ文脈を付与する
+    // （D5: created session 'NAME' but failed to confirm: <元message>）
+    let sessions = backend.list_sessions().map_err(|e| {
+        ZelperError::new(
+            e.class().clone(),
+            format!("created session '{name}' but failed to confirm: {}", e.message()),
+        )
+    })?;
     if sessions.iter().any(|s| !s.exited && s.name == name) {
         println!("{}", session_report(name, json));
         Ok(())

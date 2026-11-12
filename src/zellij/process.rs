@@ -37,6 +37,12 @@ pub struct ZellijCliBackend {
 
 const DEFAULT_TIMEOUT_SECS: u64 = 10;
 
+/// list-sessionsの0件応答marker（TASK-93 D1・DD-3.1追記の例外）: zellij 0.44.3は
+/// session 0個で rc=1 + stdout空 + stderrにこの文面（trim後完全一致・末尾ピリオド
+/// 込み。TASK-92 S0実測）を返す。list_sessionsのみがこの既知の空応答をOk(空一覧)
+/// へdecodeする（受理zellijは0.44.x固定〔check_capability〕のため文面は確定）
+const NO_ACTIVE_SESSIONS_MARKER: &str = "No active zellij sessions found.";
+
 impl ZellijCliBackend {
     pub fn new(session: impl Into<String>) -> Self {
         ZellijCliBackend {
@@ -164,18 +170,23 @@ impl ZellijCliBackend {
     }
 
     /// 生のzellij呼び出し（list-sessions等のaction外コマンド用）。
-    /// stdout/stderrは専用threadで読み取り、pipe buffer満杯によるdeadlockを防ぐ。
     ///
-    /// 成功判定は「終了code 0 かつ stderr空」（TASK-90・DD-3.1）: rc=0でもstderr
-    /// 非空ならOperationFailedへ変換する。action系は対象session不在+他session生存時に
-    /// rc=0 + stdout（稼働session一覧）+ stderr（Session not found）で応答する
-    /// （実測52action・tmp/tasks/tm-90/）ため、rcのみの判定は書き込み系の誤成功・
-    /// read系の不正確なparse errorになる。正当系27測定（list/read/dump-screen/
-    /// 書き込み系12種・plugin稼働構成含む）でrc=0+stderr非空は皆無のため、stderr非空
-    /// は正当系に現れない。これはstderr内容によるclass切替ではなく、非zero終了と
-    /// 同一class（OperationFailed）での失敗判定の追加。この場合のstdoutは破棄する。
+    /// 実行部（spawn・pipe並行読取・timeout・kill-wait）はrun_capture、成否判定は
+    /// classify_runへ分離している（TASK-93 D1: list_sessionsの0件decodeがrun_capture
+    /// の生応答を必要とするため）。run()は両者の合成であり、挙動は分離前と不変。
     /// run_interactive（attach。対話系）は本判定の対象外
     fn run(&self, args: &[String]) -> Result<String, ZelperError> {
+        let (status, stdout, stderr) = self.run_capture(args)?;
+        Self::classify_run(status, &stdout, &stderr)
+    }
+
+    /// run()の実行部（TASK-93 D1で抽出）: stdout/stderrは専用threadで読み取り、
+    /// pipe buffer満杯によるdeadlockを防ぐ。成否判定は行わずstatus・stdout・stderr
+    /// を生で返す。timeout・spawn失敗はこの段階でErrになる（decode対象外）
+    fn run_capture(
+        &self,
+        args: &[String],
+    ) -> Result<(std::process::ExitStatus, String, String), ZelperError> {
         let mut cmd = Command::new(&self.program);
         cmd.args(args)
             .stdin(Stdio::null())
@@ -224,8 +235,27 @@ impl ZellijCliBackend {
 
         let out = t_out.join().unwrap_or_default();
         let err = t_err.join().unwrap_or_default();
-        let stdout = String::from_utf8_lossy(&out).into_owned();
-        let stderr = String::from_utf8_lossy(&err).into_owned();
+        Ok((
+            status,
+            String::from_utf8_lossy(&out).into_owned(),
+            String::from_utf8_lossy(&err).into_owned(),
+        ))
+    }
+
+    /// 成功判定は「終了code 0 かつ stderr空」（TASK-90・DD-3.1）: rc=0でもstderr
+    /// 非空ならOperationFailedへ変換する。action系は対象session不在+他session生存時に
+    /// rc=0 + stdout（稼働session一覧）+ stderr（Session not found）で応答する
+    /// （実測52action・tmp/tasks/tm-90/）ため、rcのみの判定は書き込み系の誤成功・
+    /// read系の不正確なparse errorになる。正当系27測定（list/read/dump-screen/
+    /// 書き込み系12種・plugin稼働構成含む）でrc=0+stderr非空は皆無のため、stderr非空
+    /// は正当系に現れない。これはstderr内容によるclass切替ではなく、非zero終了と
+    /// 同一class（OperationFailed）での失敗判定の追加。この場合のstdoutは破棄する
+    /// （唯一の例外はlist_sessionsの0件decode。DD-3.1追記・TASK-93 D1）
+    fn classify_run(
+        status: std::process::ExitStatus,
+        stdout: &str,
+        stderr: &str,
+    ) -> Result<String, ZelperError> {
         if !status.success() {
             Err(ZelperError::new(
                 ErrorClass::OperationFailed,
@@ -242,7 +272,7 @@ impl ZellijCliBackend {
                 ),
             ))
         } else {
-            Ok(stdout)
+            Ok(stdout.to_string())
         }
     }
 }
@@ -252,8 +282,26 @@ impl ZellijBackend for ZellijCliBackend {
         self.run(&["--version".to_string()])
     }
 
+    /// zellij list-sessions のtyped取得。zellij 0.44.3はsession 0個で rc=1 +
+    /// stdout空 + stderr「No active zellij sessions found.」（trim後完全一致）の
+    /// 既知の空応答を返す（TASK-92 S0実測）ため、この条件のみ一般の成否判定
+    /// （classify_run）より前にOk(空一覧)へdecodeする（TASK-93 D1・DD-3.1追記の
+    /// 例外。0件は契約上の正常値）。条件を満たさないrc=1（別文面・marker+追加行
+    /// 混入・stdout非空）・rc≠1は従来どおりclassify_run経由のOperationFailed
+    /// （fail-safe: 不明な失敗を空一覧へ黙って変換しない）。既知応答の正常系
+    /// decodeでありerror class間の切替ではないため、R1（stderr文面によるclass
+    /// 切替禁止）は維持される。timeout・spawn失敗はrun_captureのErrとして
+    /// decode対象外
     fn list_sessions(&self) -> Result<Vec<SessionRef>, ZelperError> {
-        let out = self.run(&["list-sessions".to_string(), "-n".to_string()])?;
+        let (status, stdout, stderr) =
+            self.run_capture(&["list-sessions".to_string(), "-n".to_string()])?;
+        if status.code() == Some(1)
+            && stdout.trim().is_empty()
+            && stderr.trim() == NO_ACTIVE_SESSIONS_MARKER
+        {
+            return Ok(Vec::new());
+        }
+        let out = Self::classify_run(status, &stdout, &stderr)?;
         Ok(parser::parse_sessions(&out))
     }
 
@@ -1042,8 +1090,10 @@ exit 0
     /// NoTarget（exit 3）へ切り替えない（stderr内容によるclass切替は設計上存在
     /// しない——backend-process.nonzero-exit-operation-failedと同一規則。
     /// rc=0 + stderr非空の失敗判定〔TASK-90〕もclass切替ではなく、かつ
-    /// run_interactiveはその対象外。--session明示時はresolve_sessionが存在確認
-    /// せずpass-throughのため不在名の検出はzellij側になる）
+    /// run_interactiveはその対象外。--session明示時の不在名はresolve_sessionの
+    /// 事前存在確認〔TASK-93 D3〕でNoTargetとして先に失敗するため、この経路に
+    /// 届くのは有効なsession名での実行時失敗——本testはbackend直接呼び出しで
+    /// 解決経路を通らない）
     // [covers:attach-detach.attach-zellij-fail]
     #[test]
     fn attach_nonzero_exit_becomes_operation_failed_with_stderr() {

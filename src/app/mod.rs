@@ -14,13 +14,45 @@ pub mod watch;
 use crate::error::{ErrorClass, ZelperError};
 use crate::zellij::ZellijBackend;
 
-/// 対象session解決（DD-1.2）: --session > ZELLIJ_SESSION_NAME > 実行中1つ > error
+/// 対象session解決（DD-1.2）: --session（事前存在確認つき） >
+/// ZELLIJ_SESSION_NAME > 実行中1つ > error。
+///
+/// --session明示時はlist_sessions（EXITED含む）に該当nameがあればpass-through
+/// する（EXITEDも「存在」扱い: attachによるresurrectionの正規経路のため。
+/// TASK-93 D3）。なければNoTarget: runningがあればcandidates（running名のみ。
+/// auto解決との対称性）つき、runningなしなら作成案内文面（candidatesなし）。
+/// flag分岐の一覧取得は名前の有無だけで操作を行わないため、有効名は素通しで
+/// 振る舞い不変（list-sessionsが+1回。auto解決経路と同じく解決時にちょうど1回）。
+/// env（ZELLIJ_SESSION_NAME）はzellijが自paneへ注入する値のため検証せず
+/// pass-throughする（list-sessions呼出も行わない）
 pub fn resolve_session(
     flag: Option<&str>,
     backend: &dyn ZellijBackend,
 ) -> Result<String, ZelperError> {
     if let Some(name) = flag {
-        return Ok(name.to_string());
+        let sessions = backend.list_sessions()?;
+        if sessions.iter().any(|s| s.name == name) {
+            return Ok(name.to_string());
+        }
+        let running: Vec<String> = sessions
+            .iter()
+            .filter(|s| !s.exited)
+            .map(|s| s.name.clone())
+            .collect();
+        if running.is_empty() {
+            return Err(ZelperError::new(
+                ErrorClass::NoTarget,
+                format!(
+                    "session '{name}' not found; no running zellij sessions, \
+                     create one with 'zelper add session {name}'"
+                ),
+            ));
+        }
+        return Err(ZelperError::with_candidates(
+            ErrorClass::NoTarget,
+            format!("session '{name}' not found"),
+            running,
+        ));
     }
     if let Ok(name) = std::env::var("ZELLIJ_SESSION_NAME") {
         return Ok(name);
@@ -34,7 +66,8 @@ pub fn resolve_session(
         1 => Ok(sessions[0].name.clone()),
         0 => Err(ZelperError::new(
             ErrorClass::NoTarget,
-            "no running zellij session found; pass --session or create a session first",
+            // 0個の内訳（完全0件/EXITEDのみ）で文面を分けない（D5。NAMEはliteral）
+            "no running zellij session found; create one with 'zelper add session NAME'",
         )),
         _ => {
             let names = sessions.iter().map(|s| s.name.clone()).collect();
