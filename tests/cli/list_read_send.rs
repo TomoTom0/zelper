@@ -26,11 +26,13 @@ echo "$*" >> "$FAKE_LOG"
 if [[ "$1" == "--version" ]]; then echo "zellij 0.44.3"; exit 0; fi
 if [[ "$1" == "list-sessions" ]]; then
   # TASK-89: FAKE_SESSIONS_EMPTY設定時は0-session環境（list-sessions自体がrc=1で
-  # 失敗する実環境・M5 (0)実測）を再現。attach -bでの作成NAME反映
-  # （${FAKE_LOG}.sessions）があれば通常応答へ戻る（FAKE_SESSIONS_CREATE=okの状態管理）
+  # 失敗する実環境・M5 (0)実測）を再現。TASK-93: 0件文面は実zellij（0.44.3）と
+  # 同じstderr出力へ修正（rc=1 + stderr完全一致 + stdout空がbackendの0件decode
+  # 条件。TASK-92 S0実測）。attach -bでの作成NAME反映（${FAKE_LOG}.sessions）が
+  # あれば通常応答へ戻る（FAKE_SESSIONS_CREATE=okの状態管理）
   state="${FAKE_LOG}.sessions"
   if [[ -n "$FAKE_SESSIONS_EMPTY" && ! -s "$state" ]]; then
-    echo "No active zellij sessions found."; exit 1
+    echo "No active zellij sessions found." >&2; exit 1
   fi
   if [[ -n "$FAKE_SESSIONS" ]]; then printf '%s\n' "$FAKE_SESSIONS"; else echo "fake-sess [Created 1m ago] (current)"; fi
   [[ -s "$state" ]] && cat "$state"
@@ -440,6 +442,67 @@ fn list_sessions_works_with_exited_sessions() {
         v["data"]["sessions"][0]["panes_per_tab"],
         serde_json::json!([2])
     );
+}
+
+/// TASK-93 D1/D2: 0-session環境のlist sessionsは空一覧の正常系（exit 0）。
+/// humanはheaderのみ + stderrへ作成案内note 1行（R4慣例。stdout契約は不変）・
+/// JSONはdata.sessions:[]でstderr空・compactはstdout/stderrとも無出力・
+/// --json -c併用はJSON優先（compact無視。compact-names-and-json-precedenceと
+/// 同型の0-session版）
+// [covers:list-display.sessions-zero-session-normal-output]
+#[test]
+fn list_sessions_zero_session_environment_output() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // human: headerのみ。stderrはnote 1行（作成案内）
+    let (mut cmd, _) = zelper("list-sessions-zero");
+    cmd.env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["list", "sessions"])
+        .assert()
+        .code(0)
+        .stdout("NAME\tCREATED\tCURRENT\tPANES\n")
+        .stderr(predicates::str::contains(
+            "zelper: note: no running zellij sessions; create one with 'zelper add session NAME'",
+        ));
+
+    // JSON: envelopeのみ（data.sessions=[]）・stderr空
+    let (mut cmd, _) = zelper("list-sessions-zero-json");
+    let output = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["list", "sessions", "--json"])
+        .assert()
+        .code(0)
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["sessions"], serde_json::json!([]));
+    assert!(output.stderr.is_empty(), "stderr: {:?}", output.stderr);
+
+    // compact: stdout・stderrとも空（machine向け名前列挙契約は不変）
+    let (mut cmd, _) = zelper("list-sessions-zero-compact");
+    let output = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["list", "sessions", "-c"])
+        .assert()
+        .code(0)
+        .get_output()
+        .clone();
+    assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
+    assert!(output.stderr.is_empty(), "stderr: {:?}", output.stderr);
+
+    // --json -c併用: JSON優先でcompact無視
+    let (mut cmd, _) = zelper("list-sessions-zero-json-c");
+    let output = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["list", "sessions", "--json", "-c"])
+        .assert()
+        .code(0)
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["sessions"], serde_json::json!([]));
+    assert!(output.stderr.is_empty(), "stderr: {:?}", output.stderr);
 }
 
 /// list sessions のhuman出力: NAME/CREATED/CURRENT/PANES列（PANESはtab毎pane数の
@@ -1377,13 +1440,13 @@ fn detach_records_session_action_detach_argv() {
     );
 }
 
-/// detachのzellij非zero終了mapping: (a) FAKE_DETACH_FAILによる汎用失敗と
-/// (b) 不在session名（shimはrc=1・Session not found + 稼働session候補表示）の
-/// 双方がOperationFailed（exit 5）へ変換され、messageへstderr本文が埋め込まれる
-/// （候補表示がmessage経由で届く）。Session not foundをNoTargetへ切り替えない
+/// detachの失敗mapping: (a) FAKE_DETACH_FAILによる汎用失敗はOperationFailed
+/// （exit 5）へ変換されmessageへstderr本文が埋め込まれる。(b) 不在session名は
+/// TASK-93 D3の事前存在確認でNoTarget（exit 3・zelper統一文面 + candidates）に
+/// なり、zellij側のrc=1 Session not found応答には届かない（action detach不発）
 // [covers:attach-detach.detach-fail]
 #[test]
-fn detach_fail_is_operation_failed_with_stderr() {
+fn detach_fail_maps_generic_and_missing_name() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // (a) FAKE_DETACH_FAIL: action detachが非zero終了
     let (mut cmd, _) = zelper("detach-fail-generic");
@@ -1404,24 +1467,34 @@ fn detach_fail_is_operation_failed_with_stderr() {
         v["error"]["message"]
     );
 
-    // (b) 不在session名: rc=1・Session not found + 稼働session候補表示
-    let (mut cmd, _) = zelper("detach-fail-notfound");
+    // (b) 不在session名: 事前存在確認でNoTarget（exit 3）+ candidates（running名）
+    let (mut cmd, log) = zelper("detach-fail-notfound");
     let out = cmd
         .args(["--session", "ghost-sess", "detach", "--json"])
         .assert()
         .failure()
-        .code(5)
+        .code(3)
         .get_output()
         .stdout
         .clone();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(v["error"]["class"], "OperationFailed");
+    assert_eq!(v["error"]["class"], "NoTarget");
     let msg = v["error"]["message"].as_str().unwrap();
     assert!(
-        msg.contains("Session 'ghost-sess' not found"),
+        msg.contains("session 'ghost-sess' not found"),
         "message: {msg}"
     );
-    assert!(msg.contains("fake-sess"), "message: {msg}");
+    let cands = v["error"]["candidates"].as_array().unwrap();
+    assert!(
+        cands.iter().any(|c| c == "fake-sess"),
+        "candidates: {cands:?}"
+    );
+    // 事前存在確認で失敗するためaction detach argvは不発
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("action detach")),
+        "calls: {:?}",
+        calls(&log)
+    );
 }
 
 /// add session成功経路: 事前確認（同名なし）→ positional形式 `attach -b NAME`
@@ -1618,6 +1691,59 @@ fn add_session_postcondition_empty_list_is_verification_failed() {
         "calls: {:?}",
         calls(&log)
     );
+}
+
+/// TASK-93 D2/D3: 非TTY attachでも解決（--session不在名の事前存在確認・0件自動
+/// 解決）がTTY検査より先に立つ: 不在名・完全0件（FAKE_SESSIONS_EMPTY）はNoTarget
+/// （exit 3）で失敗しzellij attach呼出は不発。有効名側は従来どおりTTY検査による
+/// Preflight（exit 7）——attach-non-tty-preflight条件が代表
+// [covers:attach-detach.attach-non-tty-resolution-precedes-tty-check]
+#[test]
+fn attach_non_tty_resolution_precedes_tty_check() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) 不在名: NoTarget（exit 3）がTTY検査（exit 7）より先
+    let (mut cmd, log) = zelper("attach-nontty-missing");
+    let out = cmd
+        .args(["--session", "ghost-sess", "attach", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("session 'ghost-sess' not found"),
+        "message: {msg}"
+    );
+    // 解決で失敗するためzellij attach呼出は不発
+    assert!(
+        !calls(&log).iter().any(|c| c.starts_with("attach")),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) 完全0-session環境（flag/envなし自動解決）: NoTarget（exit 3・作成案内）
+    let (mut cmd, _) = zelper("attach-nontty-zero");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["attach", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("no running zellij session found"),
+        "message: {msg}"
+    );
+    assert!(msg.contains("zelper add session"), "message: {msg}");
 }
 
 // ---------------------------------------------------------------------------
@@ -2024,6 +2150,13 @@ fn session_flag_priority_and_env_resolution() {
         "calls: {:?}",
         calls(&log)
     );
+    // TASK-93 D3適用範囲限定の回帰検出: env解決経路では一覧取得（list-sessions）を
+    // 呼ばない（FAKE_LOGにlist-sessions argvなし）
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("list-sessions")),
+        "calls: {:?}",
+        calls(&log)
+    );
 }
 
 /// session解決のerror段: 実行中複数はAmbiguousTarget（候補列出）・EXITEDのみ
@@ -2047,7 +2180,8 @@ fn session_multiple_and_none_running_error() {
             .and(predicates::str::contains("candidates: live-a, live-b")),
     );
 
-    // (ii) EXITEDのみ（list-sessions成功・実行中0件）
+    // (ii) EXITEDのみ（list-sessions成功・実行中0件）: 作成案内つき新文面
+    // （TASK-93 D5: 0個の内訳〔完全0件/EXITEDのみ〕で文面を分けない）
     let (mut cmd, _) = zelper("sess-none-live");
     cmd.env(
         "FAKE_SESSIONS",
@@ -2057,7 +2191,100 @@ fn session_multiple_and_none_running_error() {
     .assert()
     .failure()
     .code(3)
-    .stderr(predicates::str::contains("no running zellij session found"));
+    .stderr(
+        predicates::str::contains("no running zellij session found")
+            .and(predicates::str::contains("zelper add session")),
+    );
+
+    // (iii) 完全0-session環境（FAKE_SESSIONS_EMPTY: list-sessions自体がrc=1 +
+    // stderr 0件文面で応答）もbackend decode（TASK-93 D1）で0件扱いとなり(ii)と
+    // 同じNoTarget（exit 3）になる（従来はOperationFailed exit 5）
+    let (mut cmd, _) = zelper("sess-zero-empty");
+    cmd.env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["read", "1"])
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(
+            predicates::str::contains("no running zellij session found")
+                .and(predicates::str::contains("zelper add session")),
+        );
+}
+
+/// TASK-93 D3: --session不在名の事前存在確認。稼働ありならNoTarget（exit 3）+
+/// candidates（running名一覧）でaction argv不発。完全0-session環境なら作成案内
+/// 文面（candidatesなし）。EXITED名明示は「存在」扱いで解決を通過する
+/// （attachによるresurrectionの正規経路を壊さない。後続action argvが発行される）
+// [covers:cli-grammar.session-flag-missing-name-notarget]
+#[test]
+fn session_flag_missing_name_is_notarget_and_exited_passes() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) 稼働あり + 不在名: exit 3 NoTarget + candidates（running名のみ）
+    let (mut cmd, log) = zelper("sess-flag-missing");
+    let out = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "live-a [Created 1m ago] (current)\nlive-b [Created 2h ago]",
+        )
+        .args(["--session", "ghost", "read", "1", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("session 'ghost' not found"), "message: {msg}");
+    let cands: Vec<&str> = v["error"]["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    assert_eq!(cands, vec!["live-a", "live-b"]);
+    // 事前存在確認で失敗するためaction argvは不発
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.starts_with("--session ghost action")),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) 完全0-session環境 + 不在名: 作成案内文面（candidatesなし）
+    let (mut cmd, _) = zelper("sess-flag-missing-zero");
+    cmd.env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["--session", "ghost", "read", "1"])
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(
+            predicates::str::contains("session 'ghost' not found")
+                .and(predicates::str::contains("no running zellij sessions"))
+                .and(predicates::str::contains(
+                    "create one with 'zelper add session ghost'",
+                )),
+        );
+
+    // (iii) EXITED名明示は存在確認で拒否しない: 解決を通過し後続action argvが
+    // FAKE_LOGに記録される（read成功）
+    let (mut cmd, log) = zelper("sess-flag-exited");
+    cmd.env(
+        "FAKE_SESSIONS",
+        "dead-a [Created 2h ago] (EXITED - attach to resurrect)",
+    )
+    .args(["--session", "dead-a", "read", "1"])
+    .assert()
+    .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session dead-a action dump-screen -p terminal_1"),
+        "calls: {:?}",
+        calls(&log)
+    );
 }
 
 /// rename verbのCLI parse表面: DD-1.6の例形式がrename-pane -p / rename-tab-by-id

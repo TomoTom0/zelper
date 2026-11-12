@@ -755,7 +755,7 @@ mod tests {
     // [covers:backend-process.nonzero-exit-operation-failed]
     #[test]
     fn nonzero_exit_becomes_operation_failed() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let program = setup_fake_zellij(
             "nonzero-exit",
             "#!/usr/bin/env bash\necho \"Failed to load layout: can't find layout default\" >&2\nexit 1\n",
@@ -779,7 +779,7 @@ mod tests {
     // [covers:backend-process.spawn-notfound-zellij-unavailable]
     #[test]
     fn spawn_notfound_becomes_zellij_unavailable() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let missing = std::env::temp_dir().join(format!(
             "zelper-fake-process-notfound-{}-no-such/zellij",
             std::process::id()
@@ -805,7 +805,7 @@ mod tests {
     // [covers:backend-process.spawn-permission-denied-zellij-unavailable]
     #[test]
     fn spawn_permission_denied_becomes_zellij_unavailable() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir =
             std::env::temp_dir().join(format!("zelper-fake-process-noperm-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -832,7 +832,7 @@ mod tests {
     // [covers:backend-process.version-unparseable-unsupported]
     #[test]
     fn version_unparseable_becomes_unsupported() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let program = setup_fake_zellij(
             "version-bad",
             "#!/usr/bin/env bash\necho 'not-a-version'\nexit 0\n",
@@ -858,7 +858,7 @@ mod tests {
     // [covers:backend-process.timeout-operation-failed]
     #[test]
     fn timeout_exceeded_becomes_operation_failed() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let program = setup_fake_zellij("timeout", "#!/usr/bin/env bash\nsleep 5\n");
         let mut backend = ZellijCliBackend::new("s").with_program(program);
         backend.timeout = Duration::from_millis(300);
@@ -883,7 +883,7 @@ mod tests {
     // [covers:backend-process.current-tab-unexpected-output-operation-failed]
     #[test]
     fn current_tab_unexpected_output_becomes_operation_failed() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let script = r#"#!/usr/bin/env bash
 printf '%s\n' '[{"position":0,"name":"Tab #1","active":true,"are_floating_panes_visible":false,"selectable_tiled_panes_count":3,"selectable_floating_panes_count":0,"tab_id":0},{"position":1,"name":"Tab #2","active":false,"are_floating_panes_visible":false,"selectable_tiled_panes_count":2,"selectable_floating_panes_count":0,"tab_id":1}]'
 exit 0
@@ -911,7 +911,7 @@ exit 0
     // [covers:backend-process.focus-pane-id-argv]
     #[test]
     fn focus_pane_id_argv_and_error_mapping() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "zelper-fake-process-focuspane-{}",
             std::process::id()
@@ -957,7 +957,7 @@ exit 0
     // [covers:attach-detach.attach-run-interactive-stdio-inherit-no-timeout]
     #[test]
     fn attach_run_interactive_inherits_stdio_and_skips_timeout() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // (a) stdio inherit検出: 子のfd 0/1/2の参照先を親と比較し報告fileへ書く。
         // あわせてfd 3以上の一覧（target付き）も報告させる
         let dir = std::env::temp_dir().join(format!(
@@ -1047,7 +1047,7 @@ exit 0
     // [covers:attach-detach.attach-zellij-fail]
     #[test]
     fn attach_nonzero_exit_becomes_operation_failed_with_stderr() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let script = "#!/usr/bin/env bash\n\
             echo \"Session 'ghost' not found. The following sessions are active:\" >&2\n\
             echo \"sess-a\" >&2\n\
@@ -1080,7 +1080,7 @@ exit 0
     // [covers:backend-process.rc0-stderr-nonempty-operation-failed]
     #[test]
     fn rc0_with_stderr_becomes_operation_failed() {
-        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap();
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // 対象session不在+他session生存時のaction系実測応答と同形:
         // rc=0 + stdout非空（稼働session一覧）+ stderr非空（Session not found + 候補）
         let script = "#!/usr/bin/env bash\n\
@@ -1115,5 +1115,61 @@ exit 0
         let program = setup_fake_zellij("rc0-silent", "#!/usr/bin/env bash\necho \"ok\"\nexit 0\n");
         let backend = ZellijCliBackend::new("s").with_program(program);
         assert_eq!(backend.run(&["--version".to_string()]).unwrap(), "ok\n");
+    }
+
+    /// TASK-93 D1（DD-3.1追記の例外）: list-sessions の0件応答decode。zellij
+    /// 0.44.3はsession 0個で rc=1 + stderr「No active zellij sessions found.」
+    /// （stdout空）を返す（TASK-92 S0実測）ため、list_sessions のみがこの既知の
+    /// 空応答をOk(空一覧)へdecodeする。decode条件は rc=1 + stdout空 + stderr
+    /// trim後完全一致（末尾ピリオド込み）であり、条件を満たさないrc=1（別文面・
+    /// marker+追加行混入・stdout非空）やrc≠1は従来どおりclassify経由の
+    /// OperationFailed（fail-safe: 不明な失敗を空一覧へ黙って変換しない）。
+    /// timeout・spawn失敗（ZellijUnavailable）はdecode対象外
+    // [covers:backend-process.list-sessions-empty-marker-decode]
+    #[test]
+    fn list_sessions_decodes_empty_marker_and_fails_otherwise() {
+        let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // 正: rc=1 + stderr完全一致 + stdout空 → Ok(空一覧)
+        let program = setup_fake_zellij(
+            "list-zero",
+            "#!/usr/bin/env bash\necho 'No active zellij sessions found.' >&2\nexit 1\n",
+        );
+        let backend = ZellijCliBackend::new("s").with_program(program);
+        assert_eq!(backend.list_sessions().unwrap(), Vec::new());
+
+        // 負: いずれもOperationFailed（decode不成立・fail-safe側へ落ちる）
+        let negatives: &[(&str, &str)] = &[
+            // rc=1 + 別stderr
+            (
+                "list-zero-other",
+                "#!/usr/bin/env bash\necho 'boom' >&2\nexit 1\n",
+            ),
+            // rc=1 + marker文面 + 追加行混入
+            (
+                "list-zero-extra",
+                "#!/usr/bin/env bash\necho 'No active zellij sessions found.' >&2\necho 'another line' >&2\nexit 1\n",
+            ),
+            // rc=1 + stdout非空
+            (
+                "list-zero-stdout",
+                "#!/usr/bin/env bash\necho 'some stdout'\necho 'No active zellij sessions found.' >&2\nexit 1\n",
+            ),
+            // rc≠1（rc=2）+ marker文面
+            (
+                "list-zero-rc2",
+                "#!/usr/bin/env bash\necho 'No active zellij sessions found.' >&2\nexit 2\n",
+            ),
+        ];
+        for (tag, script) in negatives {
+            let program = setup_fake_zellij(tag, script);
+            let backend = ZellijCliBackend::new("s").with_program(program);
+            let err = backend.list_sessions().unwrap_err();
+            assert_eq!(
+                *err.class(),
+                ErrorClass::OperationFailed,
+                "tag {tag}: {}",
+                err.message()
+            );
+        }
     }
 }

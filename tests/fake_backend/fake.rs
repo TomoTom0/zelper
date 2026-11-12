@@ -153,6 +153,10 @@ pub struct FakeBackend {
     /// add session用（TASK-89）: create_session_detachedをOkのままlist-sessions
     /// 状態へ反映しない（rc=0・postcondition不在模擬）
     pub mute_create_session: Cell<bool>,
+    /// add session用（TASK-93）: create_session_detached（attach -b）呼出を1回でも
+    /// 観測した後のlist_sessions呼出をOperationFailedで失敗させる（事前確認は成功・
+    /// 事後確認のみ失敗の系列。fail_opは先頭一致で事前確認側に当たるため専用arm）
+    pub fail_list_sessions_after_create: Cell<bool>,
     /// attach呼出時点のstdout内容（/proc/self/fd/1の読み直し）を記録する注入
     /// （TASK-89 REVIEW-2指摘6: backend復帰前の無出力検証用。test側がfd 1を
     /// 一時fileへredirectした構成でのみ使用する——pipeだと読み取りがblockする
@@ -265,6 +269,7 @@ impl FakeBackend {
             dump_fail_after: RefCell::new(HashMap::new()),
             dump_full_frames: RefCell::new(HashMap::new()),
             mute_create_session: Cell::new(false),
+            fail_list_sessions_after_create: Cell::new(false),
             probe_stdout_on_attach: Cell::new(false),
             stdout_at_attach: RefCell::new(None),
             mute_break_id_nth: Cell::new(None),
@@ -479,6 +484,13 @@ impl FakeBackend {
     #[allow(dead_code)]
     pub fn mute_create_session(&self) {
         self.mute_create_session.set(true);
+    }
+
+    /// add session用（TASK-93）: 事後確認（postcheck）のlist-sessions呼出のみを
+    /// 失敗させる（事前確認は成功・作成呼出は成功済みの系列）
+    #[allow(dead_code)]
+    pub fn fail_list_sessions_after_create(&self) {
+        self.fail_list_sessions_after_create.set(true);
     }
 
     /// attach呼出時点のstdout内容の記録を有効化（TASK-89 REVIEW-2指摘6。
@@ -828,6 +840,19 @@ impl ZellijBackend for FakeBackend {
 
     fn list_sessions(&self) -> Result<Vec<SessionRef>, ZelperError> {
         self.record("list-sessions")?;
+        // TASK-93: 事後確認のみ失敗させる注入（arm後・作成呼出観測後のlist-sessions）
+        if self.fail_list_sessions_after_create.get()
+            && self
+                .calls
+                .borrow()
+                .iter()
+                .any(|c| c.starts_with("attach -b "))
+        {
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                "injected failure at 'list-sessions' (postcheck)".to_string(),
+            ));
+        }
         Ok(self.state.borrow().sessions.clone())
     }
 

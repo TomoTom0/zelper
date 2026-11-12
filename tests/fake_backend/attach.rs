@@ -1,11 +1,13 @@
-// L2: attach / detach（fake backend。attach-detach.tomlのL2層2条件。
-// TASK-89・設計§5.2: TTY検査はrun_attach_innerのtty_ok引数注入）
+// L2: attach / detach / add session一覧取得失敗系（fake backend。attach-detach.toml
+// のL2層条件。TASK-89・設計§5.2: TTY検査はrun_attach_innerのtty_ok引数注入）
 // run_interactive経路（stdio inherit・timeout無効・非zero終了mapping）は
 // src/zellij/process.rs内test・L3（実binary・shim）系はtests/cli/list_read_send.rs
 mod fake;
 use fake::FakeBackend;
+use zelper::app::add::run_session;
 use zelper::app::attach::{detach_report, run_attach_inner, run_detach};
 use zelper::domain::*;
+use zelper::error::ErrorClass;
 
 fn pane(id: u32, title: &str) -> PaneState {
     PaneState {
@@ -171,4 +173,65 @@ fn detach_no_client_is_noop_success() {
     let v: serde_json::Value = serde_json::from_str(&detach_report("work", true)).unwrap();
     assert_eq!(v["ok"], true);
     assert_eq!(v["data"]["session"], "work");
+}
+
+// ---------------------------------------------------------------------------
+// add session: 一覧取得失敗の伝播（TASK-93 D5。fail_op / postcheck armで失敗注入）
+
+/// add sessionの事前一覧取得失敗: list_sessionsの真の失敗（rc=1 marker不一致等）は
+/// 0件へ丸めず元class/exitのまま伝播し、作成呼出（attach -b）は不発になる
+/// （unwrap_or_default妥協〔F7〕の解消）
+// [covers:attach-detach.add-session-precheck-list-failure-propagates]
+#[test]
+fn add_session_precheck_list_failure_propagates() {
+    let b = FakeBackend::new(vec![pane(1, "a")], vec![]);
+    b.inject_failure("list-sessions");
+    let err = run_session(&b, "work", true).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "message: {}",
+        err.message()
+    );
+    assert!(
+        err.message()
+            .contains("injected failure at 'list-sessions'"),
+        "message: {}",
+        err.message()
+    );
+    // 作成呼出（attach -b）は不発
+    assert!(
+        !b.calls().iter().any(|c| c.starts_with("attach -b")),
+        "calls: {:?}",
+        b.calls()
+    );
+}
+
+/// add sessionの事後一覧取得失敗: 作成呼出（attach -b）は成功済みのため、確認失敗は
+/// 元class/exitを保持しつつmessageへ文脈を付与する（D5: created session 'NAME'
+/// but failed to confirm: <元message>）
+// [covers:attach-detach.add-session-postcheck-list-failure-keeps-class]
+#[test]
+fn add_session_postcheck_list_failure_keeps_class_with_context() {
+    let b = FakeBackend::new(vec![pane(1, "a")], vec![]);
+    b.fail_list_sessions_after_create();
+    let err = run_session(&b, "work", true).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "message: {}",
+        err.message()
+    );
+    let msg = err.message();
+    assert!(
+        msg.contains("created session 'work' but failed to confirm"),
+        "message: {msg}"
+    );
+    assert!(msg.contains("injected failure"), "message: {msg}");
+    // 作成呼出自体は成功済み（rc=0・作成NAMEは状態へ反映されている）
+    assert!(
+        b.calls().iter().any(|c| c == "attach -b work"),
+        "calls: {:?}",
+        b.calls()
+    );
 }
