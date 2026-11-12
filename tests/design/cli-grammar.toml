@@ -111,7 +111,7 @@ expect_return = "いずれもexit 2。前者は\"invalid pane spec 'grow'\"（eq
 
 [[condition]]
 id = "cli-grammar.session-flag-priority-and-env-resolution"
-source_lines = "tests/cli/list_read_send.rs:1992"
+source_lines = "tests/cli/list_read_send.rs:1993"
 target_function = "session解決（resolve_session: --session > env）"
 source = "docs/testing/test-plan.md §2.1（session解決: --session > env > 単一session > error（候補列出）の優先順） + docs/design/detailed-design.md DD-1.2（対象session解決の優先順）"
 description = "session解決優先順のうち--session直接指定とZELLIJ_SESSION_NAME環境変数の段: 両方指定時は--sessionが優先され、--sessionなしではenv変数で解決する。解決済みsession名がbackend argvの--session接頭へ現れることで検証する"
@@ -120,7 +120,7 @@ expect_return = "(i) exit 0かつFAKE_LOGのargvが--session other-sess action .
 
 [[condition]]
 id = "cli-grammar.session-multiple-and-none-running-error"
-source_lines = "tests/cli/list_read_send.rs:2030"
+source_lines = "tests/cli/list_read_send.rs:2031"
 target_function = "session解決（複数実行中・実行中0件のerror段）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.2（複数実行中はerror（候補表示）・実行中が無い場合もerror）"
 description = "session解決のerror段: 実行中sessionが複数ならAmbiguousTarget（候補列出）で、EXITEDのみで実行中0件ならNoTargetで失敗する。list-sessions自体がrc=1で失敗する完全0-session環境（FAKE_SESSIONS_EMPTY）はOperationFailed exit 5の別経路であり本条件では扱わない（(ii)はlist-sessions成功・実行中0件の環境でNoTarget段を撃つ）"
@@ -129,7 +129,7 @@ expect_return = "(i) exit 3（AmbiguousTarget）・stderrが\"multiple zellij se
 
 [[condition]]
 id = "cli-grammar.rename-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2064"
+source_lines = "tests/cli/list_read_send.rs:2065"
 target_function = "renameのCLI parse（clap → backend argv・postcondition通過）"
 source = "docs/testing/test-plan.md §2.1（各verbの正常系: DD-1.6の全exampleがparseされ意図するtyped requestになる） + docs/design/detailed-design.md DD-1.6（rename pane 12 worker-1 / rename tab 3 agents） + DD-8（plan: rename-pane -p / rename-tab-by-id・postcondition: title/name反映）"
 description = "rename verbのCLI parse表面: DD-1.6の例形式がtyped request（rename-pane -p / rename-tab-by-id argv）として発行され、shim状態のtitle/name書換によりpostcondition（反映確認）を通過してexit 0する。検証限界: postcondition（title/name反映）はshim状態拡張による模擬であり、実挙動のpostcondition検証はL2（rename.toml）とL4が担う"
@@ -138,7 +138,7 @@ expect_return = "(i) exit 0・FAKE_LOGに--session fake-sess action rename-pane 
 
 [[condition]]
 id = "cli-grammar.resize-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2108"
+source_lines = "tests/cli/list_read_send.rs:2109"
 target_function = "resizeのCLI parse（clap → backend argv・no-op報告契約）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（resize pane 5 grow right 3 / resize equalize --tab 2） + DD-9（resize <increase|decrease> <dir> -p・no-op 2連続打切り+warning・equalizeは近似）"
 description = "resize verbのCLI parse表面: pane構文はresize -p <spec> increase|decrease <dir> argvを発行し、幾何不変のshimではno-op 2連続検出（DD-9のno-op報告契約）でwarning+0 step適用のexit 0になる。equalize（PANESPEC形式）は静的幾何によるno-progress打切りでincrease/decrease argvを発行し、approximate注記を出す。--tab TABSPEC形式のequalizeはresize.toml（L2）の担当のため本条件ではPANESPEC形式のみ"
@@ -147,7 +147,7 @@ expect_return = "(i) exit 0・FAKE_LOGにaction resize -p terminal_1 increase le
 
 [[condition]]
 id = "cli-grammar.add-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2174"
+source_lines = "tests/cli/list_read_send.rs:2175"
 target_function = "add paneのCLI parse（clap → backend argv・postcondition通過）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（add pane --count 2 --tab 4） + DD-11（new-pane --tab-id・postcondition: 作成IDの存在確認）"
 description = "add pane verbのCLI parse表面: --count Nはnew-pane argvをN回発行し（--tab TABSPECは--tab-idへ写像・--name無し）、shimの採番応答（terminal_N）とpostcondition（作成ID存在確認）を通過してexit 0する。検証限界: --cwd/--name連番suffix/-- CMDのoption mapと部分失敗はadd-remove.toml（L2側）が担う"
@@ -156,7 +156,7 @@ expect_return = "exit 0・FAKE_LOGに--session fake-sess action new-pane --tab-i
 
 [[condition]]
 id = "cli-grammar.remove-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2206"
+source_lines = "tests/cli/list_read_send.rs:2207"
 target_function = "removeのCLI parse（close-pane argv・--empty dry-run plan）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（remove tab --empty --dry-run） + DD-11（close-pane -p・close-tab-by-id・postcondition: 消失確認）"
 description = "remove verbのCLI parse表面: pane削除はclose-pane -p <spec> argvを発行し、shim状態の行除去によりpostcondition（消失確認）を通過する。tab --empty --dry-runは空tab（selectable pane 0個のtab）のみを対象にplan出力しclose-tab argvを発行しない。--empty TABSPEC解決・gate・部分失敗はadd-remove.toml（既存L2）が担う"
@@ -165,7 +165,7 @@ expect_return = "(i) exit 0・FAKE_LOGにaction close-pane -p terminal_1・stdou
 
 [[condition]]
 id = "cli-grammar.tab-and-all-filter-merge-positive"
-source_lines = "tests/cli/list_read_send.rs:2251"
+source_lines = "tests/cli/list_read_send.rs:2252"
 target_function = "対象解決のfilter併合（--tab × --all）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--tab（絞り込み）と--allは併合（--tab内のall）） + DD-1.4（--tab SPEC: tab指定・--all: 対象sessionの全selectable terminal pane）"
 description = "DD-1.5併用系の正例: --tabと--allの併合（--tab内のall）。--all単独なら全tab対象となるところを、--tab併合でそのtab内のみへ絞り込む（filter pool = selectable terminal pane → tab絞り込み → --allならname/command/cwd一致を適用しない）"
@@ -174,7 +174,7 @@ expect_return = "exit 0・resultsがterminal_3/terminal_4のみ（--all単独な
 
 [[condition]]
 id = "cli-grammar.dry-run-with-yes-note-output"
-source_lines = "tests/cli/list_read_send.rs:2304"
+source_lines = "tests/cli/list_read_send.rs:2305"
 target_function = "removeの--dry-run×--yes併用（注意行出力・dry-run優先）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--dry-runと--yesの併用は可（--yesは無視される旨を出力）） + MR-30（注意行出力の指摘）"
 description = "--dry-run×--yes併用の正例: 併用は可で--yesは無視され、その旨の注意行（stderr）を出力する。dry-runが優先されbackendのmutating呼出（close-pane）は不発・plan出力で終わる。add-remove.remove-pane-safety-gate（L2）が実行優先を検証済みに対し、本条件はL3の注意行出力・plan出力・非実行を担う"
@@ -183,7 +183,7 @@ expect_return = "exit 0・stderrに\"zelper: note: --yes is ignored when --dry-r
 
 [[condition]]
 id = "cli-grammar.completion-shell-variants"
-source_lines = "tests/cli/list_read_send.rs:2334"
+source_lines = "tests/cli/list_read_send.rs:2335"
 target_function = "completionサブコマンド（shell種別）"
 source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（clap_completeによる動的生成・stdoutへscript出力）"
 description = "completionのshell種別: zsh/fishもbashと同様に空でない補完scriptを出力し、内容はshell種別毎に相異する。非対応shell名（tcsh）はclap ValueEnum拒否でexit 2。検証限界: clap_complete::Shellの既定によりelvish/powershellも受理されるが、DD-1.7が文書化するのはbash|zsh|fishのため本条件では検証対象外"
