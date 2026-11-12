@@ -3,12 +3,12 @@
 [meta]
 feature = "list-display"
 source_file = "src/app/list.rs"
-verified = false
-verified_at = "2026-09-13"
+verified = true
+verified_at = "2026-11-12"
 verified_by = "claude"
 test_command = "cargo test --test cli_list_read_send && cargo test --lib"
-source_hash = "a4bfc373134eba66044b2727f190f94d76759a0a"
-note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。テスト先行のため新条件はfail-first状態（現行実装はlist sessions 0個がexit 5のため赤。既存条件は影響なしで緑）——meta verifiedは一時falseへ。実装・全条件緑化後に検証記録を再設定する"
+source_hash = "36136fdb8593ee86b3e8730f4f1f8691272d4242"
+note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。テスト先行のため新条件はfail-first状態（現行実装はlist sessions 0個がexit 5のため赤。既存条件は影響なしで緑）——（当時記録。TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕。verified/verified_at/verified_by/source_hashはTASK-93実装に対する最終検証記録へ更新）"
 
 [[condition]]
 id = "list-display.sessions-and-tabs-basic-output"
