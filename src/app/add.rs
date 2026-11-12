@@ -168,7 +168,10 @@ pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Resul
     let sessions = backend.list_sessions().map_err(|e| {
         ZelperError::new(
             e.class().clone(),
-            format!("created session '{name}' but failed to confirm: {}", e.message()),
+            format!(
+                "created session '{name}' but failed to confirm: {}",
+                e.message()
+            ),
         )
     })?;
     if sessions.iter().any(|s| !s.exited && s.name == name) {

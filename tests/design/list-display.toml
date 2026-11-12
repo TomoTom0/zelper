@@ -102,7 +102,7 @@ expect_return_shape = "soloのみの1行（header無し）"
 
 [[condition]]
 id = "list-display.human-age-granularity-boundaries"
-source_lines = "src/app/list.rs:304"
+source_lines = "src/app/list.rs:314"
 target_function = "human_age"
 source = "docs/design/detailed-design.md DD-4.1（list layouts: MODIFIEDは3d 5h ago相当の相対表記。file stat由来） + human_age粒度境界の要件本体test（lib内#[cfg(test)]で検証）"
 description = "MODIFIED相対表記（human_age）の粒度境界: d/h/m/s各粒度の切替わり境界と未来時刻のsaturating扱い（負経過を表示しない）。private fnのためlib内testで検証"
@@ -111,7 +111,7 @@ expect_return = "0s ago / 1s ago / 1m 0s ago / 1h 0m ago / 1d 0h ago / 0s ago"
 
 [[condition]]
 id = "list-display.panes-summary-elision-and-floating-exclusion"
-source_lines = "src/app/list.rs:321"
+source_lines = "src/app/list.rs:331"
 target_function = "summarize_panes"
 source = "docs/design/detailed-design.md DD-4.1（PANESはtab毎pane数の+連結。5tab目以降は...省略） + floating除外と5tab超省略の純粋関数test"
 description = "session概要PANES連結（summarize_panes純粋関数）の規則: tiled数のみ連結（floating除外）・4tab以下は全件・5tab超は先頭4件+...。lib内testで直接検証"
@@ -120,7 +120,7 @@ expect_return = "7+7+6 / 2+2（floating 1が除外される） / 1+2+3+4+..."
 
 [[condition]]
 id = "list-display.home-substitution-boundaries"
-source_lines = "src/app/list.rs:349"
+source_lines = "src/app/list.rs:359"
 target_function = "short_path_with"
 source = "docs/design/detailed-design.md DD-4.1（短縮cwd: HOME prefixを~置換） + short_pathの境界case回帰test（prefix類似dir・HOME末尾/正規化）"
 description = "短縮cwd（short_path_with純粋関数）の境界: HOME配下は~置換、HOME自身は~、prefix類似dir（/home/tomox・/home/tomo2）は置換しない、HOME外・HOME未設定相当（空）はそのまま、HOME末尾/は正規化して一致。lib内testで直接検証"
