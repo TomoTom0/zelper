@@ -2212,19 +2212,21 @@ fn session_multiple_and_none_running_error() {
 }
 
 /// TASK-93 D3: --session不在名の事前存在確認。稼働ありならNoTarget（exit 3）+
-/// candidates（running名一覧）でaction argv不発。完全0-session環境なら作成案内
+/// candidates（running名一覧。EXITED行は候補から除外）でaction argv不発。完全0-session環境なら作成案内
 /// 文面（candidatesなし）。EXITED名明示は「存在」扱いで解決を通過する
 /// （attachによるresurrectionの正規経路を壊さない。後続action argvが発行される）
 // [covers:cli-grammar.session-flag-missing-name-notarget]
 #[test]
 fn session_flag_missing_name_is_notarget_and_exited_passes() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    // (i) 稼働あり + 不在名: exit 3 NoTarget + candidates（running名のみ）
+    // (i) 稼働あり + 不在名: exit 3 NoTarget + candidates（running名のみ。EXITED行
+    // dead-xは候補から除外される——TASK-93レビュー指摘2）
     let (mut cmd, log) = zelper("sess-flag-missing");
     let out = cmd
         .env(
             "FAKE_SESSIONS",
-            "live-a [Created 1m ago] (current)\nlive-b [Created 2h ago]",
+            "live-a [Created 1m ago] (current)\nlive-b [Created 2h ago]\n\
+             dead-x [Created 3h ago] (EXITED - attach to resurrect)",
         )
         .args(["--session", "ghost", "read", "1", "--json"])
         .assert()

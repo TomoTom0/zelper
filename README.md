@@ -120,8 +120,8 @@ zelper docs readme | llm usage|skill|snippet
 
 ## session lifecycle（attach / detach / add session）
 
-- `attach` は対話clientの起動です。stdin・stdoutの両方がTTYであることを要求し、非TTY（script・agent実行等）ではzellijを起動する前にexit 7で拒否します（非TTYの素attachはzellij側でpanicするため）。対話終了後に `attach session 'NAME' ended` の1行（`--json` は `data.session`）を報告します。不在session名はzellij側の失敗（Session not found + 稼働session候補表示）をmessageに載せてexit 5になります
-- `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。複数clientがattachしている場合、zellijの仕様としてdetachは最新のattach clientのみ切断し、先発clientは画面凍結のまま残留します（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しません）
+- `attach` は対話clientの起動です。stdin・stdoutの両方がTTYであることを要求し、非TTY（script・agent実行等）ではzellijを起動する前にexit 7で拒否します（非TTYの素attachはzellij側でpanicするため。`--session` 不在名・session 0個のexit 3〔NoTarget〕はこのTTY検査より先に立ちます）。対話終了後に `attach session 'NAME' ended` の1行（`--json` は `data.session`）を報告します。zellijの非zero終了はexit 5になります
+- `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。不在session名はexit 3（NoTarget・候補表示付き）で拒否します。複数clientがattachしている場合、zellijの仕様としてdetachは最新のattach clientのみ切断し、先発clientは画面凍結のまま残留します（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しません）
 - `add session NAME` はdetached sessionを作成します（`zellij attach -b NAME` 相当）。sessionが1つも存在しない環境でも動作し、同名running sessionが既にあれば作成前にexit 7で拒否、作成後のlist-sessions出現を検証してから `created session 'NAME' (detached)` を報告します。作成直後は空session（tab 1・pane 0件）で、最初のattach時にdefault layoutが具現化します。layoutを適用したい場合は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行います
 
 ## moveの意味論（単一対象の移動・交換）
@@ -157,7 +157,7 @@ zelper docs readme | llm usage|skill|snippet
 - remapのslot割当は、group（instance/tab）所属とrun（command+args+cwd）が一意なpaneのslot対応に限り決定的。同一runの複数pane間・複数shell pane間のslot順は保証しません
 - `terminal_command`（JSON `invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneやshell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差があるpaneは照合を外しうる
 - `resize`は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない（step刻みはzellij側仕様）
-- `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する
+- `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する。sessionが1つもない場合も正常終了します（exit 0。humanはheaderのみ+stderrに作成案内note・JSONは空配列）
 - tab IDはclose後に再利用されるため、zelperは取得したtab IDを即時使用のみに用いる
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。zellij本体の解決（config.kdlの`layout_dir`）と一致させること
 

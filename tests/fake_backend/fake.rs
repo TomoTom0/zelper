@@ -58,6 +58,10 @@ pub struct FakeBackend {
     pub calls: RefCell<Vec<String>>,
     /// この操作名の次回呼び出しを失敗させる
     pub fail_op: RefCell<Vec<String>>,
+    /// 失敗注入（fail_op・fail_list_sessions_after_create）が生成するerror classの
+    /// 差し替え（TASK-93: add sessionのclass保持伝播をZellijUnavailable系でも
+    /// 検証するため。None時はOperationFailed）
+    pub fail_class: RefCell<Option<ErrorClass>>,
     /// 次回override-layout時に除去するpane（zellijがlayout適用でdead paneを掃除する挙動のemulate）
     pub drop_on_override: RefCell<Vec<PaneKindId>>,
     /// このcommandの再作成を失敗させる（new-tabでbare paneに化ける。command再起動失敗のemulate）
@@ -240,6 +244,7 @@ impl FakeBackend {
             }),
             calls: RefCell::new(Vec::new()),
             fail_op: RefCell::new(Vec::new()),
+            fail_class: RefCell::new(None),
             drop_on_override: RefCell::new(Vec::new()),
             fail_restart: RefCell::new(Vec::new()),
             pipe_mute: RefCell::new(Vec::new()),
@@ -288,7 +293,10 @@ impl FakeBackend {
         if let Some(pos) = fail.iter().position(|f| op.starts_with(f.as_str())) {
             fail.remove(pos);
             return Err(ZelperError::new(
-                ErrorClass::OperationFailed,
+                self.fail_class
+                    .borrow()
+                    .clone()
+                    .unwrap_or(ErrorClass::OperationFailed),
                 // 権限dialog pendingでpipe CLIがblockする状況のbackend timeout模擬
                 // （DD-10.3 E6事実3）を含む注入
                 format!("injected failure at '{op}'"),
@@ -310,6 +318,14 @@ impl FakeBackend {
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
     pub fn inject_failure(&self, op: &str) {
         self.fail_op.borrow_mut().push(op.to_string());
+    }
+
+    /// 失敗注入（inject_failure・fail_list_sessions_after_create）のerror classを
+    /// 差し替える（TASK-93: add sessionのclass保持伝播をZellijUnavailableでも
+    /// 検証するため。未設定はOperationFailed）
+    #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
+    pub fn inject_failure_as(&self, class: ErrorClass) {
+        *self.fail_class.borrow_mut() = Some(class);
     }
 
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
@@ -849,7 +865,10 @@ impl ZellijBackend for FakeBackend {
                 .any(|c| c.starts_with("attach -b "))
         {
             return Err(ZelperError::new(
-                ErrorClass::OperationFailed,
+                self.fail_class
+                    .borrow()
+                    .clone()
+                    .unwrap_or(ErrorClass::OperationFailed),
                 "injected failure at 'list-sessions' (postcheck)".to_string(),
             ));
         }

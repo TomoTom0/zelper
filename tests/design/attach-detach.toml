@@ -7,12 +7,12 @@
 [meta]
 feature = "attach-detach"
 source_file = "src/app/attach.rs"
-verified = false
-verified_at = "2026-09-25"
+verified = true
+verified_at = "2026-11-12"
 verified_by = "claude"
 test_command = "cargo test"
-source_hash = "5f4bc470f8c603b8e6d5bde0ec086c90017c8cf5"
-note = "TASK-89手順5作成（実装前test-first）→手順2〜6実装・test追従完了（2026-09-25）→REVIEW-2（codex）指摘8件対応で13条件へ拡張（指摘5の新規条件1件。指摘1/2/3/4〔capture一時file排他作成0600+unlink・退避FDのF_DUPFD_CLOEXEC・SIGINT SIG_IGNと契約明確化・restoreのEINTR再試行と失敗報告〕は実装修正、指摘6〔attach-successの実出力検証〕はL2 test強化、指摘7〔docs全切断案内削除〕はdocs修正、指摘8〔shim状態file初期化〕はshim setup修正）。src/app/add.rs run_session・src/zellij/process.rs run_interactive（trait定義はsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象。設計§5.1計画8条件+レビュー/実測確定による追加分4条件+REVIEW-2追加分1条件。stderr契約（DD-3.1/DD-14と同一）: attach実行中の子fd 2はcapture file（fd 0/1は元targetを継承）・stderrは子終了後に一括転写・v1で即時転送なし。実行中はSIGINTを親側で一時SIG_IGN（子がSIGINT処理して終了→wait復帰→転写→報告。execでのSIG_IGN継承を避けるためinstallはspawn後）。run_interactiveのstderrは実装上、親fd 2を一時的capture fileへ差し替えた上で継承し（親子で同一fd targetを保持 = inherit×3の維持）、子終了後に本来のstderrへ転写・非zero終了時のerror messageへ埋め込む（attach-zellij-fail条件のstderr埋込みとattach-run-interactive条件のfd同一性を両立する実装）"
+source_hash = "bd4df5408619a3a4c01244a4e740d1daf0bf579e"
+note = "TASK-89手順5作成（実装前test-first）→手順2〜6実装・test追従完了（2026-09-25）→REVIEW-2（codex）指摘8件対応で13条件へ拡張（指摘5の新規条件1件。指摘1/2/3/4〔capture一時file排他作成0600+unlink・退避FDのF_DUPFD_CLOEXEC・SIGINT SIG_IGNと契約明確化・restoreのEINTR再試行と失敗報告〕は実装修正、指摘6〔attach-successの実出力検証〕はL2 test強化、指摘7〔docs全切断案内削除〕はdocs修正、指摘8〔shim状態file初期化〕はshim setup修正）。src/app/add.rs run_session・src/zellij/process.rs run_interactive（trait定義はsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象。設計§5.1計画8条件+レビュー/実測確定による追加分4条件+REVIEW-2追加分1条件。stderr契約（DD-3.1/DD-14と同一）: attach実行中の子fd 2はcapture file（fd 0/1は元targetを継承）・stderrは子終了後に一括転写・v1で即時転送なし。実行中はSIGINTを親側で一時SIG_IGN（子がSIGINT処理して終了→wait復帰→転写→報告。execでのSIG_IGN継承を避けるためinstallはspawn後）。run_interactiveのstderrは実装上、親fd 2を一時的capture fileへ差し替えた上で継承し（親子で同一fd targetを保持 = inherit×3の維持）、子終了後に本来のstderrへ転写・非zero終了時のerror messageへ埋め込む（attach-zellij-fail条件のstderr埋込みとattach-run-interactive条件のfd同一性を両立する実装）。TASK-93実装で全条件緑化（2026-11-12）→コードレビュー指摘1/3対応: precheck/postcheck両条件へZellijUnavailable（exit 4）注入caseを追加（fake.rsへinject_failure_as機構。class保持が本質であることの検証強化）・precheck条件のfail-first説明を旧実装の実際の挙動（inject_failureは一度で消費されるため握り潰し後は作成・事後確認とも成功してOkになり、unwrap_err()が失敗する）へ修正"
 
 [[condition]]
 id = "attach-detach.attach-non-tty-preflight"
@@ -142,21 +142,21 @@ expect_return = "いずれもexit 3（NoTarget）。(i) messageはsession 'ghost
 
 [[condition]]
 id = "attach-detach.add-session-precheck-list-failure-propagates"
-source_lines = "tests/fake_backend/attach.rs:184"
+source_lines = "tests/fake_backend/attach.rs:186"
 target_function = "add::run_session（事前確認の一覧取得失敗）"
 source = "tmp/tasks/tm-93/design_session-zero-missing.md D5（TASK-93設計書: 事前確認の失敗では作成呼出（attach -b）は不発。unwrap_or_defaultを?へ変更し一覧取得errorのclass/exitを保持して伝播——OperationFailedに限らずZellijUnavailable等もあり得るためclass保持が本質） + F7/REVIEW-2指摘5（従来のrc=1一律0件扱い＝真のbackend障害も0件に丸める妥協の解消）"
-description = "add sessionの事前一覧取得失敗の伝播: list_sessionsの真の失敗（rc=1 marker不一致等）は0件へ丸めず、元class/exitのまま伝播する（fail-wrongの解消）。作成呼出（attach -b）は不発になる。L2 FakeBackendのfail_op（list-sessions失敗注入）で検証。fail-first: 現行実装はunwrap_or_defaultで失敗を0件に丸め作成まで進むため赤（VerificationFailedに化ける）"
-given = "FakeBackendへinject_failure(\"list-sessions\")（最初のlist_sessions呼出をOperationFailedで失敗注入）した状態でのrun_session(backend, \"work\", json=true)の実行"
-expect_return = "Err。class=OperationFailed（注入と同一classの保持）。messageはinjected failure at 'list-sessions'を含む。callsにattach -b argvなし（作成不発）"
+description = "add sessionの事前一覧取得失敗の伝播: list_sessionsの真の失敗（rc=1 marker不一致等）は0件へ丸めず、元class/exitのまま伝播する（fail-wrongの解消。OperationFailed exit 5・ZellijUnavailable exit 4の両注入でclass/exit保持を検証——OperationFailed特化でなくclass保持が本質）。作成呼出（attach -b）は不発になる。L2 FakeBackendのfail_op+inject_failure_as（list-sessions失敗注入・class差し替え）で検証。fail-first: 現行実装（unwrap_or_default）は事前エラーを握り潰して0件へ丸め、inject_failureは一度で消費されるため作成・事後確認とも成功してOkになり、unwrap_err()が失敗する（赤）"
+given = "FakeBackendへinject_failure(\"list-sessions\")（最初のlist_sessions呼出を失敗注入。classは既定のOperationFailedとinject_failure_asによるZellijUnavailableの2種）した状態でのrun_session(backend, \"work\", json=true)の実行"
+expect_return = "Err。classは注入と同一の保持（OperationFailedならexit 5・ZellijUnavailableならexit 4）。messageはinjected failure at 'list-sessions'を含む。callsにattach -b argvなし（作成不発）"
 
 [[condition]]
 id = "attach-detach.add-session-postcheck-list-failure-keeps-class"
-source_lines = "tests/fake_backend/attach.rs:213"
+source_lines = "tests/fake_backend/attach.rs:242"
 target_function = "add::run_session（postcondition確認の一覧取得失敗）"
 source = "tmp/tasks/tm-93/design_session-zero-missing.md D5（TASK-93設計書: 事後確認の失敗は作成呼出が成功済みの可能性があるため、元class/exitを保持しつつmessageへ文脈を付与——created session 'NAME' but failed to confirm: <元message>）"
-description = "add sessionの事後一覧取得失敗の報告: 作成呼出（attach -b）は成功済みのため、確認失敗は元class/exitを保持したままmessageへ文脈（created session 'NAME' but failed to confirm）を付与する（VerificationFailedへの丸めでもOperationFailedへの素通しでもない第3の報告形式）。L2 FakeBackendのpostcheck arm（create_session_detached呼出観測後のlist_sessions失敗注入）で検証。fail-first: 現行実装はunwrap_or_defaultで失敗を0件に丸めVerificationFailedに化けるため赤"
-given = "FakeBackendへfail_list_sessions_after_create()（attach -b呼出を1回観測した後のlist_sessions呼出のみOperationFailedで失敗注入。事前確認は成功）した状態でのrun_session(backend, \"work\", json=true)の実行"
-expect_return = "Err。class=OperationFailed（注入と同一classの保持）。messageはcreated session 'work' but failed to confirmとinjected failureを含む。callsにattach -b workあり（作成呼出は成功済み）"
+description = "add sessionの事後一覧取得失敗の報告: 作成呼出（attach -b）は成功済みのため、確認失敗は元class/exitを保持したままmessageへ文脈（created session 'NAME' but failed to confirm）を付与する（VerificationFailedへの丸めでもOperationFailedへの素通しでもない第3の報告形式。OperationFailed exit 5・ZellijUnavailable exit 4の両注入でclass/exit保持と文脈付与を検証——class保持が本質）。L2 FakeBackendのpostcheck arm（create_session_detached呼出観測後のlist_sessions失敗注入・inject_failure_asによるclass差し替え）で検証。fail-first: 現行実装はunwrap_or_defaultで失敗を0件に丸めVerificationFailedに化けるため赤"
+given = "FakeBackendへfail_list_sessions_after_create()（attach -b呼出を1回観測した後のlist_sessions呼出のみ失敗注入。classは既定のOperationFailedとinject_failure_asによるZellijUnavailableの2種。事前確認は成功）した状態でのrun_session(backend, \"work\", json=true)の実行"
+expect_return = "Err。classは注入と同一の保持（OperationFailedならexit 5・ZellijUnavailableならexit 4）。messageはcreated session 'work' but failed to confirmとinjected failureを含む。callsにattach -b workあり（作成呼出は成功済み）"
 
 [[excluded]]
 item = "実TTYでのattach対話UI継続（zellij UIの描画・キー操作・対話中の挙動）"

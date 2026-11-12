@@ -127,5 +127,5 @@ TASK-81（DD-10 2026-09-19改訂: cwd注入・reconciliation・dup close・dry-r
 - `tests/fake_backend/fake.rs`: test支援資産（fake backend実装）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
 - `tests/fixtures/`（`tests/fixtures/zellij/*.json`等）: fixtures。scanner走査対象外
 - L4統合test harness（podman・実zellij）: repo管理外。要件・実施記録は`docs/testing/test-plan.md`のL4節へ集約（設計書§6.1）。該当要求は各条件書の`[[excluded]]`から参照行で指す
-- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の8件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
+- lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の9件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）
 - companion plugin実装（`plugin/src/`）: 現在test fnなし。test追加時はremap系の関連条件書へ条件化し、scanner走査対象（`plugin/src/**/*.rs`）に含まれる

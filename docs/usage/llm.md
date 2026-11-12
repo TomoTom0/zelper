@@ -4,7 +4,7 @@
 
 ## 対象session解決（全verb共通）
 
-`--session NAME` > 環境変数 `ZELLIJ_SESSION_NAME` > 実行中sessionが1つならそれ > error（候補表示）。`--session` はglobal option（verbの前後どちらでも可）。
+`--session NAME` > 環境変数 `ZELLIJ_SESSION_NAME` > 実行中sessionが1つならそれ > error（候補表示）。`--session` はglobal option（verbの前後どちらでも可）。`--session` 明示時は存在確認を先行し、不在名（EXITED名は存在扱いで透過）は `NoTarget` exit 3（candidates付き。zellijを呼ばない）。環境変数経由は検証せずそのまま透過する。実行中sessionが0個の自動解決も `NoTarget` exit 3（作成案内文面）。`list sessions` はsession解決を行わず、session 0個でも正常系（exit 0。humanはheaderのみ+stderr note・JSONは `sessions:[]`・compactは無出力）。
 
 ## 対象指定（read / send / resize / remove等）
 
@@ -69,7 +69,7 @@ zelper docs readme | llm usage|skill|snippet
 
 `attach` / `detach` / `add session` の意味論（session lifecycle・DD-14）:
 
-- `attach`: 対話client起動。**stdin・stdoutの両方がTTYであること必須**（非TTYはzellij起動前に `Preflight` exit 7で拒否。agent/script実行からは使えない）。対話終了後のみ報告（human `attach session 'NAME' ended` / JSON `data.session`）。zellij非zero終了（不在session名のSession not found + 稼働session候補表示を含む）は `OperationFailed` exit 5
+- `attach`: 対話client起動。**stdin・stdoutの両方がTTYであること必須**（非TTYはzellij起動前に `Preflight` exit 7で拒否。agent/script実行からは使えない。`--session` 不在名・session 0個の `NoTarget` exit 3はこのTTY検査より先に立つ）。対話終了後のみ報告（human `attach session 'NAME' ended` / JSON `data.session`）。zellij非zero終了は `OperationFailed` exit 5
 - `detach`: 対象sessionのattach clientをdetach。client不在でも成功（no-op）扱い（human `detached clients from session 'NAME'` / JSON `data.session`）。複数clientがattach中の場合、detachはzellijの仕様として最新のattach clientのみ切断し、先発clientは画面凍結のまま残留する（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しない）
 - `add session NAME`: detached session作成（`attach -b NAME` 相当の非対話経路）。session 0件環境でも動作（対象session解決を経ない例外dispatch）。同名running session既存は `Preflight` exit 7（fail-fast）・作成呼出失敗は `OperationFailed` exit 5・作成後のlist-sessions出現確認は `VerificationFailed` exit 7。成功は human `created session 'NAME' (detached)` / JSON `data.session`・`data.created=true`。作成直後は空session（tab 1・pane 0件）でfirst attach時にdefault layoutが具現化する。layout適用は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行う
 

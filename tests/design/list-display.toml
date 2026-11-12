@@ -23,7 +23,7 @@ expect_return_shape = "sessions JSONはdata.sessions[0]がname=fake-sess・creat
 id = "list-display.sessions-live-only-with-exited-present"
 source_lines = "tests/cli/list_read_send.rs:413"
 target_function = "list::run（Sessions: exited filter）"
-source = "docs/design/detailed-design.md DD-1.2構文木注記（list sessionsはsession解決を行わない。EXITED混在・複数実行中でも表示できる） + DD-3.4（EXITED行もflag付きでparseし、実行中のみへの絞り込みは呼び出し側（list sessions表示）） + EXITED混在・複数実行中でも表示できる（sessionが全くない場合のlist sessionsはzellij list-sessions自体が失敗するためzelperも失敗する）"
+source = "docs/design/detailed-design.md DD-1.2構文木注記（list sessionsはsession解決を行わない。EXITED混在・複数実行中でも表示できる） + DD-3.4（EXITED行もflag付きでparseし、実行中のみへの絞り込みは呼び出し側（list sessions表示）） + EXITED混在・複数実行中でも表示できる（sessionが全くない場合のlist sessionsはbackendの0件decode（DD-3.1）により空一覧の正常系——TASK-93）"
 description = "list sessionsは対象session解決を前提とせず一覧表示できる: EXITED行はparseされるが表示は実行中のみ。dead sessionが複数残る環境でのlist可用性"
 given = "list-sessions -n出力がEXITED 2件と実行中1件（live-a・current）のfake zellij shimに対するzelper list sessions --jsonの実行"
 expect_return_shape = "data.sessionsはlive-aのみ（1件）で、created=1m ago・panes_per_tab=[2]が取れる"

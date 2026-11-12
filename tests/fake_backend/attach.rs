@@ -180,7 +180,9 @@ fn detach_no_client_is_noop_success() {
 
 /// add sessionの事前一覧取得失敗: list_sessionsの真の失敗（rc=1 marker不一致等）は
 /// 0件へ丸めず元class/exitのまま伝播し、作成呼出（attach -b）は不発になる
-/// （unwrap_or_default妥協〔F7〕の解消）
+/// （unwrap_or_default妥協〔F7〕の解消）。OperationFailed（exit 5）と
+/// ZellijUnavailable（exit 4）の両注入でclass/exit保持を検証する
+/// （OperationFailed特化でなくclass保持が本質——TASK-93レビュー指摘1）
 // [covers:attach-detach.add-session-precheck-list-failure-propagates]
 #[test]
 fn add_session_precheck_list_failure_propagates() {
@@ -193,6 +195,7 @@ fn add_session_precheck_list_failure_propagates() {
         "message: {}",
         err.message()
     );
+    assert_eq!(err.exit_code(), 5, "message: {}", err.message());
     assert!(
         err.message()
             .contains("injected failure at 'list-sessions'"),
@@ -205,11 +208,37 @@ fn add_session_precheck_list_failure_propagates() {
         "calls: {:?}",
         b.calls()
     );
+
+    // ZellijUnavailable（exit 4）注入でもclass/exitを丸めず伝播する
+    let b = FakeBackend::new(vec![pane(1, "a")], vec![]);
+    b.inject_failure("list-sessions");
+    b.inject_failure_as(ErrorClass::ZellijUnavailable);
+    let err = run_session(&b, "work", true).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::ZellijUnavailable,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 4, "message: {}", err.message());
+    assert!(
+        err.message()
+            .contains("injected failure at 'list-sessions'"),
+        "message: {}",
+        err.message()
+    );
+    assert!(
+        !b.calls().iter().any(|c| c.starts_with("attach -b")),
+        "calls: {:?}",
+        b.calls()
+    );
 }
 
 /// add sessionの事後一覧取得失敗: 作成呼出（attach -b）は成功済みのため、確認失敗は
 /// 元class/exitを保持しつつmessageへ文脈を付与する（D5: created session 'NAME'
-/// but failed to confirm: <元message>）
+/// but failed to confirm: <元message>）。OperationFailed（exit 5）と
+/// ZellijUnavailable（exit 4）の両注入でclass/exit保持と文脈付与を検証する
+/// （TASK-93レビュー指摘1）
 // [covers:attach-detach.add-session-postcheck-list-failure-keeps-class]
 #[test]
 fn add_session_postcheck_list_failure_keeps_class_with_context() {
@@ -222,6 +251,7 @@ fn add_session_postcheck_list_failure_keeps_class_with_context() {
         "message: {}",
         err.message()
     );
+    assert_eq!(err.exit_code(), 5, "message: {}", err.message());
     let msg = err.message();
     assert!(
         msg.contains("created session 'work' but failed to confirm"),
@@ -229,6 +259,30 @@ fn add_session_postcheck_list_failure_keeps_class_with_context() {
     );
     assert!(msg.contains("injected failure"), "message: {msg}");
     // 作成呼出自体は成功済み（rc=0・作成NAMEは状態へ反映されている）
+    assert!(
+        b.calls().iter().any(|c| c == "attach -b work"),
+        "calls: {:?}",
+        b.calls()
+    );
+
+    // ZellijUnavailable（exit 4）注入でもclass/exit保持と文脈付与は同一
+    let b = FakeBackend::new(vec![pane(1, "a")], vec![]);
+    b.fail_list_sessions_after_create();
+    b.inject_failure_as(ErrorClass::ZellijUnavailable);
+    let err = run_session(&b, "work", true).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::ZellijUnavailable,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 4, "message: {}", err.message());
+    let msg = err.message();
+    assert!(
+        msg.contains("created session 'work' but failed to confirm"),
+        "message: {msg}"
+    );
+    assert!(msg.contains("injected failure"), "message: {msg}");
     assert!(
         b.calls().iter().any(|c| c == "attach -b work"),
         "calls: {:?}",
