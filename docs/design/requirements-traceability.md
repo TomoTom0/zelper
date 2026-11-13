@@ -125,10 +125,10 @@ detailed-design.md（Phase 3成果物）の章番号を以下のように規定�
 | DD-8 | `rename`操作設計 | pane/tab rename |
 | DD-9 | `resize`アルゴリズム | 高位resize・equalize・収束と終了条件 |
 | DD-10 | `remap`アルゴリズム（v2: companion plugin・配置・移動・検証） | preservation・overflow・順序・plugin扱い |
-| DD-11 | `add`/`remove`操作設計 | 追加/削除・空tab cleanup |
+| DD-11 | `add`/`remove`操作設計（remove sessionを含む。TASK-84・2026-11-13追加） | 追加/削除・空tab cleanup・session完全削除（条件書: tests/design/remove-session.toml 21条件） |
 | DD-12 | safety model（dry-run・確認・部分失敗・error分類/exit status） | dry-run・clear error handling |
 | DD-13 | `move`操作設計（単一pane/tabの移動・交換。TASK-88・2026-09-25追加） | move pane（方向移動・rotate・tab間移動・pane交換）/ move tab（tab交換）・remap対比（user指示による追加。条件書: tests/design/move.toml 22条件 + cli-grammar.toml move系5条件） |
-| DD-14 | `attach`/`detach`/`add session`操作設計（session lifecycle。TASK-89・2026-09-25追加） | attach/detach/session lifecycle（user指示による追加。条件書: tests/design/attach-detach.toml 12条件） |
+| DD-14 | `attach`/`detach`/`add session`/`remove session`操作設計（session lifecycle。TASK-89・2026-09-25追加・remove sessionはTASK-84・2026-11-13） | attach/detach/session lifecycle（user指示による追加。条件書: tests/design/attach-detach.toml 12条件。remove sessionの例外dispatch一般化を含む） |
 | DD-15 | `watch`操作設計（polling pattern監視。TASK-86・2026-09-25追加） | watch pane output（元P1。user指示により実装。条件書: tests/design/watch.toml 16条件） |
 
 Acceptance criteria（§9の14項）の最終監査は §6に実施した。
@@ -155,6 +155,7 @@ Acceptance criteria（§9の14項）の最終監査は §6に実施した。
 | dry-run（§3.7） | DD-12 | remap/remove | L2 / L3 | S8・S5 | implemented with documented limitation（`resize equalize`/`add`はP1: MR-7） |
 | watch pane output（元P1。2026-09-25 user指示により昇格・TASK-86） | DD-15 | app/watch.rs | L2 fake_watch / L3 cli shim（条件書watch.toml 16条件） | -（fake zellij shimのみで完結・実zellijはdump-screen反復のため新規L4要件なし） | implemented |
 | attach/detach/add session（session lifecycle。2026-09-25 user指示・TASK-89） | DD-14 | app/attach.rs, app/add.rs run_session, zellij/process.rs run_interactive, main.rs例外dispatch | L2 fake_attach / L3 cli shim / src内process test（条件書attach-detach.toml 12条件） | -（実zellij実測M3/M4/M5はpodman sandboxで実施済み〔tmp/tasks/tm-89/〕。実TTY対話領域は条件書excluded参照） | implemented |
+| remove session（session lifecycle。TASK-84・2026-11-13。要件§2.11追記条項） | DD-11 remove session（dispatchはDD-14一般化） | app/remove.rs run_session, zellij/process.rs delete_session, main.rs例外dispatch | L2 fake_remove_session / L3 cli shim（条件書remove-session.toml 21条件〔excluded 3件付き〕） | -（実zellij実測M1〜M8はpodman sandboxで実施済み〔tmp/tasks/tm-84/〕。EXITED行そのものへのdelete-session直接実証は生成経路未特定のためexcluded参照） | implemented |
 | move pane/tab（単一対象の移動・交換。2026-09-25 user指示・TASK-88） | DD-13 | app/move_.rs, zellij/process.rs move_pane/move_tab, companion.rs runtime orchestration切り出し（remap共用）, main.rs dispatch | L2 fake_move / L3 cli shim（条件書move.toml 22条件 + cli-grammar.toml move系5条件〔L3〕） | M1/M2/M8実測・M9 acceptance（podman sandbox・`tmp/tasks/tm-88/`。companion系move・tab交換のE2E） | implemented |
 | AC-1〜6・9〜11・13・14 | 上記対応行と同一 | - | - | S1〜S6, S10 | implemented（AC-14はhelp文言test無し、実装と--help出力で確認） |
 

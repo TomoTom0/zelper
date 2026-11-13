@@ -178,6 +178,9 @@ Requirements:
 - interactive attach SHALL require a TTY and fail fast (before launching zellij) otherwise
 - detach SHALL address the attach clients of the resolved target session
 - detached session creation SHALL work in environments where no session exists yet, and report post-creation presence in the session list
+- session removal SHALL be expressed with a single full-deletion semantics (both the session row and resurrection data; added 2026-11-13, TASK-84 — zellij 0.44.3 has no kill-only/delete-data split, so none is modeled). The backend operation is uniformly `zellij delete-session <NAME> -f`
+- session removal SHALL select targets with exactly one of four exclusive selectors: `NAME...` (one or more, duplicates removed), `--all` (all rows including EXITED), `--dead` (EXITED rows only), `--me` (the current session resolved from `ZELLIJ_SESSION_NAME`; without `--me` the current session is refused in the NAME path and excluded with a warning in `--all`)
+- session removal SHALL always require `--yes` or `--dry-run` (even for a single named target — a session deletion irreversibly takes all its panes/tabs and resurrection data), accept EXITED rows as targets, and verify post-removal disappearance in the session list before reporting success
 
 The same principle applies throughout the CLI, not only to `remap`.
 

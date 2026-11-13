@@ -83,6 +83,13 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper remove session NAME... [--yes] [--dry-run] [--json]
+zelper remove session (--all | --dead | --me) [--yes] [--dry-run] [--json]
+                                        （sessionの完全削除〔行もresurrection dataも消す〕。
+                                         selector 4者排他: NAME... / --all / --dead / --me。
+                                         常に--yes/--dry-run必須〔単一対象でも〕。
+                                         --meは自session削除〔ZELLIJ_SESSION_NAME解決〕で、
+                                         実行前にstderr warningを出すbest-effort契約）
 zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
 zelper move pane PANE --to-tab TAB | --swap-with PANE   （3形式は相互排他）
 zelper move tab TAB --swap-with TAB [--json]
@@ -118,11 +125,14 @@ zelper docs readme | llm usage|skill|snippet
 - 最大試行回数`--max`（既定30）に到達すると失敗（exit 5。監視中のpane消失を一部に伴う場合はexit 6）。pollingは`dump-screen`の反復で、対象解決は開始時1回のみ（新規paneの追加は対象外）
 - 照合は`dump-screen`生テキストの行単位（ANSI escapeの正規化は行わない）
 
-## session lifecycle（attach / detach / add session）
+## session lifecycle（attach / detach / add session / remove session）
 
 - `attach` は対話clientの起動です。stdin・stdoutの両方がTTYであることを要求し、非TTY（script・agent実行等）ではzellijを起動する前にexit 7で拒否します（非TTYの素attachはzellij側でpanicするため。`--session` 不在名・session 0個のexit 3〔NoTarget〕はこのTTY検査より先に立ちます）。対話終了後に `attach session 'NAME' ended` の1行（`--json` は `data.session`）を報告します。zellijの非zero終了はexit 5になります
 - `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。不在session名はexit 3（NoTarget・候補表示付き）で拒否します。複数clientがattachしている場合、zellijの仕様としてdetachは最新のattach clientのみ切断し、先発clientは画面凍結のまま残留します（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しません）
 - `add session NAME` はdetached sessionを作成します（`zellij attach -b NAME` 相当）。sessionが1つも存在しない環境でも動作し、同名running sessionが既にあれば作成前にexit 7で拒否、作成後のlist-sessions出現を検証してから `created session 'NAME' (detached)` を報告します。作成直後は空session（tab 1・pane 0件）で、最初のattach時にdefault layoutが具現化します。layoutを適用したい場合は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行います
+- `remove session` はsessionを完全に削除します（session行もresurrection dataも消す。killのみ/dataのみの区別はzellij 0.44.3に存在しないため単一意味論。各対象は `zellij delete-session NAME -f` 1呼び出し）。対象selectorは `NAME...`（複数可・重複は除去）/ `--all`（EXITED行を含む全行）/ `--dead`（EXITED行のみ）/ `--me`（自session）の4者のうちちょうど1つで、EXITED行も削除対象として受理します（不在名はexit 3・候補はEXITED込み）。**常に** `--yes` か `--dry-run` が必要です（単一対象でも。`--dry-run` は対象毎のstate（running/dead）とtab/pane数のplanを出力）
+- 自sessionの保護: 自session（環境変数 `ZELLIJ_SESSION_NAME`）の削除は `--me` 指定時のみ許可されます。`NAME...` に自sessionが含まれる場合は状態変更前にexit 7で拒否し、`--all` は自sessionを除外してstderrのwarning行で通知します（自sessionのみが存在するならexit 3で `--me` を案内）。`--me` はzellij外ではexit 7です。`--me` 実行はzelper自身が巻き込まれて報告・exit status・検証が実行されない可能性があるためbest-effort契約とし、実行前にstderr warning行を出します
+- 削除は対象毎に順次実行し、失敗しても残対象を実行してper-targetに報告します（部分失敗はexit 6）。全対象実行後にlist-sessionsで消失を検証し、残存があれば失敗報告します（rc=0でも無操作があり得るため）
 
 ## moveの意味論（単一対象の移動・交換）
 
@@ -158,6 +168,7 @@ zelper docs readme | llm usage|skill|snippet
 - `terminal_command`（JSON `invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneやshell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差があるpaneは照合を外しうる
 - `resize`は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない（step刻みはzellij側仕様）
 - `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する。sessionが1つもない場合も正常終了します（exit 0。humanはheaderのみ+stderrに作成案内note・JSONは空配列）
+- `remove session` の存在確認はlist-sessions行基準のため、行の出ない残data（registry掃除済みでcacheにsession_infoのみ残留するsession）には到達できません。その場合は `zellij delete-session NAME` を直接実行してください
 - tab IDはclose後に再利用されるため、zelperは取得したtab IDを即時使用のみに用いる
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。zellij本体の解決（config.kdlの`layout_dir`）と一致させること
 

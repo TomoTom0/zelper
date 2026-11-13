@@ -2700,9 +2700,7 @@ fn remove_session_missing_name_is_notarget_with_candidates() {
     );
     assert!(cands.iter().any(|c| c == "deadx"), "candidates: {cands:?}");
     assert!(
-        !calls(&log)
-            .iter()
-            .any(|c| c.starts_with("delete-session")),
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
         "calls: {:?}",
         calls(&log)
     );
@@ -2721,10 +2719,7 @@ fn remove_session_missing_name_is_notarget_with_candidates() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "NoTarget");
     let msg = v["error"]["message"].as_str().unwrap();
-    assert!(
-        msg.contains("no zellij sessions found"),
-        "message: {msg}"
-    );
+    assert!(msg.contains("no zellij sessions found"), "message: {msg}");
 }
 
 /// dry-runのplan表示契約（§2.6）: 対象毎のstate（running/dead）とlist_tabs_for
@@ -2735,7 +2730,8 @@ fn remove_session_missing_name_is_notarget_with_candidates() {
 #[test]
 fn remove_session_dry_run_plan_states_and_counts() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let sessions = "foo [Created 1m ago] (current)\ndeadx [Created 2m ago] (EXITED - attach to resurrect)";
+    let sessions =
+        "foo [Created 1m ago] (current)\ndeadx [Created 2m ago] (EXITED - attach to resurrect)";
     // human: [plan]行×2 + 合計行（tabs/panesはfixtures/tabs.json基準: 1 tab・2 pane）
     let (mut cmd, log) = zelper("remove-dryrun-plan");
     let out = cmd
@@ -2756,7 +2752,10 @@ fn remove_session_dry_run_plan_states_and_counts() {
     );
     // 状態変更なし・dead対象はlist_tabs_for不呼出（running名のみlist-tabs呼出）
     let cs = calls(&log);
-    assert!(!cs.iter().any(|c| c.starts_with("delete-session")), "calls: {cs:?}");
+    assert!(
+        !cs.iter().any(|c| c.starts_with("delete-session")),
+        "calls: {cs:?}"
+    );
     assert!(
         cs.iter()
             .any(|c| c == "--session foo action list-tabs -a --json"),
@@ -2790,7 +2789,10 @@ fn remove_session_dry_run_plan_states_and_counts() {
     assert_eq!(targets[1]["tabs"], serde_json::Value::Null);
     assert_eq!(targets[1]["panes"], serde_json::Value::Null);
     let cs = calls(&log);
-    assert!(!cs.iter().any(|c| c.starts_with("delete-session")), "calls: {cs:?}");
+    assert!(
+        !cs.iter().any(|c| c.starts_with("delete-session")),
+        "calls: {cs:?}"
+    );
     assert!(!cs.iter().any(|c| c.contains("deadx")), "calls: {cs:?}");
 }
 
@@ -2807,10 +2809,20 @@ fn remove_session_emits_delete_session_f_argv() {
         .assert()
         .success();
     let cs = calls(&log);
-    let dels: Vec<&String> = cs.iter().filter(|c| c.starts_with("delete-session")).collect();
-    assert_eq!(dels, vec![&"delete-session foo -f".to_string()], "calls: {cs:?}");
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session foo -f".to_string()],
+        "calls: {cs:?}"
+    );
     // top-level positional形式（--session接頭argvなし）
-    assert!(!cs.iter().any(|c| c.starts_with("--session")), "calls: {cs:?}");
+    assert!(
+        !cs.iter().any(|c| c.starts_with("--session")),
+        "calls: {cs:?}"
+    );
     // kill/delete-all系zellij commandは発行しない（§2.2不採用）
     assert!(
         !cs.iter().any(|c| c.contains("kill-session")
@@ -2855,8 +2867,14 @@ fn remove_session_partial_failure_is_exit6_with_results() {
     );
     // 残target実行（失敗しても残targetを実行する）
     let cs = calls(&log);
-    assert!(cs.iter().any(|c| c == "delete-session foo -f"), "calls: {cs:?}");
-    assert!(cs.iter().any(|c| c == "delete-session bar -f"), "calls: {cs:?}");
+    assert!(
+        cs.iter().any(|c| c == "delete-session foo -f"),
+        "calls: {cs:?}"
+    );
+    assert!(
+        cs.iter().any(|c| c == "delete-session bar -f"),
+        "calls: {cs:?}"
+    );
 }
 
 /// NAME経路の自session保護（§2.3）: ZELLIJ_SESSION_NAMEが解決済みtarget集合に
@@ -2885,9 +2903,7 @@ fn remove_session_self_name_without_me_is_refused() {
     let msg = v["error"]["message"].as_str().unwrap();
     assert!(msg.contains("--me"), "message: {msg}");
     assert!(
-        !calls(&log)
-            .iter()
-            .any(|c| c.starts_with("delete-session")),
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
         "fail-fast（他targetも不発）: {:?}",
         calls(&log)
     );
@@ -2900,8 +2916,8 @@ fn remove_session_self_name_without_me_is_refused() {
 fn remove_session_me_requires_env() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     for (i, args) in [
-        vec!["remove", "session", "--me", "--yes"],
-        vec!["remove", "session", "--me", "--dry-run"],
+        vec!["remove", "session", "--me", "--yes", "--json"],
+        vec!["remove", "session", "--me", "--dry-run", "--json"],
     ]
     .iter()
     .enumerate()
@@ -2924,9 +2940,7 @@ fn remove_session_me_requires_env() {
         );
         assert!(msg.contains("ZELLIJ_SESSION_NAME"), "message: {msg}");
         assert!(
-            !calls(&log)
-                .iter()
-                .any(|c| c.starts_with("delete-session")),
+            !calls(&log).iter().any(|c| c.starts_with("delete-session")),
             "case {i} calls: {:?}",
             calls(&log)
         );
@@ -2977,9 +2991,7 @@ fn remove_session_me_uses_resolved_name() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "NoTarget");
     assert!(
-        !calls(&log)
-            .iter()
-            .any(|c| c.starts_with("delete-session")),
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
         "calls: {:?}",
         calls(&log)
     );
@@ -3041,7 +3053,11 @@ fn remove_session_me_dry_run_annotates_current() {
             == "[plan] remove session 'fake-sess' (running, 1 tabs, 2 panes) [current session]"),
         "stdout: {stdout:?}"
     );
-    assert!(!calls(&log).iter().any(|c| c.starts_with("delete-session")), "calls: {:?}", calls(&log));
+    assert!(
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
 
     // JSON: 当該targetへ current: true field
     let (mut cmd, log) = zelper("remove-me-dryrun-json");
@@ -3058,7 +3074,11 @@ fn remove_session_me_dry_run_annotates_current() {
     assert_eq!(targets.len(), 1, "targets: {targets:?}");
     assert_eq!(targets[0]["name"], "fake-sess");
     assert_eq!(targets[0]["current"], true, "targets: {targets:?}");
-    assert!(!calls(&log).iter().any(|c| c.starts_with("delete-session")), "calls: {:?}", calls(&log));
+    assert!(
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
 }
 
 /// --allの自session除外（§2.3）: 対象集合からZELLIJ_SESSION_NAME該当行を除外し、
@@ -3081,8 +3101,15 @@ fn remove_session_all_excludes_self_with_warning() {
         .get_output()
         .clone();
     let cs = calls(&log);
-    let dels: Vec<&String> = cs.iter().filter(|c| c.starts_with("delete-session")).collect();
-    assert_eq!(dels, vec![&"delete-session other -f".to_string()], "calls: {cs:?}");
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session other -f".to_string()],
+        "calls: {cs:?}"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("warning") && stderr.contains("current session"),
@@ -3118,9 +3145,7 @@ fn remove_session_all_self_only_is_notarget() {
     let msg = v["error"]["message"].as_str().unwrap();
     assert!(msg.contains("--me"), "message: {msg}");
     assert!(
-        !calls(&log)
-            .iter()
-            .any(|c| c.starts_with("delete-session")),
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
         "calls: {:?}",
         calls(&log)
     );
@@ -3143,8 +3168,15 @@ fn remove_session_dead_selects_exited_rows_only() {
     .assert()
     .success();
     let cs = calls(&log);
-    let dels: Vec<&String> = cs.iter().filter(|c| c.starts_with("delete-session")).collect();
-    assert_eq!(dels, vec![&"delete-session deadx -f".to_string()], "calls: {cs:?}");
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session deadx -f".to_string()],
+        "calls: {cs:?}"
+    );
 
     // (ii) EXITED行なし（RUNNINGのみ）: NoTarget
     let (mut cmd, log) = zelper("remove-dead-none");
@@ -3162,9 +3194,7 @@ fn remove_session_dead_selects_exited_rows_only() {
     let msg = v["error"]["message"].as_str().unwrap();
     assert!(msg.contains("no sessions to remove"), "message: {msg}");
     assert!(
-        !calls(&log)
-            .iter()
-            .any(|c| c.starts_with("delete-session")),
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
         "calls: {:?}",
         calls(&log)
     );
@@ -3230,9 +3260,7 @@ fn remove_session_zero_session_environment_is_notarget() {
             assert!(msg.contains(c.want_msg), "case {}: {msg}", c.tag);
         }
         assert!(
-            !calls(&log)
-                .iter()
-                .any(|x| x.starts_with("delete-session")),
+            !calls(&log).iter().any(|x| x.starts_with("delete-session")),
             "case {} calls: {:?}",
             c.tag,
             calls(&log)
@@ -3262,21 +3290,20 @@ fn remove_session_dispatches_via_probe_backend() {
     assert_eq!(v["error"]["class"], "NoTarget");
     let msg = v["error"]["message"].as_str().unwrap();
     // run_session層の文面（事前存在確認まで到達）。共通解決経路の文面ではない
-    assert!(
-        msg.contains("no zellij sessions found"),
-        "message: {msg}"
-    );
+    assert!(msg.contains("no zellij sessions found"), "message: {msg}");
     assert!(
         !msg.contains("no running zellij session found"),
         "message: {msg}"
     );
     let cs = calls(&log);
-    // probe backend経由でlist-sessions呼出は発生している（0-session環境で動作）
+    // probe backend経由でlist-sessions呼出は発生している（0-session環境で動作）。
+    // 記録はshimの `echo "$*"`（= `list-sessions -n`。backend list_sessionsの
+    // 確定argv・TASK-93 D1）
+    assert!(cs.iter().any(|c| c == "list-sessions -n"), "calls: {cs:?}");
     assert!(
-        cs.iter().any(|c| c == "list-sessions"),
+        !cs.iter().any(|c| c.starts_with("delete-session")),
         "calls: {cs:?}"
     );
-    assert!(!cs.iter().any(|c| c.starts_with("delete-session")), "calls: {cs:?}");
 }
 
 /// 成功報告の契約（§2.9報告形式）: humanは対象のstateを反映した成功行
@@ -3313,7 +3340,9 @@ fn remove_session_success_report_results_and_human_lines() {
     let (mut cmd, _) = zelper("remove-report-json");
     let out = cmd
         .env("FAKE_SESSIONS", sessions)
-        .args(["remove", "session", "foo", "bar", "deadx", "--yes", "--json"])
+        .args([
+            "remove", "session", "foo", "bar", "deadx", "--yes", "--json",
+        ])
         .assert()
         .success()
         .get_output()

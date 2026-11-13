@@ -1808,9 +1808,9 @@ impl ZellijBackend for FakeBackend {
     }
 
     /// TASK-84（設計§2.7）: delete_session。呼出記録（`delete-session <name> -f`）
-    /// + sessions状態から対象行を除去（実zellijの完全削除〔行+resurrection data〕
-    /// のうちlist_sessions可視分の再現）。mute_delete_session注入時は記録のみで
-    /// 行を除去しない（rc=0・postcondition不一致模擬）
+    /// と、sessions状態からの対象行除去（実zellijの完全削除〔行+resurrection
+    /// data〕のうちlist_sessions可視分の再現）を行う。mute_delete_session注入時は
+    /// 記録のみで行を除去しない（rc=0・postcondition不一致模擬）
     fn delete_session(&self, name: &str) -> Result<(), ZelperError> {
         self.record(&format!("delete-session {name} -f"))?;
         if self.mute_delete_session.get() {

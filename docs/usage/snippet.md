@@ -21,6 +21,11 @@ zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F 
 zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper remove session NAME... [--yes] [--dry-run] [--json]      （session完全削除。selector 4者排他:
+zelper remove session (--all | --dead | --me) [--yes] [--dry-run] [--json]
+                                                                 NAME... / --all / --dead / --me。
+                                                                 常に--yes/--dry-run必須〔単一でも〕。
+                                                                 --meは自session削除でbest-effort）
 zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
 zelper move pane PANE --to-tab TAB | --swap-with PANE   （3形式は相互排他）
 zelper move tab TAB --swap-with TAB [--json]

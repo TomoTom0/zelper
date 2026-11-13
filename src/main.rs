@@ -45,6 +45,7 @@ fn wants_json(cli: &Cli) -> bool {
         Verb::Remove { target } => match target {
             RemoveTarget::Pane { json, .. } => *json,
             RemoveTarget::Tab { json, .. } => *json,
+            RemoveTarget::Session { json, .. } => *json,
         },
         Verb::Move { target } => match target {
             MoveTarget::Pane { json, .. } => *json,
@@ -184,6 +185,26 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
             }
         }
         Verb::Remove { target } => {
+            // RemoveTarget::Sessionは例外dispatch（DD-14・TASK-84設計§2.7）: session
+            // 集合を対象とする操作は対象session解決（mk_backend）を経ずprobe backend
+            // （capability checkのみ）で直接構築する（0-session環境でも事前確認まで
+            // 到達させる。global --session flagはlist sessions等と同じく無視）
+            if let zelper::cli::RemoveTarget::Session {
+                names,
+                all,
+                dead,
+                me,
+                yes,
+                dry_run,
+                json,
+            } = target
+            {
+                let probe = ZellijCliBackend::new("zelper-probe-unused");
+                check_capability(&probe)?;
+                return zelper::app::remove::run_session(
+                    &probe, names, *all, *dead, *me, *yes, *dry_run, *json,
+                );
+            }
             let backend = mk_backend(&cli)?;
             match target {
                 zelper::cli::RemoveTarget::Pane {
@@ -206,6 +227,10 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                     *dry_run,
                     *json,
                 ),
+                // Sessionは上記の例外dispatch（probe backend）で処理済み
+                zelper::cli::RemoveTarget::Session { .. } => {
+                    unreachable!("RemoveTarget::Session is dispatched via probe backend above")
+                }
             }
         }
         Verb::Move { target } => {

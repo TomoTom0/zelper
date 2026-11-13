@@ -32,6 +32,8 @@ zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F 
 zelper add session NAME [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab [TAB...] [--empty] [--yes] [--dry-run] [--json]
+zelper remove session NAME... [--yes] [--dry-run] [--json]
+zelper remove session (--all | --dead | --me) [--yes] [--dry-run] [--json]
 zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
 zelper move pane PANE --to-tab TABSPEC [--json]        （3形式は相互排他かつちょうど1つ）
 zelper move pane PANE --swap-with PANE [--json]
@@ -54,6 +56,7 @@ zelper docs readme | llm usage|skill|snippet
 - `move pane`: action positional（direction/rotate）/ `--to-tab` / `--swap-with` は**三者相互排他かつちょうど1つ必須**。`--backwards` はaction=rotateとのみ併用可。`--swap-with` の相手と同一対象（自分自身）はusage error
 - 引数検証（usage error, exit 2）はapp層でbackend初期化（version確認・session解決）の後に行われるため、zellij不在時は引数不正より `ZellijUnavailable`（exit 4）が優先する（全verb共通）
 - `remove tab --empty` はTAB省略可。省略時は全空tab（selectable paneが0個のtab）が対象
+- `remove session`: selectorは `NAME...`（1件以上）/ `--all` / `--dead` / `--me` の**4者相互排他かつちょうど1つ必須**（NAME重複は除去し指定順保持）
 
 既定値: `add pane/tab --count 1`、`resize pane STEPS 1`、`watch --interval 1.0 --max 30`。
 
@@ -67,11 +70,13 @@ zelper docs readme | llm usage|skill|snippet
 
 `watch` の意味論: 対象pane（複数可・any-hit）の出力を`--interval`秒間隔でpolling（`dump-screen`反復）し、`-- PATTERN`を含む行が出現したら即hit（exit 0）。attempt 1はsleepなし即時実行のため開始前の既出テキストもhit（`--full`でscrollback込み）。照合はdump-screen生テキストの行単位（既定は固定substring・`--regex`で正規表現。ANSI正規化なし）。hit paneはvisual order最初の1件。`--max`回到達でno hitなら失敗。
 
-`attach` / `detach` / `add session` の意味論（session lifecycle・DD-14）:
+`attach` / `detach` / `add session` / `remove session` の意味論（session lifecycle・DD-11/14）:
 
 - `attach`: 対話client起動。**stdin・stdoutの両方がTTYであること必須**（非TTYはzellij起動前に `Preflight` exit 7で拒否。agent/script実行からは使えない。`--session` 不在名・session 0個の `NoTarget` exit 3はこのTTY検査より先に立つ）。対話終了後のみ報告（human `attach session 'NAME' ended` / JSON `data.session`）。zellij非zero終了は `OperationFailed` exit 5
 - `detach`: 対象sessionのattach clientをdetach。client不在でも成功（no-op）扱い（human `detached clients from session 'NAME'` / JSON `data.session`）。複数clientがattach中の場合、detachはzellijの仕様として最新のattach clientのみ切断し、先発clientは画面凍結のまま残留する（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しない）
 - `add session NAME`: detached session作成（`attach -b NAME` 相当の非対話経路）。session 0件環境でも動作（対象session解決を経ない例外dispatch）。同名running session既存は `Preflight` exit 7（fail-fast）・作成呼出失敗は `OperationFailed` exit 5・作成後のlist-sessions出現確認は `VerificationFailed` exit 7。成功は human `created session 'NAME' (detached)` / JSON `data.session`・`data.created=true`。作成直後は空session（tab 1・pane 0件）でfirst attach時にdefault layoutが具現化する。layout適用は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行う
+- `remove session`: sessionの完全削除（session行もresurrection dataも消す。killのみ/dataのみの区別はzellij 0.44.3に存在しないため単一意味論。各対象は `zellij delete-session NAME -f` 1呼び出し）。selectorは `NAME...` / `--all`（EXITED行を含む全行）/ `--dead`（EXITED行のみ）/ `--me`（自session）のちょうど1つ。EXITED行も削除対象として受理（不在名は `NoTarget` exit 3・candidatesはEXITED込み）。session 0件環境でも動作（例外dispatch）。**常に** `--yes` か `--dry-run` が必要（単一対象でも）。`--dry-run` は対象毎のplan（human `[plan] remove session 'X' (running, N tabs, M panes)` / `(dead)`・JSON `data.plan.targets[]`。dead対象はtabs/panes=null・list-tabs呼出なし）を出力して実行しない
+- `remove session` の自session保護: 自session（環境変数 `ZELLIJ_SESSION_NAME`）の削除は `--me` 指定時のみ許可。`NAME...` に自sessionが含まれる場合は状態変更前に `Preflight` exit 7で拒否（`--me` へ案内）し、`--all` は自sessionを除外してstderr warning行で通知（自sessionのみなら `NoTarget` exit 3で `--me` を案内）。`--me` はenv不在で `Preflight` exit 7（dry-runでも）。`--me` 実行はzelper自身が巻き込まれて報告・exit status・検証が実行されない可能性があるbest-effort契約で、実行前にstderr warning行を出す。成功報告は human `removed session 'X'`（dead対象は `(was dead)` 付き・`--me` は `(current session)` 付き）/ JSON `data.results[]`（target=session名）。全対象実行後にlist-sessions消失を検証（残存はper-target失敗・部分失敗はexit 6）。行の出ない残data（cacheにsession_info残留のみ）は対象外: `zellij delete-session NAME` を直接使う
 
 ## JSON出力契約（`--json`）
 
@@ -119,7 +124,7 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 
 ## 安全機構
 
-- `remove`: 対象2件以上（または `--empty`）は破壊的とみなし、`--yes` か `--dry-run` がない限りerror（`Preflight` exit 7のgate。単一対象は即実行）
+- `remove`（pane/tab）: 対象2件以上（または `--empty`）は破壊的とみなし、`--yes` か `--dry-run` がない限りerror（`Preflight` exit 7のgate。単一対象は即実行）。**`remove session` は対象数・selector種別によらず常にgate**（単一NAMEでも `--yes`/`--dry-run` 必須。全pane・tab・resurrection dataを不可逆に巻き込むため）
 - `remove --dry-run`: 削除計画を表示して実行しない
 - `remap` は実行開始前に存在したpaneのkill/restartを行わない（run一致不成立でzelper自身がspawnした複製pane・開始前snapshotに存在しないidで対応規則によりdupと特定されたもののみcloseし、`closed_duplicates` で報告）。移動が必要な場合はprobe（companion plugin応答性確認）成功後に状態変更を開始し、不成立なら一切の状態変更前に中断
 - `--dry-run` は一切のsession状態を変更しない（tab切替・companion pluginのwasm展開・permissions.kdl書換も発生しない）

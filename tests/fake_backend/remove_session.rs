@@ -38,21 +38,50 @@ fn delete_calls(b: &FakeBackend) -> Vec<String> {
 fn single_name_still_requires_yes_or_dry_run() {
     // (i) 単一NAME + gate違反: Preflight 7
     let b = FakeBackend::new(vec![], vec![]);
-    let err = run_session(&b, &names(&["fake"]), false, false, false, false, false, false)
-        .unwrap_err();
-    assert_eq!(*err.class(), ErrorClass::Preflight, "message: {}", err.message());
+    let err = run_session(
+        &b,
+        &names(&["fake"]),
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::Preflight,
+        "message: {}",
+        err.message()
+    );
     assert_eq!(err.exit_code(), 7, "message: {}", err.message());
     assert!(delete_calls(&b).is_empty(), "calls: {:?}", b.calls());
 
     // (ii) --dry-runはgate通過・状態変更なし
     let b = FakeBackend::new(vec![], vec![]);
-    run_session(&b, &names(&["fake"]), false, false, false, false, true, false).unwrap();
+    run_session(
+        &b,
+        &names(&["fake"]),
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+    )
+    .unwrap();
     assert!(delete_calls(&b).is_empty(), "calls: {:?}", b.calls());
 
     // (iii) --all selectorでもgate違反は同様（selector種別によらず常時）
     let b = FakeBackend::new(vec![], vec![]);
     let err = run_session(&b, &[], true, false, false, false, false, false).unwrap_err();
-    assert_eq!(*err.class(), ErrorClass::Preflight, "message: {}", err.message());
+    assert_eq!(
+        *err.class(),
+        ErrorClass::Preflight,
+        "message: {}",
+        err.message()
+    );
     assert_eq!(err.exit_code(), 7, "message: {}", err.message());
     assert!(delete_calls(&b).is_empty(), "calls: {:?}", b.calls());
 }
@@ -66,9 +95,23 @@ fn single_name_still_requires_yes_or_dry_run() {
 fn still_listed_session_is_reported_as_failure() {
     let b = FakeBackend::new(vec![], vec![]);
     b.mute_delete_session();
-    let err = run_session(&b, &names(&["fake"]), false, false, false, true, false, false)
-        .unwrap_err();
-    assert_eq!(*err.class(), ErrorClass::OperationFailed, "message: {}", err.message());
+    let err = run_session(
+        &b,
+        &names(&["fake"]),
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "message: {}",
+        err.message()
+    );
     assert_eq!(err.exit_code(), 5, "message: {}", err.message());
     let data = err.data().expect("per-target results in error.data");
     let results = data["results"].as_array().unwrap();
@@ -101,9 +144,23 @@ fn postcheck_list_failure_preserves_class_with_context() {
     // OperationFailed（既定注入class）: exit 5保持
     let b = FakeBackend::new(vec![], vec![]);
     b.fail_list_sessions_after_delete();
-    let err = run_session(&b, &names(&["fake"]), false, false, false, true, false, false)
-        .unwrap_err();
-    assert_eq!(*err.class(), ErrorClass::OperationFailed, "message: {}", err.message());
+    let err = run_session(
+        &b,
+        &names(&["fake"]),
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "message: {}",
+        err.message()
+    );
     assert_eq!(err.exit_code(), 5, "message: {}", err.message());
     let msg = err.message();
     assert!(msg.contains("but failed to confirm"), "message: {msg}");
@@ -119,8 +176,17 @@ fn postcheck_list_failure_preserves_class_with_context() {
     let b = FakeBackend::new(vec![], vec![]);
     b.fail_list_sessions_after_delete();
     b.inject_failure_as(ErrorClass::ZellijUnavailable);
-    let err = run_session(&b, &names(&["fake"]), false, false, false, true, false, false)
-        .unwrap_err();
+    let err = run_session(
+        &b,
+        &names(&["fake"]),
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
     assert_eq!(
         *err.class(),
         ErrorClass::ZellijUnavailable,
@@ -189,7 +255,17 @@ fn exited_name_is_accepted_and_removed_via_dead_path() {
     // (i) 実行: EXITED行を受理しdelete-session 1回・postcondition通過
     let b = FakeBackend::new(vec![], vec![]);
     b.set_sessions(vec![sess("live", false), sess("dead1", true)]);
-    run_session(&b, &names(&["dead1"]), false, false, false, true, false, false).unwrap();
+    run_session(
+        &b,
+        &names(&["dead1"]),
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+    )
+    .unwrap();
     assert_eq!(
         delete_calls(&b),
         vec!["delete-session dead1 -f".to_string()],
@@ -203,12 +279,26 @@ fn exited_name_is_accepted_and_removed_via_dead_path() {
         .iter()
         .map(|s| s.name.clone())
         .collect();
-    assert_eq!(remaining, vec!["live".to_string()], "remaining: {remaining:?}");
+    assert_eq!(
+        remaining,
+        vec!["live".to_string()],
+        "remaining: {remaining:?}"
+    );
 
     // (ii) dry-run: 受理されるが実行不発・状態不変
     let b = FakeBackend::new(vec![], vec![]);
     b.set_sessions(vec![sess("live", false), sess("dead1", true)]);
-    run_session(&b, &names(&["dead1"]), false, false, false, false, true, false).unwrap();
+    run_session(
+        &b,
+        &names(&["dead1"]),
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+    )
+    .unwrap();
     assert!(delete_calls(&b).is_empty(), "calls: {:?}", b.calls());
     assert_eq!(b.state.borrow().sessions.len(), 2);
 }

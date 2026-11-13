@@ -107,7 +107,7 @@ pub enum Verb {
         #[command(subcommand)]
         target: AddTarget,
     },
-    /// pane/tab削除
+    /// pane/tab/session削除
     Remove {
         #[command(subcommand)]
         target: RemoveTarget,
@@ -343,6 +343,35 @@ pub enum RemoveTarget {
         /// 「空tab」（selectable paneが0個）を削除対象にする
         #[arg(long)]
         empty: bool,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// session削除（TASK-84）: zelper remove session NAME... / --all / --dead / --me
+    ///
+    /// selectorは NAME...（1件以上）/ --all / --dead / --me の4者のうちちょうど1つ
+    /// （DD-1.5排他）。単一の完全削除意味論（session行もresurrection dataも消す。
+    /// backendは常に `zellij delete-session NAME -f`）。常時--yes/--dry-run必須。
+    /// --meはbest-effort: 自session削除でzelper自身が巻き込まれ、報告・exit
+    /// status・検証が実行されない可能性がある（実行前にstderr warning行を出す）。
+    /// 既知制限: list-sessions行なしの残data（registry掃除済み・cacheにsession_info
+    /// 残留）は対象外——`zellij delete-session NAME` でのみ到達可能
+    Session {
+        /// 削除対象session名（複数指定可・重複は除去。--all/--dead/--meと排他）
+        #[arg(conflicts_with_all = ["all", "dead", "me"])]
+        names: Vec<String>,
+        /// 全sessionを対象（EXITED行を含む。現在sessionは除外してwarning通知）
+        #[arg(long, conflicts_with_all = ["dead", "me"])]
+        all: bool,
+        /// EXITED行（resurrection可能な死session）のみを対象
+        #[arg(long, conflicts_with = "me")]
+        dead: bool,
+        /// 現在session（ZELLIJ_SESSION_NAME解決）を対象
+        #[arg(long)]
+        me: bool,
         #[arg(long)]
         yes: bool,
         #[arg(long)]
