@@ -199,7 +199,9 @@ fn remove_missing_pane_is_no_target() {
 }
 
 // ---------------------------------------------------------------------------
-// rename session（TASK-95・rename.tomlのL2層5条件。設計
+// rename session（TASK-95・rename.tomlのL2層6条件——postcondition両判定の独立保護
+// 〔rename_post_inject〕と不在/EXITED×衝突の検査優先順位test〔2条件tag〕は
+// コードレビュー対応で追加。設計
 // tmp/tasks/tm-95/design_rename-session.md §2/§2.9/§5実装上の注意）。
 // CLI表面（exit code実出力・文面・FAKE_LOG argv列・probe dispatch）はL3層
 // tests/cli/list_read_send.rs

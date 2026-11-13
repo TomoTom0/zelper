@@ -36,7 +36,7 @@ lib内test 14件（`src/app/list.rs` 3件・src/zellij/process.rs 11件〔TASK-8
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（304テスト）
+cargo test          # L1〜L3（317テスト）
 mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。316条件でexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）

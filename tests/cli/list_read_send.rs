@@ -3415,7 +3415,7 @@ fn remove_session_success_report_results_and_human_lines() {
 // 〔EXITED行混在可〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・${FAKE_LOG}.renamed
 // 〔rename-session作用のlist-sessions応答反映〕。FAKE_FAIL_RENAME_SESSION /
 // FAKE_MUTE_RENAME_SESSIONは機構のみ維持——呼出失敗・黙失敗系の検証はL2の
-// fail_op/mute注入条件が担う〔設計§2.10行使分担〕。L2層5条件は
+// fail_op/mute注入条件が担う〔設計§2.10行使分担〕。L2層6条件は
 // tests/fake_backend/rename_add_remove.rs）
 
 /// rename session成功経路のargvと報告（§2.0/2.6/2.7）: 実行は
@@ -3632,7 +3632,7 @@ fn rename_session_invalid_new_name_is_usage_error() {
         );
         // 文面は完全一致で検証
         let msg = v["error"]["message"].as_str().unwrap();
-        assert_eq!(msg, expect_msg, "case {i} (new_name={new_name:?})");
+        assert_eq!(msg, *expect_msg, "case {i} (new_name={new_name:?})");
         let cs = calls(&log);
         assert!(
             !cs.iter().any(|c| c == "list-sessions -n"),
