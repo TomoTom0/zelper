@@ -3500,16 +3500,16 @@ fn rename_session_missing_name_is_notarget_with_candidates() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "NoTarget");
     let msg = v["error"]["message"].as_str().unwrap();
-    // 単一対象のため単数形のsession不在文面（removeの複数名前提文面と異なる点）
-    assert!(msg.contains("not found"), "message: {msg}");
+    // 単一対象のため単数形のsession不在文面（removeの複数名前提文面と異なる点）。
+    // 対象名の欠落を見逃さないよう完全一致で検証
+    assert_eq!(msg, "session 'ghost' not found");
     // 共通解離経路の文面ではない
     assert!(
         !msg.contains("no running zellij session found"),
         "message: {msg}"
     );
-    let cands = v["error"]["candidates"].as_array().unwrap();
-    assert!(cands.iter().any(|c| c == "old"), "candidates: {cands:?}");
-    assert!(cands.iter().any(|c| c == "deadx"), "candidates: {cands:?}");
+    // candidates=全行のname（EXITED込み・行順）の完全一致
+    assert_eq!(v["error"]["candidates"], serde_json::json!(["old", "deadx"]));
     assert!(
         !calls(&log).iter().any(|c| c.contains("rename-session")),
         "calls: {:?}",
@@ -3530,7 +3530,7 @@ fn rename_session_missing_name_is_notarget_with_candidates() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "NoTarget");
     let msg = v["error"]["message"].as_str().unwrap();
-    assert!(msg.contains("no zellij sessions found"), "message: {msg}");
+    assert_eq!(msg, "no zellij sessions found");
 }
 
 /// NEW_NAME衝突の事前fail-fast（§2.2）: NEW_NAMEが既存行（running・EXITEDの
@@ -3558,8 +3558,8 @@ fn rename_session_new_name_collision_is_preflight() {
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(v["error"]["class"], "Preflight", "case {i}");
         let msg = v["error"]["message"].as_str().unwrap();
-        assert!(msg.contains("session already exists"), "message: {msg}");
-        assert!(msg.contains(new_name), "message: {msg}");
+        // 対象名の欠落を見逃さないよう完全一致で検証
+        assert_eq!(msg, format!("session already exists: '{new_name}'"));
         assert!(
             !calls(&log).iter().any(|c| c.contains("rename-session")),
             "case {i} calls: {:?}",
@@ -3589,7 +3589,7 @@ fn rename_session_same_name_is_usage_error() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "Usage");
     let msg = v["error"]["message"].as_str().unwrap();
-    assert!(msg.contains("must differ"), "message: {msg}");
+    assert_eq!(msg, "NEW_NAME must differ from NAME");
     // 一覧取得より前のfail-fast（list-sessions・rename-sessionとも不発。
     // check_capabilityの--version呼び出しはdispatch契約上発生する）
     let cs = calls(&log);
@@ -3600,16 +3600,21 @@ fn rename_session_same_name_is_usage_error() {
     );
 }
 
-/// NEW_NAME validationの最小set（§2.3）: 空文字と'/'含みNEW_NAMEはUsage
-/// （exit 2）で一覧取得より前に拒否する（観測された黙失敗〔空文字・M95-C1〕・
-/// 状態破壊〔'/'含みはcacheのsession_info directoryがnested pathへ部分移動・
-/// M95-C2〕系のみ。それ以外の文字種は事前拒否しない——受理側は
-/// whitespace-name-accepted条件〔L2〕が検出）
+/// NEW_NAME validationの最小set（§2.3）: 空文字・'/'含み・空白含みNEW_NAMEは
+/// Usage（exit 2）で一覧取得より前に拒否する（空文字は黙失敗〔M95-C1〕・'/'含みは
+/// cacheのsession_info directoryがnested pathへ部分移動する状態破壊〔M95-C2〕・
+/// 空白含みはzellij受理後もlist_sessions行から復元不能〔parse_sessionsが先頭
+/// wordのみ名前化〕のため。それ以外の文字種は事前拒否しない）
 // [covers:rename.session-invalid-new-name-usage-error]
 #[test]
 fn rename_session_invalid_new_name_is_usage_error() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    for (i, new_name) in ["", "a/b"].iter().enumerate() {
+    let cases = [
+        ("", "NEW_NAME must not be empty"),
+        ("a/b", "NEW_NAME must not contain '/'"),
+        ("a b", "NEW_NAME must not contain whitespace"),
+    ];
+    for (i, (new_name, expect_msg)) in cases.iter().enumerate() {
         let (mut cmd, log) = zelper(&format!("rename-sess-invalid-{i}"));
         let out = cmd
             .env("FAKE_SESSIONS", "old [Created 1m ago] (current)")
@@ -3625,6 +3630,9 @@ fn rename_session_invalid_new_name_is_usage_error() {
             v["error"]["class"], "Usage",
             "case {i} (new_name={new_name:?})"
         );
+        // 文面は完全一致で検証
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert_eq!(msg, expect_msg, "case {i} (new_name={new_name:?})");
         let cs = calls(&log);
         assert!(
             !cs.iter().any(|c| c == "list-sessions -n"),
@@ -3663,8 +3671,11 @@ fn rename_session_exited_name_is_refused() {
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["error"]["class"], "Preflight");
     let msg = v["error"]["message"].as_str().unwrap();
-    assert!(msg.contains("cannot rename an EXITED"), "message: {msg}");
-    assert!(msg.contains("attach"), "message: {msg}");
+    // §2.4指定文面の完全一致（resurrection案内を含む）
+    assert_eq!(
+        msg,
+        "cannot rename an EXITED (dead) session 'deadx' (attach to resurrect it first)"
+    );
     assert!(
         !calls(&log).iter().any(|c| c.contains("rename-session")),
         "calls: {:?}",

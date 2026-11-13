@@ -81,9 +81,10 @@ pub fn run_tab(
 /// main.rsからは対象session解離を必要としないprobe backendが渡される
 /// （RenameTarget::Session例外dispatch。設計§2.7）。
 ///
-/// 実行順序（設計§2.8）: app層Usage検査（空文字・'/'含み・同一名——いずれも
-/// zellijがrc=0で黙って失敗/部分適用する系列〔M4 I・M95-B/C1/C2〕のため、
-/// 一覧取得より前にfail-fast）→ 事前list_sessions（1回の取得をNAME不在・
+/// 実行順序（設計§2.8）: app層Usage検査（空文字・'/'含み・空白含み・同一名
+/// ——空文字・'/'・同一名はzellijがrc=0で黙って失敗/部分適用する系列〔M4 I・
+/// M95-B/C1/C2〕、空白含みはzellijが受理してもlist_sessionsの世界modelで
+/// 復元不能なため、いずれも一覧取得より前にfail-fast）→ 事前list_sessions（1回の取得をNAME不在・
 /// EXITED判定・NEW_NAME衝突の全判定に共用。存在確認はEXITED込み = remove
 /// sessionと同一基準）→ rename呼出（action形式・DD-3.1判定はbackendが担う）→
 /// 事後list_sessionsでpostcondition（旧名消失+新名running出現。rc=0黙失敗の
@@ -97,8 +98,10 @@ pub fn run_session(
     json: bool,
 ) -> Result<(), ZelperError> {
     // app層Usage検査（§2.2/§2.3: 無駄なbackend呼出をしない。先頭'-'はclapが
-    // 既に拒否済みのため検査しない。それ以外の文字種（空白含み等）はzellijが
-    // 受理するためwhitelist検査は導入しない——すり抜けはpostconditionが最終防衛）
+    // 既に拒否済みのため検査しない。空白含み名はzellijが受理する（M95-C3）が
+    // parse_sessionsが先頭wordのみを名前化するためlist_sessionsで復元不能
+    // （postcondition必敗）——世界modelで表現可能な名前のみ許可する。それ以外の
+    // 文字種は推測で事前拒否せず、すり抜けはpostconditionが最終防衛）
     if new_name.is_empty() {
         return Err(ZelperError::new(
             ErrorClass::Usage,
@@ -109,6 +112,12 @@ pub fn run_session(
         return Err(ZelperError::new(
             ErrorClass::Usage,
             "NEW_NAME must not contain '/'",
+        ));
+    }
+    if new_name.contains(char::is_whitespace) {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must not contain whitespace",
         ));
     }
     if name == new_name {

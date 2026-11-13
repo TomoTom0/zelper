@@ -1,6 +1,6 @@
 // L2: rename / add / remove（fake backend。test-plan §2.5、remove安全gate）
 mod fake;
-use fake::FakeBackend;
+use fake::{FakeBackend, RenamePostInjection};
 use zelper::domain::*;
 use zelper::error::ErrorClass;
 
@@ -215,15 +215,18 @@ fn sess(name: &str, exited: bool) -> SessionRef {
 
 /// 成功時のbackend状態書き換え契約（§2.9）: rename_session呼出成功でsessionsの
 /// from行がtoへ書き換わる（exited不変——renameは実行状態を変えない）。呼出記録は
-/// `rename-session@<from> <to>` 形式（fail_opのprefix照合で失敗注入可）
+/// `rename-session@<from> <to>` 形式（fail_opのprefix照合で失敗注入可）。
+/// 呼出列は事前一覧→rename→事後一覧の3呼用・完全一致で固定（§2.5: 事前1回を
+/// 全事前判定に共用するためlist-sessionsはこの3回のみ）
 // [covers:rename.session-state-rewrite-on-success]
 #[test]
 fn rename_session_rewrites_sessions_state_on_success() {
     let b = FakeBackend::new(vec![], vec![]);
     b.set_sessions(vec![sess("old", false), sess("dead1", true)]);
     zelper::app::rename::run_session(&b, "old", "new", false).unwrap();
-    assert!(
-        b.calls().iter().any(|c| c == "rename-session@old new"),
+    assert_eq!(
+        b.calls(),
+        vec!["list-sessions", "rename-session@old new", "list-sessions"],
         "calls: {:?}",
         b.calls()
     );
@@ -250,10 +253,10 @@ fn rename_session_silent_noop_detected_by_postcondition() {
         err.message()
     );
     assert_eq!(err.exit_code(), 7, "message: {}", err.message());
-    assert!(
-        err.message().contains("did not take effect"),
-        "message: {}",
-        err.message()
+    // §2.5指定文面の完全一致（対象名の欠落を見逃さない）
+    assert_eq!(
+        err.message(),
+        "rename of session 'old' did not take effect (unchanged in list-sessions)"
     );
     // 呼出自体はrc=0成功扱いで発行済み
     assert!(
@@ -328,19 +331,102 @@ fn rename_session_postcheck_list_failure_preserves_class_with_context() {
     assert!(msg.contains("injected failure"), "message: {msg}");
 }
 
-/// 空白含みNEW_NAMEの受理（§2.3）: zellijが受理する名（実測M95-C3: "a b"）を
-/// wrap側でも拒否せずそのまま実行する（whitelist検査を導入していないことの検出。
-/// 空白含み名はL3 shimのrenamed状態file〔space区切り〕で模擬不能なためL2が担う）
-// [covers:rename.session-whitespace-name-accepted]
+/// 空白含みNEW_NAMEの事前拒否（§2.3）: zellij自体は空白含み名を受理する
+/// （実測M95-C3: "a b" rename成功）が、parse_sessionsがlist-sessions行の先頭
+/// wordのみを名前化するため空白含み名はzellerの世界modelで復元不能
+/// （postcondition必敗）。zellij受理可能性と世界modelでの表現可能性は別問題で
+/// あり、世界modelで復元不能な名前の作成はUsage（exit 2）で事前拒否する
+// [covers:rename.session-whitespace-name-rejected]
 #[test]
-fn rename_session_accepts_whitespace_in_new_name() {
+fn rename_session_rejects_whitespace_in_new_name() {
     let b = FakeBackend::new(vec![], vec![]);
     b.set_sessions(vec![sess("s3", false)]);
-    zelper::app::rename::run_session(&b, "s3", "a b", false).unwrap();
-    assert!(
-        b.calls().iter().any(|c| c == "rename-session@s3 a b"),
-        "calls: {:?}",
-        b.calls()
+    let err = zelper::app::rename::run_session(&b, "s3", "a b", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::Usage,
+        "message: {}",
+        err.message()
     );
-    assert_eq!(b.state.borrow().sessions[0].name, "a b");
+    assert_eq!(err.exit_code(), 2, "message: {}", err.message());
+    assert_eq!(err.message(), "NEW_NAME must not contain whitespace");
+    // 一覧取得より前のfail-fast: いずれのbackend呼出も不発
+    assert!(b.calls().is_empty(), "calls: {:?}", b.calls());
+}
+
+/// postcondition各判定の独立保護（§2.5）: 旧名消失・新名running出現の両判定が
+/// それぞれ単独で不成立となる事後状態では、いずれもVerificationFailed（exit 7）
+/// になる。実装を片方の判定のみへ弱めても検出されることの固定
+/// （(a) 旧名残存+新名running行追加 (b) 旧名・新名とも行消失
+/// (c) 旧名消失+新名がEXITED行で出現——exited == false検査の独立保護）
+// [covers:rename.session-postcondition-both-branches-required]
+#[test]
+fn rename_session_postcondition_requires_both_branches() {
+    for (i, inj) in [
+        RenamePostInjection::KeepOldAddNew,
+        RenamePostInjection::DropBoth,
+        RenamePostInjection::NewAsExited,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let b = FakeBackend::new(vec![], vec![]);
+        b.set_sessions(vec![sess("old", false)]);
+        b.inject_rename_post(*inj);
+        let err = zelper::app::rename::run_session(&b, "old", "new", false).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::VerificationFailed,
+            "case {i} message: {}",
+            err.message()
+        );
+        assert_eq!(err.exit_code(), 7, "case {i} message: {}", err.message());
+        // 呼出自体はrc=0成功扱いで発行済み（全系列で一覧→rename→一覧の3呼用）
+        assert_eq!(
+            b.calls(),
+            vec!["list-sessions", "rename-session@old new", "list-sessions"],
+            "case {i} calls: {:?}",
+            b.calls()
+        );
+    }
+}
+
+/// 事前検査の優先順位固定（§2.8）: 複合違反入力で (i) 不在NAME×NEW_NAME衝突は
+/// 不在（NoTarget exit 3）が、(ii) EXITED行NAME×NEW_NAME衝突はEXITED拒否
+/// （Preflight exit 7・resurrection案内文面）が、それぞれNEW_NAME衝突検査に
+/// 優先する。文面・candidatesは完全一致で検証
+// [covers:rename.session-missing-name-notarget-with-candidates]
+// [covers:rename.session-exited-name-preflight-refused]
+#[test]
+fn rename_session_check_order_missing_and_exited_before_collision() {
+    // (i) 不在NAME（ghost）× NEW_NAME=既存running名（taken）: NoTarget優先
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false), sess("taken", false)]);
+    let err = zelper::app::rename::run_session(&b, "ghost", "taken", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::NoTarget,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 3, "message: {}", err.message());
+    assert_eq!(err.message(), "session 'ghost' not found");
+    // candidates=全行のname（EXITED込み・行順）の完全一致
+    assert_eq!(err.candidates(), &["old".to_string(), "taken".to_string()]);
+
+    // (ii) EXITED行NAME（deadx）× NEW_NAME=既存running名（old）: EXITED優先
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false), sess("deadx", true)]);
+    let err = zelper::app::rename::run_session(&b, "deadx", "old", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::Preflight,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 7, "message: {}", err.message());
+    assert_eq!(
+        err.message(),
+        "cannot rename an EXITED (dead) session 'deadx' (attach to resurrect it first)"
+    );
 }

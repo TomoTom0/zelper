@@ -63,7 +63,7 @@ Requirements:
 
 - rename a pane
 - rename a tab
-- rename a session (added 2026-11-13, TASK-95 — the old name is pre-verified against the session list including EXITED rows; NEW_NAME collisions with any existing row (EXITED included), EXITED source sessions, and empty / `/`-containing / identical new names are refused before execution, and success is verified by the old name disappearing and the new name appearing as running in the session list)
+- rename a session (added 2026-11-13, TASK-95 — the old name is pre-verified against the session list including EXITED rows; NEW_NAME collisions with any existing row (EXITED included), EXITED source sessions, and empty / `/`-containing / whitespace-containing / identical new names are refused before execution, and success is verified by the old name disappearing and the new name appearing as running in the session list)
 - support multiple targets where useful
 - provide a path for generated/pattern-based names in detailed design if this can remain understandable and safe
 

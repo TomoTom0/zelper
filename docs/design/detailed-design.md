@@ -55,7 +55,7 @@ send (PANESPEC... | --tab TABSPEC | --name NAME | --command CMD | --cwd DIR | --
      ( -- TEXT | --keys KEY... ) [--enter] [--json]
 rename pane PANESPEC NAME
 rename tab  TABSPEC  NAME
-rename session NAME NEW_NAME                                     # TASK-95。旧NAME存在確認はEXITED込み
+rename session NAME NEW_NAME                                     # TASK-95。旧NAME存在確認はEXITED込み。NEW_NAMEの空文字・'/'・空白含み・同一名はusage error
      # （不在はNoTarget+candidates=全行名）。NEW_NAME衝突（EXITED込み）・EXITED旧名は
      # Preflight・同一名・空文字/'/'含み新名はUsageで事前拒否（zellijがrc=0で黙って
      # 失敗する系列のため。詳細はDD-8 rename session）
@@ -353,7 +353,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 - plan: `rename-pane -p` / `rename-tab-by-id <id> <name>`
 - postcondition: `list-panes`/`list-tabs`でtitle/name反映を確認（サイレント成功対策）
 - 失敗: 検証失敗はclass=`VerificationFailed`（exit 7）
-- **session（TASK-95・2026-11-13追加。設計書: `tmp/tasks/tm-95/design_rename-session.md`）**: requestは旧NAME+NEW_NAME（ともにpositional必須。`zelper rename session NAME NEW_NAME`）。実行は `zellij --session <from> action rename-session <to>`（top-level rename-sessionはzellij 0.44.3に存在しないため。実測M1/M3）。zellijは既存session名へのrename・空文字・同一名をrc=0・両stream空で**黙って失敗**し（M4 I・M95-B/C1）、'/'含み新名はcacheのsession_info directoryのみnested pathへ移動する部分的適用になる（M95-C2）ため、wrap側の事前検査+postcondition検証が本質: (1) app層Usage検査（空文字・'/'含み・同一名——一覧取得より前）(2) 事前list_sessions 1回の取得で旧名不在（NoTarget・candidates=全行名EXITED込み・行0件は「no zellij sessions found」）・EXITED旧名（Preflight・attachによるresurrection案内）・NEW_NAME衝突（Preflight・EXITED込み）を判定 (3) rename呼出（失敗はOperationFailed exit 5）(4) 事後list_sessionsでpostcondition: 旧名行消失+新名行がrunning出現の両方（不成立は`VerificationFailed` exit 7。事後一覧取得失敗は元class/exit保持+`renamed session 'NAME' but failed to confirm: <元message>`——add sessionと同一pattern）。報告: human `renamed session 'old' -> 'new'` / JSON `data.renamed_session`=旧名・`data.name`=新名。dispatchは例外dispatch（DD-14・probe backend）
+- **session（TASK-95・2026-11-13追加。設計書: `tmp/tasks/tm-95/design_rename-session.md`）**: requestは旧NAME+NEW_NAME（ともにpositional必須。`zelper rename session NAME NEW_NAME`）。実行は `zellij --session <from> action rename-session <to>`（top-level rename-sessionはzellij 0.44.3に存在しないため。実測M1/M3）。zellijは既存session名へのrename・空文字・同一名をrc=0・両stream空で**黙って失敗**し（M4 I・M95-B/C1）、'/'含み新名はcacheのsession_info directoryのみnested pathへ移動する部分的適用になる（M95-C2）。空白含み新名はzellij自体は受理する（M95-C3）がlist-sessions行の先頭wordのみが名前としてparseされるためzellerの世界modelで復元不能（postcondition必敗）——世界modelで復元不能な名前の作成は許可しない。これらのためwrap側の事前検査+postcondition検証が本質: (1) app層Usage検査（空文字・'/'含み・空白含み・同一名——一覧取得より前）(2) 事前list_sessions 1回の取得で旧名不在（NoTarget・candidates=全行名EXITED込み・行0件は「no zellij sessions found」）・EXITED旧名（Preflight・attachによるresurrection案内）・NEW_NAME衝突（Preflight・EXITED込み）を判定 (3) rename呼出（失敗はOperationFailed exit 5）(4) 事後list_sessionsでpostcondition: 旧名行消失+新名行がrunning出現の両方（不成立は`VerificationFailed` exit 7。事後一覧取得失敗は元class/exit保持+`renamed session 'NAME' but failed to confirm: <元message>`——add sessionと同一pattern）。報告: human `renamed session 'old' -> 'new'` / JSON `data.renamed_session`=旧名・`data.name`=新名。dispatchは例外dispatch（DD-14・probe backend）
 
 ## DD-9. `resize` アルゴリズム
 

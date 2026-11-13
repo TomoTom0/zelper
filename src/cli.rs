@@ -209,9 +209,10 @@ pub enum RenameTarget {
     /// （TASK-95）。旧名・新名とも必須（不足・先頭'-'値はusage error）。
     /// global --session flagは無視（list/add/remove sessionと同一規約——対象
     /// session名をpositionalで明示するため解決に使わない）。既存session名への
-    /// rename・空文字・'/'含み新名はzellijがrc=0で黙って失敗する（M4 I・
-    /// M95-C1/C2実測）ため、衝突・validation事前検査とpostcondition検証は
-    /// wrap側で行う
+    /// rename・空文字・'/'含み新名はzellijがrc=0で黙って失敗し（M4 I・
+    /// M95-C1/C2実測）、空白含み新名はzellij受理後もlist-sessions行から名前を
+    /// 復元できないため、いずれもwrap側が事前検査で拒否しpostcondition検証を
+    /// 行う
     Session {
         name: String,
         new_name: String,

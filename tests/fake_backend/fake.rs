@@ -52,6 +52,18 @@ impl FakeRun {
     }
 }
 
+/// TASK-95レビュー対応: rename_session呼出後の事後list_sessions状態注入
+/// （postcondition各判定〔旧名消失・新名running出現〕の独立保護検証用）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenamePostInjection {
+    /// 旧名残存 + 新名running行追加（旧名消失検査の独立保護）
+    KeepOldAddNew,
+    /// 旧名・新名とも行消失（新名running出現検査の独立保護）
+    DropBoth,
+    /// 旧名消失 + 新名がEXITED行で出現（exited == false検査の独立保護）
+    NewAsExited,
+}
+
 pub struct FakeBackend {
     pub state: RefCell<FakeState>,
     /// 呼び出し記録（"rename-pane terminal_1" 形式）
@@ -207,6 +219,9 @@ pub struct FakeBackend {
     /// のみ失敗の系列。fail_opは先頭一致で事前確認側に当たるため専用arm——
     /// fail_list_sessions_after_deleteと同型）
     pub fail_list_sessions_after_rename: Cell<bool>,
+    /// rename session用（TASK-95レビュー対応）: rename_session呼出の状態作用を
+    /// 差し替える事後状態注入（None = 通常の書き換え〔from行をtoへ・exited不変〕）
+    pub rename_post_inject: Cell<Option<RenamePostInjection>>,
 }
 
 pub struct FakeState {
@@ -303,6 +318,7 @@ impl FakeBackend {
             fail_list_sessions_after_delete: Cell::new(false),
             mute_rename_session: Cell::new(false),
             fail_list_sessions_after_rename: Cell::new(false),
+            rename_post_inject: Cell::new(None),
         }
     }
 
@@ -603,6 +619,13 @@ impl FakeBackend {
     #[allow(dead_code)]
     pub fn fail_list_sessions_after_rename(&self) {
         self.fail_list_sessions_after_rename.set(true);
+    }
+
+    /// rename session用（TASK-95レビュー対応）: rename_session呼出の状態作用を
+    /// 差し替える（postcondition各判定の独立保護検証用の事後状態注入）
+    #[allow(dead_code)]
+    pub fn inject_rename_post(&self, inj: RenamePostInjection) {
+        self.rename_post_inject.set(Some(inj));
     }
 
     /// remove session用（TASK-84）: session一覧の初期状態を差し替える
@@ -1867,15 +1890,39 @@ impl ZellijBackend for FakeBackend {
     /// fail_opのprefix照合〔record内starts_with〕により`rename-session@`等で
     /// 失敗注入可）と、sessions内のname == from行をname = toへ書き換え
     /// （exitedは不変——renameは実行状態を変えない）を行う。
-    /// mute_rename_session注入時は記録のみで書き換えない（rc=0・黙失敗模擬）
+    /// mute_rename_session注入時は記録のみで書き換えない（rc=0・黙失敗模擬）。
+    /// rename_post_inject注入時（レビュー対応）は状態作用を差し替える
+    /// （postcondition各判定の独立保護検証用）
     fn rename_session(&self, from: &str, to: &str) -> Result<(), ZelperError> {
         self.record(&format!("rename-session@{from} {to}"))?;
         if self.mute_rename_session.get() {
             return Ok(());
         }
         let mut s = self.state.borrow_mut();
-        if let Some(x) = s.sessions.iter_mut().find(|x| x.name == from) {
-            x.name = to.to_string();
+        match self.rename_post_inject.get() {
+            // 旧名残存 + 新名running行追加（旧名消失検査の独立保護）
+            Some(RenamePostInjection::KeepOldAddNew) => s.sessions.push(SessionRef {
+                name: to.to_string(),
+                created: Some("1m ago".into()),
+                current: false,
+                exited: false,
+            }),
+            // 旧名・新名とも行消失（新名running出現検査の独立保護）
+            Some(RenamePostInjection::DropBoth) => {
+                s.sessions.retain(|x| x.name != from);
+            }
+            // 旧名消失 + 新名がEXITED行で出現（exited == false検査の独立保護）
+            Some(RenamePostInjection::NewAsExited) => {
+                if let Some(x) = s.sessions.iter_mut().find(|x| x.name == from) {
+                    x.name = to.to_string();
+                    x.exited = true;
+                }
+            }
+            None => {
+                if let Some(x) = s.sessions.iter_mut().find(|x| x.name == from) {
+                    x.name = to.to_string();
+                }
+            }
         }
         Ok(())
     }
