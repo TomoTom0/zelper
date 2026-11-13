@@ -232,6 +232,9 @@ pub trait ZellijBackend {
     fn go_to_tab(&self, tab: TabId) -> Result<()>;                       // remapの--tab用
     fn dump_layout(&self) -> Result<String>;
     fn toggle_embed_floating(&self, pane: &PaneKindId) -> Result<()>;    // remapの--embed-floating用
+    fn attach_session(&self) -> Result<()>;                            // 対話attach（DD-14）。`attach <session>` positional・run_interactive（stdio inherit×3・timeout無効）
+    fn detach_session(&self) -> Result<()>;                            // 対象sessionのattach clientをdetach（DD-14）。`--session NAME action detach`
+    fn create_session_detached(&self, name: &str) -> Result<()>;        // detached session作成（DD-14）。`attach -b NAME`（positional。global --session形式は禁止）
     fn delete_session(&self, name: &str) -> Result<()>;                 // delete-session <name> -f（top-level positional。DD-11 remove session・TASK-84）
     fn pipe_plugin(&self, path: &std::path::Path, name: &str, payload: &str) -> Result<()>;
     // action pipe --plugin file:<path> --name <name> -- <payload>（DD-10.3）。

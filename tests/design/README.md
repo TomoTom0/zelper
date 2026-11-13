@@ -14,7 +14,7 @@ mise run verify-conditions
 
 ## 条件書一覧（20 file・303条件）
 
-verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。TASK-93テスト先行更新の4 file〔cli-grammar・list-display・backend-process・attach-detach〕はfail-first期間中のためfalse——実装・全条件緑化後に再記録。TASK-84テスト先行作成のremove-sessionも同様にfail-first期間中のためfalse）。
+verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。TASK-93テスト先行更新の4 file〔cli-grammar・list-display・backend-process・attach-detach〕はfail-first期間中のためfalse——実装・全条件緑化後に再記録。TASK-84のremove-sessionは実装工程で全条件緑化後にtrueへ再記録済み）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -37,7 +37,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 17 | watch | src/app/watch.rs | fake_watch（loop系6件）+ cli_list_read_send（部分10件） | 16 | true |
 | 18 | attach-detach | src/app/attach.rs | fake_attach（L2・4件）+ cli_list_read_send（部分10件）+ lib src/zellij/process.rs（部分2件） | 16 | false（TASK-93 fail-first） |
 | 19 | move | src/app/move_.rs | fake_move（24件）+ cli_list_read_send（部分5件・L3） | 24 | true |
-| 20 | remove-session | src/app/remove.rs | fake_remove_session（5件）+ cli_list_read_send（部分16件・L3） | 21 | false（TASK-84 fail-first） |
+| 20 | remove-session | src/app/remove.rs | fake_remove_session（5件）+ cli_list_read_send（部分16件・L3） | 21 | true |
 
 source_fileの代表とnote欄記載の対応（設計書§2.2）:
 

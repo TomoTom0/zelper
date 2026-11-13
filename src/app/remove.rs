@@ -479,40 +479,55 @@ pub fn run_session(
     // postcondition（§2.11）: 全target実行後にlist_sessionsを1回取得し全対象行の
     // 消失を確認（delete-session -fがrc=0でも無操作あり得る系のため実測の消失
     // 確認は必須）。残存はper-target失敗（VerificationFailed不使用）へfold。
-    // 一覧取得失敗は元class/exitを保持しmessageへ文脈付与（add session DD-14と
-    // 同一の「but failed to confirm」pattern）
-    let after = backend.list_sessions().map_err(|e| {
-        let list = targets
-            .iter()
-            .map(|(n, _, _)| format!("'{n}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        ZelperError::new(
-            e.class().clone(),
-            format!(
+    // 一覧取得失敗は実行済み全targetをunverified失敗扱い: 元class/exitを保持して
+    // messageへ文脈付与（add session DD-14と同一の「but failed to confirm」
+    // pattern）しつつ、蓄積済みresultsは破棄せず全対象の結果をerror.data.results[]
+    // とhuman報告へ出す（削除呼出失敗対象はその失敗理由を維持。DD-4対象別報告）
+    let ok_line = |r: &output::json::TargetedResult<String>| {
+        let suffix = match r.detail.as_deref() {
+            Some("dead") => " (was dead)",
+            Some("current") => " (current session)",
+            _ => "",
+        };
+        format!("removed session '{}'{}", r.target, suffix)
+    };
+    let after = match backend.list_sessions() {
+        Ok(after) => after,
+        Err(e) => {
+            let list = targets
+                .iter()
+                .map(|(n, _, _)| format!("'{n}'"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let confirm = format!(
                 "removed session(s) {list} but failed to confirm: {}",
                 e.message()
-            ),
-        )
-    })?;
+            );
+            for r in results.iter_mut() {
+                if r.ok {
+                    r.ok = false;
+                    r.error = Some(format!("removed but failed to confirm: {}", e.message()));
+                }
+            }
+            // report()のhuman行・envelope構造（FAILED行・data.results同梱）を流用し、
+            // 全失敗扱いのclass/exitのみlist_sessions失敗の元class保持へ差し替える
+            // （report()構造・pane/tab経路は不変）
+            return report(results, ok_line, json).map_err(|rep| {
+                let mut err = ZelperError::new(e.class().clone(), confirm);
+                if let Some(d) = rep.data() {
+                    err = err.with_data(d.clone());
+                }
+                err
+            });
+        }
+    };
     for r in results.iter_mut() {
         if r.ok && after.iter().any(|s| s.name == r.target) {
             r.ok = false;
             r.error = Some(format!("session '{}' still listed after removal", r.target));
         }
     }
-    report(
-        results,
-        |r| {
-            let suffix = match r.detail.as_deref() {
-                Some("dead") => " (was dead)",
-                Some("current") => " (current session)",
-                _ => "",
-            };
-            format!("removed session '{}'{}", r.target, suffix)
-        },
-        json,
-    )
+    report(results, ok_line, json)
 }
 
 /// NAME不在のNoTarget（§2.9）: candidatesは全行のname（EXITED行も含む——

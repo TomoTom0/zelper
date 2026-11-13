@@ -53,6 +53,11 @@ if [[ "$1" == "delete-session" ]]; then
   # list-sessions応答へ反映しない（rc=0・postcondition不一致模擬）。通常は成功
   # stdout 2行（M5 E実測形式。zellerはこれをparseしない）+ 削除名を
   # ${FAKE_LOG}.deletedへ記録
+  # TASK-84指摘3: 削除開始の順序検証用marker。shim自体のstderrはbackendに
+  # captureされてtestへ届かないため、親（zeller）のfd 2（testがcaptureするstderr）
+  # へ直接出す。zellerのwarning行がこのmarkerより前に現れることで「自壊前通知」
+  # （§2.3）を検証する
+  echo "shim: delete-session handler start" > /proc/$PPID/fd/2 2>/dev/null || true
   dname="$2"
   for fail in $FAKE_FAIL_DELETE_SESSION; do
     if [[ "$fail" == "$dname" ]]; then echo "boom" >&2; exit 1; fi
@@ -2834,7 +2839,9 @@ fn remove_session_emits_delete_session_f_argv() {
 
 /// 部分失敗の継続実行と報告（§2.12）: 一部targetのdelete-session呼出が非zero終了
 /// しても残targetを実行し、全体はPartialFailure（exit 6）でper-target結果
-/// （data.results[]）付きで報告する。rollbackしない
+/// （data.results[]）付きで報告する。rollbackしない。失敗は先頭target（foo）に
+/// 注入——最後のtargetの失敗では早期打ち切り実装でも通るため、後続target（bar）
+/// の呼出・成功結果まで検証できる構成とする
 // [covers:remove-session.per-target-partial-failure]
 #[test]
 fn remove_session_partial_failure_is_exit6_with_results() {
@@ -2845,7 +2852,7 @@ fn remove_session_partial_failure_is_exit6_with_results() {
             "FAKE_SESSIONS",
             "foo [Created 1m ago] (current)\nbar [Created 2m ago]",
         )
-        .env("FAKE_FAIL_DELETE_SESSION", "bar")
+        .env("FAKE_FAIL_DELETE_SESSION", "foo")
         .args(["remove", "session", "foo", "bar", "--yes", "--json"])
         .assert()
         .failure()
@@ -2859,20 +2866,25 @@ fn remove_session_partial_failure_is_exit6_with_results() {
     assert_eq!(results.len(), 2, "results: {results:?}");
     let foo = results.iter().find(|r| r["target"] == "foo").unwrap();
     let bar = results.iter().find(|r| r["target"] == "bar").unwrap();
-    assert_eq!(foo["ok"], true, "results: {results:?}");
-    assert_eq!(bar["ok"], false, "results: {results:?}");
+    assert_eq!(foo["ok"], false, "results: {results:?}");
+    assert_eq!(bar["ok"], true, "results: {results:?}");
     assert!(
-        bar["error"].as_str().unwrap_or_default().contains("boom"),
+        foo["error"].as_str().unwrap_or_default().contains("boom"),
         "results: {results:?}"
     );
-    // 残target実行（失敗しても残targetを実行する）
+    // 残target実行（先頭失敗後も指定順に後続targetを呼ぶ——早期打ち切りでは
+    // barの呼出・成功結果が欠ける）
     let cs = calls(&log);
-    assert!(
-        cs.iter().any(|c| c == "delete-session foo -f"),
-        "calls: {cs:?}"
-    );
-    assert!(
-        cs.iter().any(|c| c == "delete-session bar -f"),
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![
+            &"delete-session foo -f".to_string(),
+            &"delete-session bar -f".to_string(),
+        ],
         "calls: {cs:?}"
     );
 }
@@ -2998,8 +3010,10 @@ fn remove_session_me_uses_resolved_name() {
 }
 
 /// --me実行前のstderr警告行（§2.3）: 自session削除はzelper自身のprocess treeを
-/// 巻き込みうるため、delete-session呼出の前にstderrへ警告行を出す。実行は通常
-/// 経路（fake shim環境では自壊しないため成功報告まで完結）
+/// 巻き込みうるため、delete-session呼出の前にstderrへ警告行を出す。shimの
+/// delete-session handler開始marker（親zellerのstderrへ直接出力）より前に警告行が
+/// 現れることで順序を検証する（終了後の存在確認だけでは削除後に移しても通る）。
+/// 実行は通常経路（fake shim環境では自壊しないため成功報告まで完結）
 // [covers:remove-session.me-preflight-warning-before-execution]
 #[test]
 fn remove_session_me_warns_before_execution() {
@@ -3013,9 +3027,15 @@ fn remove_session_me_warns_before_execution() {
         .get_output()
         .clone();
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let warn_pos = stderr
+        .find("removing the current session")
+        .unwrap_or_else(|| panic!("warning行なし: {stderr}"));
+    let marker_pos = stderr
+        .find("shim: delete-session handler start")
+        .unwrap_or_else(|| panic!("delete handler開始markerなし: {stderr}"));
     assert!(
-        stderr.contains("removing the current session"),
-        "stderr: {stderr}"
+        warn_pos < marker_pos,
+        "warning行がdelete-session開始より前であること: {stderr}"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(

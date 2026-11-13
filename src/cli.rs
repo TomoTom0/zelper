@@ -355,6 +355,9 @@ pub enum RemoveTarget {
     /// selectorは NAME...（1件以上）/ --all / --dead / --me の4者のうちちょうど1つ
     /// （DD-1.5排他）。単一の完全削除意味論（session行もresurrection dataも消す。
     /// backendは常に `zellij delete-session NAME -f`）。常時--yes/--dry-run必須。
+    /// global --sessionは無視（対象は4 selectorのみ。--meの解決も
+    /// ZELLIJ_SESSION_NAMEのみ——--sessionはsession外からも指定可能で自sessionの
+    /// 証拠にならないため）
     /// --meはbest-effort: 自session削除でzelper自身が巻き込まれ、報告・exit
     /// status・検証が実行されない可能性がある（実行前にstderr warning行を出す）。
     /// 既知制限: list-sessions行なしの残data（registry掃除済み・cacheにsession_info
