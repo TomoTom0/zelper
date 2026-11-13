@@ -34,8 +34,34 @@ if [[ "$1" == "list-sessions" ]]; then
   if [[ -n "$FAKE_SESSIONS_EMPTY" && ! -s "$state" ]]; then
     echo "No active zellij sessions found." >&2; exit 1
   fi
-  if [[ -n "$FAKE_SESSIONS" ]]; then printf '%s\n' "$FAKE_SESSIONS"; else echo "fake-sess [Created 1m ago] (current)"; fi
-  [[ -s "$state" ]] && cat "$state"
+  # TASK-84: ${FAKE_LOG}.deleted（delete-session handlerの削除記録）に含まれる
+  # 名前の行は応答から除外する（delete-session後のlist-sessions再取得 =
+  # postcondition検証への応答反映）
+  if [[ -n "$FAKE_SESSIONS" ]]; then all="$FAKE_SESSIONS"; else all="fake-sess [Created 1m ago] (current)"; fi
+  [[ -s "$state" ]] && all="$all"$'\n'"$(cat "$state")"
+  if [[ -s "${FAKE_LOG}.deleted" ]]; then
+    all="$(printf '%s\n' "$all" | awk 'NR==FNR { del[$1]=1; next } !($1 in del)' "${FAKE_LOG}.deleted" -)"
+  fi
+  printf '%s\n' "$all"
+  exit 0
+fi
+if [[ "$1" == "delete-session" ]]; then
+  # TASK-84: `zellij delete-session <NAME> -f`（top-level positional。--session接頭
+  # なし）。FAKE_FAIL_DELETE_SESSION（失敗させるsession名のspace区切りlist）に一致
+  # する名前はrc=1 + stderrで失敗（部分失敗注入。zellerの事前NoTargetで不在には
+  # 到達しないため汎用失敗応答でよい）。FAKE_MUTE_DELETE_SESSION=1はrc=0だが
+  # list-sessions応答へ反映しない（rc=0・postcondition不一致模擬）。通常は成功
+  # stdout 2行（M5 E実測形式。zellerはこれをparseしない）+ 削除名を
+  # ${FAKE_LOG}.deletedへ記録
+  dname="$2"
+  for fail in $FAKE_FAIL_DELETE_SESSION; do
+    if [[ "$fail" == "$dname" ]]; then echo "boom" >&2; exit 1; fi
+  done
+  if [[ -z "$FAKE_MUTE_DELETE_SESSION" ]]; then
+    echo "$dname" >> "${FAKE_LOG}.deleted"
+  fi
+  echo "force killed and deleted."
+  echo "Session: $dname successfully deleted."
   exit 0
 fi
 if [[ "$1" == "attach" ]]; then
@@ -327,6 +353,10 @@ exit 0
     // 返すため、PID再利用でdirを再利用した際にargv列・期待positionがずれる。
     // 削除によりshimがFAKE_TABS_JSONから再初期化する）
     let _ = std::fs::remove_file(dir.join("calls.log.tabs"));
+    // TASK-84: delete-session handlerの削除記録（${FAKE_LOG}.deleted）もsetup時に
+    // 初期化する（.sessionsと同一の理由: PID再利用でdirを再利用した際の前回削除
+    // 分の残留を排除。空fileはshimの [[ -s ]] で「無し」と同一扱い）
+    std::fs::write(dir.join("calls.log.deleted"), "").unwrap();
     // TASK-65: FAKE_PANES_JSONのpane状態file（${FAKE_LOG}.panes）もsetup時に
     // 削除する（PID再利用で既存dirを再利用した際の前回のrename/close/new-pane
     // 作用後状態の残留を排除。tabsと同一の理由）
@@ -2589,4 +2619,716 @@ fn completion_shell_variants() {
 
     let (mut cmd, _) = zelper("completion-tcsh");
     cmd.args(["completion", "tcsh"]).assert().failure().code(2);
+}
+
+// ---------------------------------------------------------------------------
+// remove session（TASK-84・remove-session.tomlのL3層16条件。設計§2/§7。
+// shimのFAKE_SESSIONS〔EXITED行混在可〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・
+// FAKE_FAIL_DELETE_SESSION / FAKE_MUTE_DELETE_SESSION・${FAKE_LOG}.deleted
+// 〔delete-session作用のlist-sessions応答反映〕。L2層5条件は
+// tests/fake_backend/remove_session.rs）
+
+/// remove sessionの4 selector排他（§2.0）: NAME...（1件以上）/ --all / --dead /
+/// --me は相互排他かつちょうど1つ。不在・併用はusage error（exit 2）で状態変更
+/// 前に拒否。対照正例（NAME単独）はexit 2にならず実行経路へ進む
+// [covers:remove-session.selector-exactly-one-usage-error]
+#[test]
+fn remove_session_selector_exactly_one_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let cases: [&[&str]; 5] = [
+        // (i) 全selector不在
+        &["remove", "session", "--yes"],
+        // (ii) --all × --dead 併用
+        &["remove", "session", "--all", "--dead", "--yes"],
+        // (iii) NAME × --all 併用
+        &["remove", "session", "fake-sess", "--all", "--yes"],
+        // (iv) NAME × --me 併用
+        &["remove", "session", "fake-sess", "--me", "--yes"],
+        // (v) --dead × --me 併用
+        &["remove", "session", "--dead", "--me", "--yes"],
+    ];
+    for (i, args) in cases.iter().enumerate() {
+        let (mut cmd, log) = zelper(&format!("remove-sel-usage-{i}"));
+        cmd.args(args.to_vec()).assert().failure().code(2);
+        assert!(
+            !calls(&log).iter().any(|c| c.starts_with("delete-session")),
+            "case {i} calls: {:?}",
+            calls(&log)
+        );
+    }
+    // 対照正例: NAME単独はexit 2にならず実行経路へ進む（実行成功）
+    let (mut cmd, log) = zelper("remove-sel-usage-ok");
+    cmd.args(["remove", "session", "fake-sess", "--yes"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "delete-session fake-sess -f"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// 明示NAMEの不在分類（§2.9）: 指定NAMEがlist_sessionsの行（RUNNING・EXITEDとも）
+/// に存在しない場合はNoTarget（exit 3）でcandidates=全行名（EXITED込み）。一覧が
+/// 完全0件の場合は「no zellij sessions found」の文面でNoTarget
+// [covers:remove-session.missing-name-notarget-with-candidates]
+#[test]
+fn remove_session_missing_name_is_notarget_with_candidates() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) 不在NAME: candidatesに稼働名とEXITED名の両方（EXITED込み）
+    let (mut cmd, log) = zelper("remove-missing");
+    let out = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "fake-sess [Created 1m ago] (current)\ndeadx [Created 2m ago] (EXITED - attach to resurrect)",
+        )
+        .args(["remove", "session", "ghost", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let cands = v["error"]["candidates"].as_array().unwrap();
+    assert!(
+        cands.iter().any(|c| c == "fake-sess"),
+        "candidates: {cands:?}"
+    );
+    assert!(cands.iter().any(|c| c == "deadx"), "candidates: {cands:?}");
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) 行0件（0-session環境）: no zellij sessions found文面
+    let (mut cmd, _) = zelper("remove-missing-zero");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["remove", "session", "foo", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("no zellij sessions found"),
+        "message: {msg}"
+    );
+}
+
+/// dry-runのplan表示契約（§2.6）: 対象毎のstate（running/dead）とlist_tabs_for
+/// 由来のtabs/panes数。dead対象はlist_tabs_forを呼ばずtabs/panes=null固定
+/// （EXITED名へのaction系呼び出しの副作用が未検証のため呼ばない）。状態変更は
+/// 一切行わない
+// [covers:remove-session.dry-run-plan-states-and-counts]
+#[test]
+fn remove_session_dry_run_plan_states_and_counts() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = "foo [Created 1m ago] (current)\ndeadx [Created 2m ago] (EXITED - attach to resurrect)";
+    // human: [plan]行×2 + 合計行（tabs/panesはfixtures/tabs.json基準: 1 tab・2 pane）
+    let (mut cmd, log) = zelper("remove-dryrun-plan");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "foo", "deadx", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(out).unwrap();
+    assert_eq!(
+        stdout,
+        "[plan] remove session 'foo' (running, 1 tabs, 2 panes)\n\
+         [plan] remove session 'deadx' (dead)\n\
+         2 session(s) to remove; pass --yes to execute\n",
+        "stdout: {stdout:?}"
+    );
+    // 状態変更なし・dead対象はlist_tabs_for不呼出（running名のみlist-tabs呼出）
+    let cs = calls(&log);
+    assert!(!cs.iter().any(|c| c.starts_with("delete-session")), "calls: {cs:?}");
+    assert!(
+        cs.iter()
+            .any(|c| c == "--session foo action list-tabs -a --json"),
+        "calls: {cs:?}"
+    );
+    assert!(
+        !cs.iter().any(|c| c.contains("deadx")),
+        "dead対象へのaction系呼出: {cs:?}"
+    );
+
+    // JSON: data.plan.targets[]（dead対象はtabs/panes=null）
+    let (mut cmd, log) = zelper("remove-dryrun-plan-json");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "foo", "deadx", "--dry-run", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let targets = v["data"]["plan"]["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 2, "targets: {targets:?}");
+    assert_eq!(targets[0]["name"], "foo");
+    assert_eq!(targets[0]["state"], "running");
+    assert_eq!(targets[0]["tabs"], 1);
+    assert_eq!(targets[0]["panes"], 2);
+    assert_eq!(targets[1]["name"], "deadx");
+    assert_eq!(targets[1]["state"], "dead");
+    assert_eq!(targets[1]["tabs"], serde_json::Value::Null);
+    assert_eq!(targets[1]["panes"], serde_json::Value::Null);
+    let cs = calls(&log);
+    assert!(!cs.iter().any(|c| c.starts_with("delete-session")), "calls: {cs:?}");
+    assert!(!cs.iter().any(|c| c.contains("deadx")), "calls: {cs:?}");
+}
+
+/// 削除のbackend argv契約（§2.1/§2.7）: 各対象は `zellij delete-session <NAME> -f`
+/// のtop-level positional形式（--session接頭なし）で1回。kill-session /
+/// kill-all-sessions / delete-all-sessionsは発行しない
+// [covers:remove-session.delete-session-f-argv]
+#[test]
+fn remove_session_emits_delete_session_f_argv() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-delargv");
+    cmd.env("FAKE_SESSIONS", "foo [Created 1m ago] (current)")
+        .args(["remove", "session", "foo", "--yes"])
+        .assert()
+        .success();
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs.iter().filter(|c| c.starts_with("delete-session")).collect();
+    assert_eq!(dels, vec![&"delete-session foo -f".to_string()], "calls: {cs:?}");
+    // top-level positional形式（--session接頭argvなし）
+    assert!(!cs.iter().any(|c| c.starts_with("--session")), "calls: {cs:?}");
+    // kill/delete-all系zellij commandは発行しない（§2.2不採用）
+    assert!(
+        !cs.iter().any(|c| c.contains("kill-session")
+            || c.contains("kill-all")
+            || c.contains("delete-all")),
+        "calls: {cs:?}"
+    );
+}
+
+/// 部分失敗の継続実行と報告（§2.12）: 一部targetのdelete-session呼出が非zero終了
+/// しても残targetを実行し、全体はPartialFailure（exit 6）でper-target結果
+/// （data.results[]）付きで報告する。rollbackしない
+// [covers:remove-session.per-target-partial-failure]
+#[test]
+fn remove_session_partial_failure_is_exit6_with_results() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-partial");
+    let out = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "foo [Created 1m ago] (current)\nbar [Created 2m ago]",
+        )
+        .env("FAKE_FAIL_DELETE_SESSION", "bar")
+        .args(["remove", "session", "foo", "bar", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(6)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "PartialFailure");
+    let results = v["error"]["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2, "results: {results:?}");
+    let foo = results.iter().find(|r| r["target"] == "foo").unwrap();
+    let bar = results.iter().find(|r| r["target"] == "bar").unwrap();
+    assert_eq!(foo["ok"], true, "results: {results:?}");
+    assert_eq!(bar["ok"], false, "results: {results:?}");
+    assert!(
+        bar["error"].as_str().unwrap_or_default().contains("boom"),
+        "results: {results:?}"
+    );
+    // 残target実行（失敗しても残targetを実行する）
+    let cs = calls(&log);
+    assert!(cs.iter().any(|c| c == "delete-session foo -f"), "calls: {cs:?}");
+    assert!(cs.iter().any(|c| c == "delete-session bar -f"), "calls: {cs:?}");
+}
+
+/// NAME経路の自session保護（§2.3）: ZELLIJ_SESSION_NAMEが解決済みtarget集合に
+/// 含まれる場合、--meなしの実行は状態変更前にPreflight（exit 7）で拒否
+/// （messageは remove session --me へ案内）。他target（other）も実行されない
+// [covers:remove-session.self-name-without-me-refused]
+#[test]
+fn remove_session_self_name_without_me_is_refused() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-self-refused");
+    let out = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "fake-sess [Created 1m ago] (current)\nother [Created 2m ago]",
+        )
+        .env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "fake-sess", "other", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "Preflight");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("--me"), "message: {msg}");
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.starts_with("delete-session")),
+        "fail-fast（他targetも不発）: {:?}",
+        calls(&log)
+    );
+}
+
+/// --meのenv解決必須（§2.3）: ZELLIJ_SESSION_NAME不在での--me実行はdry-runでも
+/// Preflight（exit 7）で拒否される（plan表示に解決名が必要なため）
+// [covers:remove-session.me-requires-env]
+#[test]
+fn remove_session_me_requires_env() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    for (i, args) in [
+        vec!["remove", "session", "--me", "--yes"],
+        vec!["remove", "session", "--me", "--dry-run"],
+    ]
+    .iter()
+    .enumerate()
+    {
+        let (mut cmd, log) = zelper(&format!("remove-me-env-{i}"));
+        let out = cmd
+            .args(args.clone())
+            .assert()
+            .failure()
+            .code(7)
+            .get_output()
+            .stdout
+            .clone();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["error"]["class"], "Preflight");
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert!(
+            msg.contains("requires running inside a zellij session"),
+            "message: {msg}"
+        );
+        assert!(msg.contains("ZELLIJ_SESSION_NAME"), "message: {msg}");
+        assert!(
+            !calls(&log)
+                .iter()
+                .any(|c| c.starts_with("delete-session")),
+            "case {i} calls: {:?}",
+            calls(&log)
+        );
+    }
+}
+
+/// --meの解決名実行契約（§2.3）: env解決名を対象として通常経路
+/// （事前存在確認→delete-session <name> -f→報告）で実行する。env解決名が
+/// list_sessionsの行に存在しない場合はNoTarget（exit 3）
+// [covers:remove-session.me-selector-argv-uses-resolved-name]
+#[test]
+fn remove_session_me_uses_resolved_name() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) env解決名が行に存在: 解決名でdelete-session実行
+    let (mut cmd, log) = zelper("remove-me-resolved");
+    cmd.env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "--me", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(
+        calls(&log)
+            .iter()
+            .filter(|c| c.starts_with("delete-session"))
+            .count(),
+        1,
+        "calls: {:?}",
+        calls(&log)
+    );
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "delete-session fake-sess -f"),
+        "env解決名での実行: {:?}",
+        calls(&log)
+    );
+
+    // (ii) env解決名が行に不存在: NoTarget（env値を無検証でtargetにしない）
+    let (mut cmd, log) = zelper("remove-me-ghost");
+    let out = cmd
+        .env("ZELLIJ_SESSION_NAME", "ghost")
+        .args(["remove", "session", "--me", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// --me実行前のstderr警告行（§2.3）: 自session削除はzelper自身のprocess treeを
+/// 巻き込みうるため、delete-session呼出の前にstderrへ警告行を出す。実行は通常
+/// 経路（fake shim環境では自壊しないため成功報告まで完結）
+// [covers:remove-session.me-preflight-warning-before-execution]
+#[test]
+fn remove_session_me_warns_before_execution() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-me-warning");
+    let output = cmd
+        .env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "--me", "--yes"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("removing the current session"),
+        "stderr: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("removed session 'fake-sess' (current session)"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "delete-session fake-sess -f"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// --me dry-runのcurrent注記（§2.6）: env解決名のplan行に現在sessionである旨の
+/// 注記を付ける（human: 行末尾 [current session]・JSON: current: true）
+// [covers:remove-session.me-dry-run-current-annotation]
+#[test]
+fn remove_session_me_dry_run_annotates_current() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // human: plan行の [current session] 注記（tabs/panesはfixtures/tabs.json基準）
+    let (mut cmd, log) = zelper("remove-me-dryrun");
+    let out = cmd
+        .env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "--me", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(out).unwrap();
+    assert!(
+        stdout.lines().any(|l| l
+            == "[plan] remove session 'fake-sess' (running, 1 tabs, 2 panes) [current session]"),
+        "stdout: {stdout:?}"
+    );
+    assert!(!calls(&log).iter().any(|c| c.starts_with("delete-session")), "calls: {:?}", calls(&log));
+
+    // JSON: 当該targetへ current: true field
+    let (mut cmd, log) = zelper("remove-me-dryrun-json");
+    let out = cmd
+        .env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "--me", "--dry-run", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let targets = v["data"]["plan"]["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 1, "targets: {targets:?}");
+    assert_eq!(targets[0]["name"], "fake-sess");
+    assert_eq!(targets[0]["current"], true, "targets: {targets:?}");
+    assert!(!calls(&log).iter().any(|c| c.starts_with("delete-session")), "calls: {:?}", calls(&log));
+}
+
+/// --allの自session除外（§2.3）: 対象集合からZELLIJ_SESSION_NAME該当行を除外し、
+/// 除外した旨をstderrのwarning行で通知する（stdout契約は不変）。除外対象への
+/// delete-sessionは発行されない
+// [covers:remove-session.all-excludes-self-with-warning]
+#[test]
+fn remove_session_all_excludes_self_with_warning() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-all-self");
+    let output = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "fake-sess [Created 1m ago] (current)\nother [Created 2m ago]",
+        )
+        .env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "--all", "--yes"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs.iter().filter(|c| c.starts_with("delete-session")).collect();
+    assert_eq!(dels, vec![&"delete-session other -f".to_string()], "calls: {cs:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning") && stderr.contains("current session"),
+        "stderr: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("removed session 'other'") && !stdout.contains("fake-sess"),
+        "stdout: {stdout}"
+    );
+}
+
+/// --allの除外後0件分類（§2.3）: 自sessionのみが存在する環境での--all実行は
+/// self除外により対象0件になるためNoTarget（exit 3）。messageは
+/// remove session --me への案内
+// [covers:remove-session.all-self-only-notarget]
+#[test]
+fn remove_session_all_self_only_is_notarget() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-all-selfonly");
+    let out = cmd
+        .env("FAKE_SESSIONS", "fake-sess [Created 1m ago] (current)")
+        .env("ZELLIJ_SESSION_NAME", "fake-sess")
+        .args(["remove", "session", "--all", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("--me"), "message: {msg}");
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// --dead selectorの対象選択（§2.2）: 対象はlist_sessionsのEXITED行のみ
+/// （RUNNING行は対象外）。EXITED行が1件もない環境ではNoTarget（exit 3・
+/// no sessions to remove）
+// [covers:remove-session.dead-selector-exited-rows-only]
+#[test]
+fn remove_session_dead_selects_exited_rows_only() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) EXITED行あり: EXITED行のみ削除（RUNNING行は対象外）
+    let (mut cmd, log) = zelper("remove-dead-hit");
+    cmd.env(
+        "FAKE_SESSIONS",
+        "fake-sess [Created 1m ago] (current)\ndeadx [Created 2m ago] (EXITED - attach to resurrect)",
+    )
+    .args(["remove", "session", "--dead", "--yes"])
+    .assert()
+    .success();
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs.iter().filter(|c| c.starts_with("delete-session")).collect();
+    assert_eq!(dels, vec![&"delete-session deadx -f".to_string()], "calls: {cs:?}");
+
+    // (ii) EXITED行なし（RUNNINGのみ）: NoTarget
+    let (mut cmd, log) = zelper("remove-dead-none");
+    let out = cmd
+        .env("FAKE_SESSIONS", "fake-sess [Created 1m ago] (current)")
+        .args(["remove", "session", "--dead", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("no sessions to remove"), "message: {msg}");
+    assert!(
+        !calls(&log)
+            .iter()
+            .any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// 0-session環境の事前確認（§2.9）: NAME指定（no zellij sessions found文面）・
+/// --all / --dead（no sessions to remove文面）・--me（env解決名が行になし）の
+/// いずれもNoTarget（exit 3）で中断する
+// [covers:remove-session.zero-session-notarget]
+#[test]
+fn remove_session_zero_session_environment_is_notarget() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    struct Case {
+        tag: &'static str,
+        args: Vec<&'static str>,
+        env: Option<(&'static str, &'static str)>,
+        want_msg: &'static str,
+    }
+    let cases = [
+        Case {
+            tag: "zero-name",
+            args: vec!["remove", "session", "foo", "--yes", "--json"],
+            env: None,
+            want_msg: "no zellij sessions found",
+        },
+        Case {
+            tag: "zero-all",
+            args: vec!["remove", "session", "--all", "--yes", "--json"],
+            env: None,
+            want_msg: "no sessions to remove",
+        },
+        Case {
+            tag: "zero-dead",
+            args: vec!["remove", "session", "--dead", "--yes", "--json"],
+            env: None,
+            want_msg: "no sessions to remove",
+        },
+        Case {
+            tag: "zero-me",
+            args: vec!["remove", "session", "--me", "--yes", "--json"],
+            env: Some(("ZELLIJ_SESSION_NAME", "ghost")),
+            want_msg: "",
+        },
+    ];
+    for c in cases {
+        let (mut cmd, log) = zelper(&format!("remove-{}", c.tag));
+        let mut cmd = cmd.env("FAKE_SESSIONS_EMPTY", "1");
+        if let Some((k, v)) = c.env {
+            cmd = cmd.env(k, v);
+        }
+        let out = cmd
+            .args(c.args.clone())
+            .assert()
+            .failure()
+            .code(3)
+            .get_output()
+            .stdout
+            .clone();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["error"]["class"], "NoTarget", "case {}", c.tag);
+        if !c.want_msg.is_empty() {
+            let msg = v["error"]["message"].as_str().unwrap();
+            assert!(msg.contains(c.want_msg), "case {}: {msg}", c.tag);
+        }
+        assert!(
+            !calls(&log)
+                .iter()
+                .any(|x| x.starts_with("delete-session")),
+            "case {} calls: {:?}",
+            c.tag,
+            calls(&log)
+        );
+    }
+}
+
+/// remove sessionの例外dispatch（§2.7）: 対象session解決（mk_backend）を経ない
+/// probe backend直接構築により、0-session環境でもremove sessionが事前確認まで
+/// 到達する（共通経路のまま実装するとresolve_sessionのNoTarget文面
+/// 〔no running zellij session found + add session案内〕で失敗する回帰の検出）
+// [covers:remove-session.dispatch-via-probe-backend]
+#[test]
+fn remove_session_dispatches_via_probe_backend() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-probe-dispatch");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["remove", "session", "foo", "--dry-run", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    // run_session層の文面（事前存在確認まで到達）。共通解決経路の文面ではない
+    assert!(
+        msg.contains("no zellij sessions found"),
+        "message: {msg}"
+    );
+    assert!(
+        !msg.contains("no running zellij session found"),
+        "message: {msg}"
+    );
+    let cs = calls(&log);
+    // probe backend経由でlist-sessions呼出は発生している（0-session環境で動作）
+    assert!(
+        cs.iter().any(|c| c == "list-sessions"),
+        "calls: {cs:?}"
+    );
+    assert!(!cs.iter().any(|c| c.starts_with("delete-session")), "calls: {cs:?}");
+}
+
+/// 成功報告の契約（§2.9報告形式）: humanは対象のstateを反映した成功行
+/// （running対象は removed session 'X'・dead対象は (was dead) 付き）で報告し、
+/// JSONはper-targetのresults[]（target=name・ok=true）
+// [covers:remove-session.success-report-results-and-human-lines]
+#[test]
+fn remove_session_success_report_results_and_human_lines() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = "foo [Created 1m ago] (current)\nbar [Created 2m ago]\ndeadx [Created 3m ago] (EXITED - attach to resurrect)";
+    // human: 指定順の成功行（dead対象は (was dead) 付き）
+    let (mut cmd, log) = zelper("remove-report-human");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "foo", "bar", "deadx", "--yes"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(out).unwrap();
+    assert_eq!(
+        stdout,
+        "removed session 'foo'\nremoved session 'bar'\nremoved session 'deadx' (was dead)\n",
+        "stdout: {stdout:?}"
+    );
+    let dels: Vec<String> = calls(&log)
+        .into_iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(dels.len(), 3, "calls: {dels:?}");
+
+    // JSON: data.results[]（target/ok）
+    let (mut cmd, _) = zelper("remove-report-json");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "foo", "bar", "deadx", "--yes", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let results = v["data"]["results"].as_array().unwrap();
+    let names: Vec<&str> = results
+        .iter()
+        .map(|r| r["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["foo", "bar", "deadx"], "results: {results:?}");
+    assert!(
+        results.iter().all(|r| r["ok"] == true),
+        "results: {results:?}"
+    );
 }

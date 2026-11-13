@@ -83,6 +83,10 @@ name = "fake_move"
 path = "tests/fake_backend/move.rs"
 
 [[test]]
+name = "fake_remove_session"
+path = "tests/fake_backend/remove_session.rs"
+
+[[test]]
 name = "companion_seed"
 path = "tests/fake_backend/companion_seed.rs"
 

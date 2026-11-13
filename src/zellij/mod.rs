@@ -165,6 +165,11 @@ pub trait ZellijBackend {
     /// global --session形式はrandom別名sessionを作るため禁止——M5実測）。
     /// session解決に依存しないtop-level argv
     fn create_session_detached(&self, name: &str) -> Result<(), ZelperError>;
+    /// sessionの完全削除（DD-11 remove session・TASK-84）。argvは
+    /// `delete-session <name> -f`（top-level positional。run_actionの--session接頭
+    /// なし）。kill-sessionとは終状態が同一（行+session_info完全消滅・実測M4/M5）
+    /// で状態（RUNNING/死data）に依らず動作するため単一methodに統一
+    fn delete_session(&self, name: &str) -> Result<(), ZelperError>;
     fn pipe_plugin(
         &self,
         path: &std::path::Path,

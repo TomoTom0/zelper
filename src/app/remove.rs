@@ -242,3 +242,27 @@ fn report(
         }
     }
 }
+
+/// remove session（TASK-84設計§2.0）。selectorは NAME...（1件以上）/ --all /
+/// --dead / --me の4者のうちちょうど1つ（app層exactly-one検証——clap pairwise
+/// conflictsと二段構え。moveの三者排他と同一pattern）。
+///
+/// TASK-84テスト先行工程のcompile enabling stub: signature確定のみで本体は
+/// 未実装（実装工程で gate常時化・--me解決・self検査・dry-run plan・
+/// per-target loop・postcondition・report()拡張を載せる）
+pub fn run_session(
+    backend: &dyn ZellijBackend,
+    names: &[String],
+    all: bool,
+    dead: bool,
+    me: bool,
+    yes: bool,
+    dry_run: bool,
+    json: bool,
+) -> Result<(), ZelperError> {
+    let _ = (backend, names, all, dead, me, yes, dry_run, json);
+    Err(ZelperError::new(
+        ErrorClass::OperationFailed,
+        "remove session is not yet implemented (TASK-84 implementation pending)",
+    ))
+}

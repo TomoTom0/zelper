@@ -192,6 +192,13 @@ pub struct FakeBackend {
     /// move用（REVIEW-3指摘3）: 指定番目（1開始）のmove_tab呼出成功後に指定tabを
     /// paneごと除去する（tab交換の途中消滅系列の注入）
     pub vanish_tab_after_move_tab: Cell<Option<(usize, TabId)>>,
+    /// remove session用（TASK-84）: delete_sessionをOkのままlist-sessions状態から
+    /// 行を除去しない（rc=0・postcondition不一致模擬）
+    pub mute_delete_session: Cell<bool>,
+    /// remove session用（TASK-84）: delete_session（delete-session <name> -f）呼出を
+    /// 1回でも観測した後のlist_sessions呼出を失敗させる（事前確認は成功・事後確認
+    /// のみ失敗の系列。fail_opは先頭一致で事前確認側に当たるため専用arm）
+    pub fail_list_sessions_after_delete: Cell<bool>,
 }
 
 pub struct FakeState {
@@ -284,6 +291,8 @@ impl FakeBackend {
             lenient_panes_after_break: Cell::new(0),
             hide_pane_in_lenient_after_break: Cell::new(None),
             vanish_tab_after_move_tab: Cell::new(None),
+            mute_delete_session: Cell::new(false),
+            fail_list_sessions_after_delete: Cell::new(false),
         }
     }
 
@@ -556,6 +565,27 @@ impl FakeBackend {
     #[allow(dead_code)]
     pub fn vanish_tab_after_move_tab(&self, nth: usize, tab: TabId) {
         self.vanish_tab_after_move_tab.set(Some((nth, tab)));
+    }
+
+    /// remove session用（TASK-84）: delete_sessionをOkのままlist-sessions状態から
+    /// 行を除去しない（rc=0・postcondition不一致模擬）
+    #[allow(dead_code)]
+    pub fn mute_delete_session(&self) {
+        self.mute_delete_session.set(true);
+    }
+
+    /// remove session用（TASK-84）: 事後確認（postcheck）のlist-sessions呼出のみを
+    /// 失敗させる（事前確認は成功・delete-session呼出は成功済みの系列）
+    #[allow(dead_code)]
+    pub fn fail_list_sessions_after_delete(&self) {
+        self.fail_list_sessions_after_delete.set(true);
+    }
+
+    /// remove session用（TASK-84）: session一覧の初期状態を差し替える
+    /// （EXITED行混在・複数稼働等のfixture。既定はfake 1件）
+    #[allow(dead_code)]
+    pub fn set_sessions(&self, sessions: Vec<SessionRef>) {
+        self.state.borrow_mut().sessions = sessions;
     }
 
     /// watch用: paneへのdump_screen呼び出し回数（記録から計上。-f付き呼び出しを
@@ -863,6 +893,23 @@ impl ZellijBackend for FakeBackend {
                 .borrow()
                 .iter()
                 .any(|c| c.starts_with("attach -b "))
+        {
+            return Err(ZelperError::new(
+                self.fail_class
+                    .borrow()
+                    .clone()
+                    .unwrap_or(ErrorClass::OperationFailed),
+                "injected failure at 'list-sessions' (postcheck)".to_string(),
+            ));
+        }
+        // TASK-84: remove sessionの事後確認のみ失敗させる注入（arm後・
+        // delete-session呼出観測後のlist-sessions。事前確認側には当てない）
+        if self.fail_list_sessions_after_delete.get()
+            && self
+                .calls
+                .borrow()
+                .iter()
+                .any(|c| c.starts_with("delete-session "))
         {
             return Err(ZelperError::new(
                 self.fail_class
@@ -1757,6 +1804,20 @@ impl ZellijBackend for FakeBackend {
             current: false,
             exited: false,
         });
+        Ok(())
+    }
+
+    /// TASK-84（設計§2.7）: delete_session。呼出記録（`delete-session <name> -f`）
+    /// + sessions状態から対象行を除去（実zellijの完全削除〔行+resurrection data〕
+    /// のうちlist_sessions可視分の再現）。mute_delete_session注入時は記録のみで
+    /// 行を除去しない（rc=0・postcondition不一致模擬）
+    fn delete_session(&self, name: &str) -> Result<(), ZelperError> {
+        self.record(&format!("delete-session {name} -f"))?;
+        if self.mute_delete_session.get() {
+            return Ok(());
+        }
+        let mut s = self.state.borrow_mut();
+        s.sessions.retain(|x| x.name != name);
         Ok(())
     }
 }

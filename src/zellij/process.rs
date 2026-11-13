@@ -582,6 +582,18 @@ impl ZellijBackend for ZellijCliBackend {
         self.run(&["attach".to_string(), "-b".to_string(), name.to_string()])?;
         Ok(())
     }
+
+    fn delete_session(&self, name: &str) -> Result<(), ZelperError> {
+        // 完全削除（TASK-84設計§2.7）。create_session_detachedと同一の「session
+        // 解決に依存しないtop-level argv」pattern。成功時stdout（2行の状況文）は
+        // 捨てる（rc=0+stderr空→Ok。DD-3.1。M5 E・M6 D）
+        self.run(&[
+            "delete-session".to_string(),
+            name.to_string(),
+            "-f".to_string(),
+        ])?;
+        Ok(())
+    }
 }
 
 /// run_interactive用のstderr capture（DD-14）。親自身のfd 2を一時的なcapture
