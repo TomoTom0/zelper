@@ -23,6 +23,7 @@ zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
 zelper rename pane PANE NAME [--json]
 zelper rename tab TAB NAME [--json]
+zelper rename session NAME NEW_NAME [--json]
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS] [--json]
 zelper resize equalize [--tab T | PANE...] [--json]
 zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
@@ -70,13 +71,14 @@ zelper docs readme | llm usage|skill|snippet
 
 `watch` の意味論: 対象pane（複数可・any-hit）の出力を`--interval`秒間隔でpolling（`dump-screen`反復）し、`-- PATTERN`を含む行が出現したら即hit（exit 0）。attempt 1はsleepなし即時実行のため開始前の既出テキストもhit（`--full`でscrollback込み）。照合はdump-screen生テキストの行単位（既定は固定substring・`--regex`で正規表現。ANSI正規化なし）。hit paneはvisual order最初の1件。`--max`回到達でno hitなら失敗。
 
-`attach` / `detach` / `add session` / `remove session` の意味論（session lifecycle・DD-11/14）:
+`attach` / `detach` / `add session` / `remove session` / `rename session` の意味論（session lifecycle・DD-8/11/14）:
 
 - `attach`: 対話client起動。**stdin・stdoutの両方がTTYであること必須**（非TTYはzellij起動前に `Preflight` exit 7で拒否。agent/script実行からは使えない。`--session` 不在名・session 0個の `NoTarget` exit 3はこのTTY検査より先に立つ）。対話終了後のみ報告（human `attach session 'NAME' ended` / JSON `data.session`）。zellij非zero終了は `OperationFailed` exit 5
 - `detach`: 対象sessionのattach clientをdetach。client不在でも成功（no-op）扱い（human `detached clients from session 'NAME'` / JSON `data.session`）。複数clientがattach中の場合、detachはzellijの仕様として最新のattach clientのみ切断し、先発clientは画面凍結のまま残留する（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しない）
 - `add session NAME`: detached session作成（`attach -b NAME` 相当の非対話経路）。session 0件環境でも動作（対象session解決を経ない例外dispatch）。同名running session既存は `Preflight` exit 7（fail-fast）・作成呼出失敗は `OperationFailed` exit 5・作成後のlist-sessions出現確認は `VerificationFailed` exit 7。成功は human `created session 'NAME' (detached)` / JSON `data.session`・`data.created=true`。作成直後は空session（tab 1・pane 0件）でfirst attach時にdefault layoutが具現化する。layout適用は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行う
 - `remove session`: sessionの完全削除（session行もresurrection dataも消す。killのみ/dataのみの区別はzellij 0.44.3に存在しないため単一意味論。各対象は `zellij delete-session NAME -f` 1呼び出し）。selectorは `NAME...` / `--all`（EXITED行を含む全行）/ `--dead`（EXITED行のみ）/ `--me`（自session）のちょうど1つ。EXITED行も削除対象として受理（不在名は `NoTarget` exit 3・candidatesはEXITED込み）。session 0件環境でも動作（例外dispatch）。**常に** `--yes` か `--dry-run` が必要（単一対象でも）。`--dry-run` は対象毎のplan（human `[plan] remove session 'X' (running, N tabs, M panes)` / `(dead)`・JSON `data.plan.targets[]`。dead対象はtabs/panes=null・list-tabs呼出なし）を出力して実行しない
 - `remove session` の自session保護: 自session（環境変数 `ZELLIJ_SESSION_NAME`）の削除は `--me` 指定時のみ許可。`NAME...` に自sessionが含まれる場合は状態変更前に `Preflight` exit 7で拒否（`--me` へ案内）し、`--all` は自sessionを除外してstderr warning行で通知（自sessionのみなら `NoTarget` exit 3で `--me` を案内）。`--me` はenv不在で `Preflight` exit 7（dry-runでも）。`--me` 実行はzelper自身が巻き込まれて報告・exit status・検証が実行されない可能性があるbest-effort契約で、実行前にstderr warning行を出す。成功報告は human `removed session 'X'`（dead対象は `(was dead)` 付き・`--me` は `(current session)` 付き）/ JSON `data.results[]`（target=session名）。全対象実行後にlist-sessions消失を検証（残存はper-target失敗・部分失敗はexit 6）。行の出ない残data（cacheにsession_info残留のみ）は対象外: `zellij delete-session NAME` を直接使う
+- `rename session NAME NEW_NAME`: session名変更（実行は `zellij --session <旧名> action rename-session <新名>` wrap）。旧NAMEはlist-sessions（EXITED込み）で事前存在確認し、不在は `NoTarget` exit 3（candidates=全行名・EXITED込み）、EXITED旧名は `Preflight` exit 7（attachによる復帰を案内）。NEW_NAMEが既存行（EXITED込み）と衝突は `Preflight` exit 7、同一名・空文字・`/` 含み新名はusage error exit 2（いずれもzellijがrc=0で黙って失敗する系列のための事前検査）。成功は human `renamed session 'old' -> 'new'` / JSON `data.renamed_session`=旧名・`data.name`=新名。事後list-sessionsで旧名消失+新名running出現を検証（不成立は `VerificationFailed` exit 7）
 
 ## JSON出力契約（`--json`）
 
@@ -106,7 +108,7 @@ zelper docs readme | llm usage|skill|snippet
 - `list layouts` の `layouts` は `{name, size, modified_epoch}` の配列（stat失敗時はsize/modified_epochがnull）
 - `watch` のhit時 `data` は `{ target, pattern, regex, attempts_used, elapsed_secs, matched_lines, pane_errors }`（DD-15）。**multi-targetでもresults[]でなくhit pane単一のobject**（DD-4.2一般規定の例外）。回数切れの `error.data` は `{ attempts_used, elapsed_secs, pattern }`（一部pane消失を伴うPartialFailure時は失敗paneのみの `results[]`）
 - `move pane` の方向移動・rotateの成功 `data` は `{ target, action }`（rotateは `backwards` 追加・no-op時は `noop: true` 追加）。`--to-tab` は `{ target, action: "to-tab", tab, tab_name }`。pane交換は `{ action: "swap-pane", panes: [{id, tab}, ...] }`。tab交換は `{ action: "swap-tab", tabs: [{id, position}, ...] }`（DD-13）
-- `attach` / `detach` の成功 `data` は `{ "session": "NAME" }`。`add session` の成功 `data` は `{ "session": "NAME", "created": true }`（DD-14）
+- `attach` / `detach` の成功 `data` は `{ "session": "NAME" }`。`add session` の成功 `data` は `{ "session": "NAME", "created": true }`（DD-14）。`rename session` の成功 `data` は `{ "renamed_session": "旧名", "name": "新名" }`（DD-8）
 
 ## exit codeとerror class対応
 

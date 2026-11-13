@@ -3440,8 +3440,7 @@ fn rename_session_success_argv_and_report() {
         .clone();
     let stdout = String::from_utf8(out).unwrap();
     assert_eq!(
-        stdout,
-        "renamed session 'old' -> 'new'\n",
+        stdout, "renamed session 'old' -> 'new'\n",
         "stdout: {stdout:?}"
     );
     let cs = calls(&log);
@@ -3504,7 +3503,10 @@ fn rename_session_missing_name_is_notarget_with_candidates() {
     // 単一対象のため単数形のsession不在文面（removeの複数名前提文面と異なる点）
     assert!(msg.contains("not found"), "message: {msg}");
     // 共通解離経路の文面ではない
-    assert!(!msg.contains("no running zellij session found"), "message: {msg}");
+    assert!(
+        !msg.contains("no running zellij session found"),
+        "message: {msg}"
+    );
     let cands = v["error"]["candidates"].as_array().unwrap();
     assert!(cands.iter().any(|c| c == "old"), "candidates: {cands:?}");
     assert!(cands.iter().any(|c| c == "deadx"), "candidates: {cands:?}");

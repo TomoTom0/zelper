@@ -11,7 +11,7 @@ zellij sessionを操作するCLI。`zellij`（>= 0.44.3）がインストール�
 zelper list sessions|tabs|panes|layouts [--tab T] [--json] [-c|--compact]
 zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
-zelper rename pane PANE NAME | zelper rename tab TAB NAME
+zelper rename pane PANE NAME | zelper rename tab TAB NAME | zelper rename session NAME NEW_NAME
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS]
 zelper resize equalize [--tab T | PANE...] [--json]
 zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]

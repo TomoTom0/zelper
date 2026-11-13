@@ -55,6 +55,10 @@ send (PANESPEC... | --tab TABSPEC | --name NAME | --command CMD | --cwd DIR | --
      ( -- TEXT | --keys KEY... ) [--enter] [--json]
 rename pane PANESPEC NAME
 rename tab  TABSPEC  NAME
+rename session NAME NEW_NAME                                     # TASK-95。旧NAME存在確認はEXITED込み
+     # （不在はNoTarget+candidates=全行名）。NEW_NAME衝突（EXITED込み）・EXITED旧名は
+     # Preflight・同一名・空文字/'/'含み新名はUsageで事前拒否（zellijがrc=0で黙って
+     # 失敗する系列のため。詳細はDD-8 rename session）
 resize pane PANESPEC (grow|shrink) (left|right|up|down) [STEPS]
 resize equalize [--tab TABSPEC | PANESPEC...] [--json]
 remap LAYOUTNAME [--tab TABSPEC] [--embed-floating] [--dry-run] [--json]
@@ -130,6 +134,7 @@ zelper send 1 2 3 -- y              # 3 paneへyをbroadcast（Enterなし）
 zelper send --command codex --keys Enter   # codex起動pane全てへEnter
 zelper rename pane 12 worker-1
 zelper rename tab 3 agents
+zelper rename session old new             # session名変更（事前衝突検査+事後一覧検証つき）
 zelper resize pane 5 grow right 3
 zelper resize equalize --tab 2
 zelper remap agents                 # 全paneをagents layoutへ再配置（ceil(M/N)反復・全pane保存）
@@ -221,6 +226,7 @@ pub trait ZellijBackend {
     fn send_keys(&self, pane: &PaneKindId, keys: &[String]) -> Result<()>;
     fn rename_pane(&self, pane: &PaneKindId, name: &str) -> Result<()>;
     fn rename_tab(&self, tab: TabId, name: &str) -> Result<()>;
+    fn rename_session(&self, from: &str, to: &str) -> Result<()>;     // `--session <from> action rename-session <to>`（DD-8 rename session・TASK-95。黙失敗系の事前検査とpostcondition検証はcallerの責務）
     fn new_pane(&self, spec: NewPaneSpec) -> Result<PaneKindId>;         // stdoutのIDをparse
     fn new_tab(&self, spec: NewTabSpec) -> Result<TabId>;                // 同上
     fn close_pane(&self, pane: &PaneKindId) -> Result<()>;
@@ -347,6 +353,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 - plan: `rename-pane -p` / `rename-tab-by-id <id> <name>`
 - postcondition: `list-panes`/`list-tabs`でtitle/name反映を確認（サイレント成功対策）
 - 失敗: 検証失敗はclass=`VerificationFailed`（exit 7）
+- **session（TASK-95・2026-11-13追加。設計書: `tmp/tasks/tm-95/design_rename-session.md`）**: requestは旧NAME+NEW_NAME（ともにpositional必須。`zelper rename session NAME NEW_NAME`）。実行は `zellij --session <from> action rename-session <to>`（top-level rename-sessionはzellij 0.44.3に存在しないため。実測M1/M3）。zellijは既存session名へのrename・空文字・同一名をrc=0・両stream空で**黙って失敗**し（M4 I・M95-B/C1）、'/'含み新名はcacheのsession_info directoryのみnested pathへ移動する部分的適用になる（M95-C2）ため、wrap側の事前検査+postcondition検証が本質: (1) app層Usage検査（空文字・'/'含み・同一名——一覧取得より前）(2) 事前list_sessions 1回の取得で旧名不在（NoTarget・candidates=全行名EXITED込み・行0件は「no zellij sessions found」）・EXITED旧名（Preflight・attachによるresurrection案内）・NEW_NAME衝突（Preflight・EXITED込み）を判定 (3) rename呼出（失敗はOperationFailed exit 5）(4) 事後list_sessionsでpostcondition: 旧名行消失+新名行がrunning出現の両方（不成立は`VerificationFailed` exit 7。事後一覧取得失敗は元class/exit保持+`renamed session 'NAME' but failed to confirm: <元message>`——add sessionと同一pattern）。報告: human `renamed session 'old' -> 'new'` / JSON `data.renamed_session`=旧名・`data.name`=新名。dispatchは例外dispatch（DD-14・probe backend）
 
 ## DD-9. `resize` アルゴリズム
 
@@ -701,9 +708,9 @@ zelper move tab TABSPEC --swap-with TABSPEC                           # tab交�
 - **JSON/human報告**（DD-4.2/4.3の変更系1行サマリ規約）: `moved terminal_3 left` / `rotated terminal_3 backwards` / `moved terminal_3 -> tab 5 (agents)` / `swapped terminal_3 <-> terminal_4` / `swapped tab 2 <-> tab 5`。no-opはwarning行 + exit 0。JSON dataは各操作の対象・結果（swap-paneは`panes[]`・swap-tabは`tabs[]`の配列）
 - **実測記録**（podman sandbox・zellij 0.44.3・2026-09-25/26）: M1（move-pane系。`tmp/tasks/tm-88/m1_result.log`・`m1c_result.log`）・M2（move-tab。`m2_result.log`・`m2b_result.log`）・M8（pane id/title不変。`m8_result.log`）・M9（E2E acceptance。`m9_result.log`）・M9b（selectable pluginのみ残るtabの自動close観察。`m9_result.log`追記分——S5〔non-selectable compact-barのみ→close〕との対で自動closeのselectable不在基準を確定）
 
-## DD-14. `attach` / `detach` / `add session` / `remove session` のdispatch（session lifecycle。TASK-89・2026-09-25追加。TASK-87設計書が元。remove sessionはTASK-84・2026-11-13追加）
+## DD-14. `attach` / `detach` / `add session` / `remove session` / `rename session` のdispatch（session lifecycle。TASK-89・2026-09-25追加。TASK-87設計書が元。remove sessionはTASK-84・2026-11-13追加。rename sessionはTASK-95・2026-11-13追加）
 
-- grammar: `zelper [--session NAME] attach [--json]` / `zelper [--session NAME] detach [--json]` / `zelper add session NAME [--json]` / `zelper remove session ... [--json]`（TASK-84。詳細はDD-11 remove session）。attach/detachのsession解決は--session共通（DD-1.2）。**session集合を対象とする操作（`list sessions`・`add session`・`remove session`）は例外dispatch**: 対象session解決（mk_backend）を経ずprobe backend（`ZellijCliBackend::new("zelper-probe-unused")` + check_capability）を直接構築する（sessionが1つも存在しない環境——add sessionの主要ユースケース・remove sessionの事前確認到達——でも動作するため。共通経路のまま実装するとresolve_sessionがNoTargetで失敗する）
+- grammar: `zelper [--session NAME] attach [--json]` / `zelper [--session NAME] detach [--json]` / `zelper add session NAME [--json]` / `zelper remove session ... [--json]`（TASK-84。詳細はDD-11 remove session）/ `zelper rename session NAME NEW_NAME [--json]`（TASK-95。詳細はDD-8 rename session）。attach/detachのsession解決は--session共通（DD-1.2）。**対象session名を扱い対象session解決（mk_backend）を必要としない操作（`list sessions`・`add session`・`remove session`・`rename session`）は例外dispatch**: 対象session解決（mk_backend）を経ずprobe backend（`ZellijCliBackend::new("zelper-probe-unused")` + check_capability）を直接構築する（sessionが1つも存在しない環境——add sessionの主要ユースケース・remove/rename sessionの事前確認到達——でも動作するため。共通経路のまま実装するとresolve_sessionがNoTargetで失敗する）
 - **attach**: TTY検証（`std::io::IsTerminal`でstdin・stdout両方）をzellij起動前にfail-fast（非TTYは`Preflight` exit 7。誘導文「attach requires a TTY; for non-interactive session creation use `zelper add session`」）。M4実測: 全fd非TTYの素attachはzellijがpanic exit 101・stdout汚染、stdin=TTY/stdout=pipeではUI出力先不在でblockするため、それらに到達させる前に止める（stdout片側のみ非TTYの構成もblock防止のため拒否）。backend経路は`attach_session()` = `run_interactive(["attach", <session>])`（positional形式。DD-3.1例外——実行中の子fd 2はcapture file・fd 0/1は元targetを継承・stderrは子終了後に一括転写で対話中の即時転送なし・実行中は親のSIGINTを一時SIG_IGN）。対話終了後のみ報告（対話中は一切出力しない。stdoutはzellijが占有）: human `attach session 'X' ended` / JSON `data.session`。zellij非zero終了は`OperationFailed` exit 5（messageへexit statusとstderr本文を埋め込む）。**不在名はzelper側で事前検出（TASK-93）**: session解決（DD-1.2）の--session明示時は`list_sessions`による事前存在確認を先行し、不在はNoTarget exit 3（zelper文面+candidates。EXITED名は存在扱いでpass-through）でzellij呼出前に失敗する——zellij側rc=1「Session not Found」経路（Session not found + 稼働session候補表示）には原則到達しない。0個・不在名時のNoTargetはTTY検査（`Preflight` exit 7）より先に立つ（mk_backend_namedによるsession解決がTTY検査より先のため）
 - **detach**: `--session NAME action detach` wrap（現行run_actionの枠・新機構なし）。M3実測: 単一client存在時は外部detachでclient即切断・client exit 0・sessionはRUNNING継続・detach自身はrc=0 silent。**client不在でもrc=0 silent（no-op成功）**のため、zelperはclient数を検査せずrc=0を無条件で成功扱いする（client不在とclient存在がzellerから同一に見える）。報告: human `detached clients from session 'X'` / JSON `data.session`。不在session名はsession解決（DD-1.2）の事前存在確認でNoTarget exit 3（zelper文面+candidates。zellij呼出不発。TASK-93）。それ以外のzellij非zero終了は`OperationFailed` exit 5
   - 注記（M3 (c)実測）: **複数attach client存在時のdetachはzellijが最新のattach clientのみdetachし、先発clientは描画凍結のまま残留する**（2回目のdetachでも先発clientは残留——反復detachは全client切断の手段として機能しない）。zellij側のclient選択挙動でありzelperにclient数依存の分岐はなく、rc=0を成功として報告するのみ

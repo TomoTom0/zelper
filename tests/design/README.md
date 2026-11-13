@@ -14,7 +14,7 @@ mise run verify-conditions
 
 ## 条件書一覧（20 file・315条件）
 
-verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。TASK-93テスト先行更新の4 file〔cli-grammar・list-display・backend-process・attach-detach〕はfail-first期間中のためfalse——実装・全条件緑化後に再記録。TASK-84のremove-sessionは実装工程で全条件緑化後にtrueへ再記録済み。TASK-95のrenameはsession条件12件追加のfail-first期間中のためpane分とともにfalse——実装・全条件緑化後に再記録）。
+verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。TASK-93テスト先行更新の4 file〔cli-grammar・list-display・backend-process・attach-detach〕はfail-first期間中のためfalse——実装・全条件緑化後に再記録。TASK-84のremove-session・TASK-95のrenameは実装工程で全条件緑化後にtrueへ再記録済み）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -24,7 +24,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 4 | json-contract | src/output/json.rs | error_map（4件）+ cli_list_read_send（部分2件） | 6 | true |
 | 5 | read-send | src/app/read.rs | cli_list_read_send（部分11件） | 11 | true |
 | 6 | list-display | src/app/list.rs | cli_list_read_send（部分11件）+ lib src/app/list.rs（3件） | 14 | false（TASK-93 fail-first） |
-| 7 | rename | src/app/rename.rs | fake_rename_add_remove（pane 3件+session L2 5件）+ cli_list_read_send（session L3 7件） | 15 | false（TASK-95 fail-first） |
+| 7 | rename | src/app/rename.rs | fake_rename_add_remove（pane 3件+session L2 5件）+ cli_list_read_send（session L3 7件） | 15 | true |
 | 8 | add-remove | src/app/remove.rs | fake_rename_add_remove（部分7件） | 7 | true |
 | 9 | resize | src/app/resize.rs | fake_resize（7件） | 7 | true |
 | 10 | layout-planner | src/app/remap.rs | layout_planner（26件） | 26 | true |

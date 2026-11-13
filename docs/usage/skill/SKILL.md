@@ -28,6 +28,7 @@ zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
 zelper rename pane PANE NAME
 zelper rename tab TAB NAME
+zelper rename session NAME NEW_NAME
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS]
 zelper resize equalize [--tab T | PANE...] [--json]
 zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
@@ -53,7 +54,7 @@ zelper docs readme | llm usage|skill|snippet
 
 - `list --compact`（`-c`）はhuman出力の縮小（panesはtab+短縮cwdのみ・他は名前のみ）。`--json` 併用時はJSON優先
 - `send` のtext指定は `--` 区切り必須: `zelper send --command codex -- y`（`-- y`を忘れるとusage error exit 2）
-- `rename` はnoun形式: `zelper rename pane 3 build` / `zelper rename tab agents work`
+- `rename` はnoun形式: `zelper rename pane 3 build` / `zelper rename tab agents work` / `zelper rename session old new`
 - `resize` は方向まで指定: `zelper resize pane 3 grow right 2`
 - `remap` のlayout指定は名前 / `--path` / `--inline` の3source相互排他。併用はusage error
 - `move` は単一pane/tabの移動・交換（全体再配置はremap）: `zelper move pane 3 left`（方向移動・rotate。slot間swap・端ではno-op warning+exit 0）/ `zelper move pane 3 --to-tab 1`（tab間移動・pane ID不変）/ `zelper move pane 3 --swap-with 5`（pane交換・cross-tabのみ）/ `zelper move tab 1 --swap-with 3`（tab交換・position入替）。direction・--to-tab・--swap-withは三者排他かつちょうど1つ。同一tab内のpane交換・両tab最後のpane同士の交換はexit 7（remapかtab交換を案内）。floating paneはexit 7（`remap --embed-floating`でtiled化してから）

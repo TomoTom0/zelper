@@ -140,8 +140,8 @@ expect_return = "(i) exit 3（NoTarget）・JSON error.candidates == [live-a, li
 id = "cli-grammar.rename-parse-emits-typed-argv"
 source_lines = "tests/cli/list_read_send.rs:2356"
 target_function = "renameのCLI parse（clap → backend argv・postcondition通過）"
-source = "docs/testing/test-plan.md §2.1（各verbの正常系: DD-1.6の全exampleがparseされ意図するtyped requestになる） + docs/design/detailed-design.md DD-1.6（rename pane 12 worker-1 / rename tab 3 agents） + DD-8（plan: rename-pane -p / rename-tab-by-id・postcondition: title/name反映）"
-description = "rename verbのCLI parse表面: DD-1.6の例形式がtyped request（rename-pane -p / rename-tab-by-id argv）として発行され、shim状態のtitle/name書換によりpostcondition（反映確認）を通過してexit 0する。検証限界: postcondition（title/name反映）はshim状態拡張による模擬であり、実挙動のpostcondition検証はL2（rename.toml）とL4が担う"
+source = "docs/testing/test-plan.md §2.1（各verbの正常系: DD-1.6の全exampleがparseされ意図するtyped requestになる） + docs/design/detailed-design.md DD-1.6（rename pane 12 worker-1 / rename tab 3 agents / rename session old new——session例はTASK-95で追加） + DD-8（plan: rename-pane -p / rename-tab-by-id・postcondition: title/name反映）"
+description = "rename verbのCLI parse表面: DD-1.6の例形式がtyped request（rename-pane -p / rename-tab-by-id argv）として発行され、shim状態のtitle/name書換によりpostcondition（反映確認）を通過してexit 0する。TASK-95でDD-1.6へ追加されたsession例（rename session old new）のparse→action形式argv→postcondition通過→exit 0はrename.tomlのrename.session-success-argv-and-report条件が同一test file内で検証するため本条件のgiven/expectはpane/tabのまま（同一表面の重複条件化を避ける分担）。検証限界: postcondition（title/name反映）はshim状態拡張による模擬であり、実挙動のpostcondition検証はL2（rename.toml）とL4が担う"
 given = "(i) FAKE_PANES_JSON（terminal_1入り）でzelper rename pane terminal_1 worker-1 (ii) FAKE_TABS_JSON（1-tab）でzelper rename tab 0 agents"
 expect_return = "(i) exit 0・FAKE_LOGに--session fake-sess action rename-pane -p terminal_1 worker-1・stdout \"renamed pane terminal_1 -> worker-1\" (ii) exit 0・FAKE_LOGにaction rename-tab-by-id 0 agents・stdout \"renamed tab 0 -> agents\""
 

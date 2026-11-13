@@ -75,6 +75,7 @@ zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
 zelper rename pane PANE NAME
 zelper rename tab TAB NAME
+zelper rename session NAME NEW_NAME           （session名変更。事前衝突検査+事後一覧検証つき）
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS]
 zelper resize equalize [--tab T | PANE...] [--json]
 zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
