@@ -170,6 +170,11 @@ pub trait ZellijBackend {
     /// なし）。kill-sessionとは終状態が同一（行+session_info完全消滅・実測M4/M5）
     /// で状態（RUNNING/死data）に依らず動作するため単一methodに統一
     fn delete_session(&self, name: &str) -> Result<(), ZelperError>;
+    /// session名変更（DD-8 rename session・TASK-95）。argvは
+    /// `--session <from> action rename-session <to>`（run_action_as形式・M4 H実測）。
+    /// 既存session名へのrename・空文字・'/'含み名はrc=0で黙って失敗する（M4 I・
+    /// M95-C1/C2）ため、衝突・validation事前検査とpostcondition検証はcallerの責務
+    fn rename_session(&self, from: &str, to: &str) -> Result<(), ZelperError>;
     fn pipe_plugin(
         &self,
         path: &std::path::Path,

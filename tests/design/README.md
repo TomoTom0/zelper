@@ -12,9 +12,9 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（20 file・303条件）
+## 条件書一覧（20 file・315条件）
 
-verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。TASK-93テスト先行更新の4 file〔cli-grammar・list-display・backend-process・attach-detach〕はfail-first期間中のためfalse——実装・全条件緑化後に再記録。TASK-84のremove-sessionは実装工程で全条件緑化後にtrueへ再記録済み）。
+verified列はmeta検証記録（verified = true）の実績値（backend-parserはsrc実装分のverified再記録が未実施のためfalseのまま残置〔cargo test --test parser は全pass〕。TASK-93テスト先行更新の4 file〔cli-grammar・list-display・backend-process・attach-detach〕はfail-first期間中のためfalse——実装・全条件緑化後に再記録。TASK-84のremove-sessionは実装工程で全条件緑化後にtrueへ再記録済み。TASK-95のrenameはsession条件12件追加のfail-first期間中のためpane分とともにfalse——実装・全条件緑化後に再記録）。
 
 | # | stem | source_file | 対応test target | 条件数 | verified |
 |---|---|---|---|---|---|
@@ -24,7 +24,7 @@ verified列はmeta検証記録（verified = true）の実績値（backend-parser
 | 4 | json-contract | src/output/json.rs | error_map（4件）+ cli_list_read_send（部分2件） | 6 | true |
 | 5 | read-send | src/app/read.rs | cli_list_read_send（部分11件） | 11 | true |
 | 6 | list-display | src/app/list.rs | cli_list_read_send（部分11件）+ lib src/app/list.rs（3件） | 14 | false（TASK-93 fail-first） |
-| 7 | rename | src/app/rename.rs | fake_rename_add_remove（部分3件） | 3 | true |
+| 7 | rename | src/app/rename.rs | fake_rename_add_remove（pane 3件+session L2 5件）+ cli_list_read_send（session L3 7件） | 15 | false（TASK-95 fail-first） |
 | 8 | add-remove | src/app/remove.rs | fake_rename_add_remove（部分7件） | 7 | true |
 | 9 | resize | src/app/resize.rs | fake_resize（7件） | 7 | true |
 | 10 | layout-planner | src/app/remap.rs | layout_planner（26件） | 26 | true |
@@ -48,11 +48,12 @@ source_fileの代表とnote欄記載の対応（設計書§2.2）:
 - attach-detach: note = 「src/app/add.rs run_session・src/zellij/process.rs run_interactive（traitはsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象」
 - move: note = 「src/zellij/process.rs（move_pane / move_tab・MovePaneOp・TabMoveDirection）・src/companion.rs（remap.rsから切り出しのcompanion helper。TASK-88 §2.8）も検証対象。CLI parse表面・help出現はcli-grammar.tomlのmove系5条件が分担」
 - remove-session: note = 「src/zellij/process.rs（delete_session trait実装。trait定義はsrc/zellij/mod.rs）・src/cli.rs（RemoveTarget::Session・clap pairwise conflicts + app層exactly-one）・src/main.rs（RemoveTarget::Session例外dispatch・probe backend）も検証対象」
+- rename: note = 「src/zellij/process.rs（rename_session trait実装。trait定義はsrc/zellij/mod.rs）・src/cli.rs（RenameTarget::Session）・src/main.rs（RenameTarget::Session例外dispatch・probe backend）も検証対象。CLI parse文法・help出現はcli-grammar.tomlが分担」
 
 test file側の振分（1 fileが複数条件書に跨る分。設計書§2.3）:
 
-- `tests/cli/list_read_send.rs` 86件 = cli-grammar 26（うちmove系5件: TASK-88のparse排他・native argv/no-op JSON・fail exit5・tab swap argv列・verb set v2 help出現〔watch/attach/detachの継承分を含む〕。TASK-65: 残excluded 8件の条件化14件を含む——zellij不在実path exit4・plugin PANESPEC正例・remap positional path・--json重複・resize equalize×grow排他・session解決残り段〔--session/env優先・複数/0件error〕・rename/resize/add/remove parse→argv正例・--tab×--all併合・--dry-run×--yes注意行・completion zsh/fish種別）/ read-send 11 / list-display 11 / json-contract 2 / watch 10（文法・出力契約・exit分類。loop系6件はfake_watch）/ attach-detach 10（L3層。TASK-89+TASK-93の非TTY attach解決先行・--session不在名・list sessions 0個出力）/ remove-session 16（L3層。TASK-84テスト先行: selector 4者排他・不在NAME candidates〔EXITED込み〕・dry-run plan〔running tabs/panes・deadはnull+list_tabs_for不呼出〕・delete-session <name> -f argv・部分失敗exit 6 results[]・self保護〔NAME経路拒否・--all除外warning・selfのみNoTarget〕・--me系〔env必須・解決名実行・実行前warning・dry-run current注記〕・--dead〔EXITED行のみ〕・0-session NoTarget・probe dispatch・成功報告〔removed session行・(was dead)〕。shimのFAKE_FAIL_DELETE_SESSION / FAKE_MUTE_DELETE_SESSION・${FAKE_LOG}.deleted〔delete-session作用のlist-sessions応答反映〕・FAKE_SESSIONSのEXITED行）
-- `tests/fake_backend/rename_add_remove.rs` 10件 = rename 3 / add-remove 7
+- `tests/cli/list_read_send.rs` 93件 = cli-grammar 26（うちmove系5件: TASK-88のparse排他・native argv/no-op JSON・fail exit5・tab swap argv列・verb set v2 help出現〔watch/attach/detachの継承分を含む〕。TASK-65: 残excluded 8件の条件化14件を含む——zellij不在実path exit4・plugin PANESPEC正例・remap positional path・--json重複・resize equalize×grow排他・session解決残り段〔--session/env優先・複数/0件error〕・rename/resize/add/remove parse→argv正例・--tab×--all併合・--dry-run×--yes注意行・completion zsh/fish種別）/ read-send 11 / list-display 11 / json-contract 2 / watch 10（文法・出力契約・exit分類。loop系6件はfake_watch）/ attach-detach 10（L3層。TASK-89+TASK-93の非TTY attach解決先行・--session不在名・list sessions 0個出力）/ remove-session 16（L3層。TASK-84テスト先行: selector 4者排他・不在NAME candidates〔EXITED込み〕・dry-run plan〔running tabs/panes・deadはnull+list_tabs_for不呼出〕・delete-session <name> -f argv・部分失敗exit 6 results[]・self保護〔NAME経路拒否・--all除外warning・selfのみNoTarget〕・--me系〔env必須・解決名実行・実行前warning・dry-run current注記〕・--dead〔EXITED行のみ〕・0-session NoTarget・probe dispatch・成功報告〔removed session行・(was dead)〕。shimのFAKE_FAIL_DELETE_SESSION / FAKE_MUTE_DELETE_SESSION・${FAKE_LOG}.deleted〔delete-session作用のlist-sessions応答反映〕・FAKE_SESSIONSのEXITED行）/ rename session 7（L3層。TASK-95テスト先行: 成功argv/報告〔action形式・renamed_session/name envelope〕・不在NAME candidates〔EXITED込み〕・NEW_NAME衝突Preflight〔running・EXITED両方〕・同一名Usage・不正新名Usage〔空文字・'/'含み〕・EXITED名Preflight拒否・probe dispatch。shimの${FAKE_LOG}.renamed〔rename-session作用のlist-sessions応答反映〕。FAKE_FAIL_RENAME_SESSION / FAKE_MUTE_RENAME_SESSIONは機構のみ維持——行使はL2のfail_op/mute注入条件が担う〔設計§2.10行使分担〕）
+- `tests/fake_backend/rename_add_remove.rs` 15件 = rename 15（pane 3 / session L2 5: TASK-95テスト先行——状態書き換え〔exited不変〕・mute黙失敗のpostcondition検出〔VerificationFailed〕・呼出失敗〔OperationFailed〕・事後list失敗class保持〔but failed to confirm〕・空白含み新名受理〔L3 shimで模擬不能なためL2が担う〕）/ add-remove 7
 - `tests/fake_backend/watch.rs` 6件 = watch（loop系: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。設計§5.2/§5.3の層帰属）
 - `tests/fake_backend/move.rs` 24件 = move（全条件。L2中心・1条件=1 test fn。TASK-88実装済み。REVIEW-3でprobe送信失敗・tab交換途中消滅の2条件を追加。polling timeout系3条件は10s deadlineを実時間消費）
 - `tests/fake_backend/remove_session.rs` 5件 = remove-session（L2層。TASK-84テスト先行: 常時gate・postcondition 2系〔still listed・list失敗class保持〕・NAME重複除去・EXITED受理。fake.rsのsession状態管理拡張〔delete_sessionでsessionsから行削除・mute_delete_session / fail_list_sessions_after_delete注入・set_sessions fixture差し替え〕も参照）

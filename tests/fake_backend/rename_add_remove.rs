@@ -197,3 +197,150 @@ fn remove_missing_pane_is_no_target() {
         zelper::app::remove::run_pane(&b, &["42".to_string()], true, false, false).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::NoTarget);
 }
+
+// ---------------------------------------------------------------------------
+// rename session（TASK-95・rename.tomlのL2層5条件。設計
+// tmp/tasks/tm-95/design_rename-session.md §2/§2.9/§5実装上の注意）。
+// CLI表面（exit code実出力・文面・FAKE_LOG argv列・probe dispatch）はL3層
+// tests/cli/list_read_send.rs
+
+fn sess(name: &str, exited: bool) -> SessionRef {
+    SessionRef {
+        name: name.into(),
+        created: Some("1m ago".into()),
+        current: false,
+        exited,
+    }
+}
+
+/// 成功時のbackend状態書き換え契約（§2.9）: rename_session呼出成功でsessionsの
+/// from行がtoへ書き換わる（exited不変——renameは実行状態を変えない）。呼出記録は
+/// `rename-session@<from> <to>` 形式（fail_opのprefix照合で失敗注入可）
+// [covers:rename.session-state-rewrite-on-success]
+#[test]
+fn rename_session_rewrites_sessions_state_on_success() {
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false), sess("dead1", true)]);
+    zelper::app::rename::run_session(&b, "old", "new", false).unwrap();
+    assert!(
+        b.calls().iter().any(|c| c == "rename-session@old new"),
+        "calls: {:?}",
+        b.calls()
+    );
+    let s = b.state.borrow();
+    let names: Vec<&str> = s.sessions.iter().map(|x| x.name.as_str()).collect();
+    assert_eq!(names, vec!["new", "dead1"], "sessions: {names:?}");
+    assert!(!s.sessions[0].exited, "exited is unchanged (false)");
+}
+
+/// rc=0黙失敗のpostcondition検出（§2.5）: rename_session呼出がOkでも
+/// list_sessions状態が書き換わらない系列（M4 I型・rc=0黙失敗模擬）は、事後一覧の
+/// postcondition検証でVerificationFailed（exit 7）として報告する
+// [covers:rename.session-silent-noop-detected-by-postcondition]
+#[test]
+fn rename_session_silent_noop_detected_by_postcondition() {
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false)]);
+    b.mute_rename_session();
+    let err = zelper::app::rename::run_session(&b, "old", "new", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::VerificationFailed,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 7, "message: {}", err.message());
+    assert!(
+        err.message().contains("did not take effect"),
+        "message: {}",
+        err.message()
+    );
+    // 呼出自体はrc=0成功扱いで発行済み
+    assert!(
+        b.calls().iter().any(|c| c == "rename-session@old new"),
+        "calls: {:?}",
+        b.calls()
+    );
+}
+
+/// rename_session呼出自体の失敗はOperationFailed（§2.6表）: postcondition検証に
+/// 到達しない失敗経路。exit 5
+// [covers:rename.session-backend-failure-operation-failed]
+#[test]
+fn rename_session_backend_failure_is_operation_failed() {
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false)]);
+    b.inject_failure("rename-session@");
+    let err = zelper::app::rename::run_session(&b, "old", "new", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 5, "message: {}", err.message());
+}
+
+/// 事後一覧取得失敗のclass保持伝播（§2.5）: rename呼出成功後のlist_sessions失敗は
+/// 元class/exitを保持したままmessageへ文脈（but failed to confirm）を付与する。
+/// OperationFailedとZellijUnavailableの両注入でclass/exit保持を検証
+/// （class保持が本質——add/remove sessionと同一pattern）
+// [covers:rename.session-postcondition-list-failure-preserves-class]
+#[test]
+fn rename_session_postcheck_list_failure_preserves_class_with_context() {
+    // OperationFailed（既定注入class）: exit 5保持
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false)]);
+    b.fail_list_sessions_after_rename();
+    let err = zelper::app::rename::run_session(&b, "old", "new", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 5, "message: {}", err.message());
+    let msg = err.message();
+    assert!(msg.contains("but failed to confirm"), "message: {msg}");
+    assert!(msg.contains("injected failure"), "message: {msg}");
+    // rename呼出は成功済み（実行結果が検証できずに報告される系列）
+    assert!(
+        b.calls().iter().any(|c| c == "rename-session@old new"),
+        "calls: {:?}",
+        b.calls()
+    );
+
+    // ZellijUnavailable注入でもclass/exit保持と文脈付与は同一
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("old", false)]);
+    b.fail_list_sessions_after_rename();
+    b.inject_failure_as(ErrorClass::ZellijUnavailable);
+    let err = zelper::app::rename::run_session(&b, "old", "new", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::ZellijUnavailable,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 4, "message: {}", err.message());
+    let msg = err.message();
+    assert!(msg.contains("but failed to confirm"), "message: {msg}");
+    assert!(msg.contains("injected failure"), "message: {msg}");
+}
+
+/// 空白含みNEW_NAMEの受理（§2.3）: zellijが受理する名（実測M95-C3: "a b"）を
+/// wrap側でも拒否せずそのまま実行する（whitelist検査を導入していないことの検出。
+/// 空白含み名はL3 shimのrenamed状態file〔space区切り〕で模擬不能なためL2が担う）
+// [covers:rename.session-whitespace-name-accepted]
+#[test]
+fn rename_session_accepts_whitespace_in_new_name() {
+    let b = FakeBackend::new(vec![], vec![]);
+    b.set_sessions(vec![sess("s3", false)]);
+    zelper::app::rename::run_session(&b, "s3", "a b", false).unwrap();
+    assert!(
+        b.calls().iter().any(|c| c == "rename-session@s3 a b"),
+        "calls: {:?}",
+        b.calls()
+    );
+    assert_eq!(b.state.borrow().sessions[0].name, "a b");
+}

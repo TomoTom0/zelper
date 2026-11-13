@@ -199,6 +199,14 @@ pub struct FakeBackend {
     /// 1回でも観測した後のlist_sessions呼出を失敗させる（事前確認は成功・事後確認
     /// のみ失敗の系列。fail_opは先頭一致で事前確認側に当たるため専用arm）
     pub fail_list_sessions_after_delete: Cell<bool>,
+    /// rename session用（TASK-95）: rename_sessionをOkのままlist-sessions状態
+    /// （sessions行のname書き換え）へ反映しない（rc=0・黙失敗模擬。M4 I型）
+    pub mute_rename_session: Cell<bool>,
+    /// rename session用（TASK-95）: rename_session（rename-session@<from> <to>）呼出を
+    /// 1回でも観測した後のlist_sessions呼出を失敗させる（事前確認は成功・事後確認
+    /// のみ失敗の系列。fail_opは先頭一致で事前確認側に当たるため専用arm——
+    /// fail_list_sessions_after_deleteと同型）
+    pub fail_list_sessions_after_rename: Cell<bool>,
 }
 
 pub struct FakeState {
@@ -293,6 +301,8 @@ impl FakeBackend {
             vanish_tab_after_move_tab: Cell::new(None),
             mute_delete_session: Cell::new(false),
             fail_list_sessions_after_delete: Cell::new(false),
+            mute_rename_session: Cell::new(false),
+            fail_list_sessions_after_rename: Cell::new(false),
         }
     }
 
@@ -579,6 +589,20 @@ impl FakeBackend {
     #[allow(dead_code)]
     pub fn fail_list_sessions_after_delete(&self) {
         self.fail_list_sessions_after_delete.set(true);
+    }
+
+    /// rename session用（TASK-95）: rename_sessionをOkのままlist-sessions状態
+    /// （sessions行のname書き換え）へ反映しない（rc=0・黙失敗模擬）
+    #[allow(dead_code)]
+    pub fn mute_rename_session(&self) {
+        self.mute_rename_session.set(true);
+    }
+
+    /// rename session用（TASK-95）: 事後確認（postcheck）のlist-sessions呼出のみを
+    /// 失敗させる（事前確認は成功・rename-session呼出は成功済みの系列）
+    #[allow(dead_code)]
+    pub fn fail_list_sessions_after_rename(&self) {
+        self.fail_list_sessions_after_rename.set(true);
     }
 
     /// remove session用（TASK-84）: session一覧の初期状態を差し替える
@@ -910,6 +934,23 @@ impl ZellijBackend for FakeBackend {
                 .borrow()
                 .iter()
                 .any(|c| c.starts_with("delete-session "))
+        {
+            return Err(ZelperError::new(
+                self.fail_class
+                    .borrow()
+                    .clone()
+                    .unwrap_or(ErrorClass::OperationFailed),
+                "injected failure at 'list-sessions' (postcheck)".to_string(),
+            ));
+        }
+        // TASK-95: rename sessionの事後確認のみ失敗させる注入（arm後・
+        // rename-session@呼出観測後のlist-sessions。事前確認側には当てない）
+        if self.fail_list_sessions_after_rename.get()
+            && self
+                .calls
+                .borrow()
+                .iter()
+                .any(|c| c.starts_with("rename-session@"))
         {
             return Err(ZelperError::new(
                 self.fail_class
@@ -1818,6 +1859,24 @@ impl ZellijBackend for FakeBackend {
         }
         let mut s = self.state.borrow_mut();
         s.sessions.retain(|x| x.name != name);
+        Ok(())
+    }
+
+    /// TASK-95（設計§2.9）: rename_session。呼出記録
+    /// （`rename-session@{from} {to}`——list_tabs_forの`list-tabs@{session}`流儀。
+    /// fail_opのprefix照合〔record内starts_with〕により`rename-session@`等で
+    /// 失敗注入可）と、sessions内のname == from行をname = toへ書き換え
+    /// （exitedは不変——renameは実行状態を変えない）を行う。
+    /// mute_rename_session注入時は記録のみで書き換えない（rc=0・黙失敗模擬）
+    fn rename_session(&self, from: &str, to: &str) -> Result<(), ZelperError> {
+        self.record(&format!("rename-session@{from} {to}"))?;
+        if self.mute_rename_session.get() {
+            return Ok(());
+        }
+        let mut s = self.state.borrow_mut();
+        if let Some(x) = s.sessions.iter_mut().find(|x| x.name == from) {
+            x.name = to.to_string();
+        }
         Ok(())
     }
 }

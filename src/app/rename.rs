@@ -76,3 +76,25 @@ pub fn run_tab(
         ))
     }
 }
+
+/// rename session NAME NEW_NAME: session名変更（DD-8 rename session・TASK-95）。
+/// main.rsからは対象session解離を必要としないprobe backendが渡される
+/// （RenameTarget::Session例外dispatch。設計§2.7）。
+///
+/// TASK-95テスト工程時点のstub（テスト先行・fail-first）: signatureのみ確定し、
+/// 実行順序（app層Usage検査→事前一覧→不在/EXITED/衝突検査→rename呼出→
+/// 事後一覧→postcondition→報告。設計§2.8）は実装工程で置き換える。
+/// classは期待class群（Usage/NoTarget/Preflight/OperationFailed/
+/// VerificationFailed）と区別可能なPartialFailureを返す
+pub fn run_session(
+    backend: &dyn ZellijBackend,
+    name: &str,
+    new_name: &str,
+    json: bool,
+) -> Result<(), ZelperError> {
+    let _ = (backend, name, new_name, json);
+    Err(ZelperError::new(
+        ErrorClass::PartialFailure,
+        "rename session: not yet implemented",
+    ))
+}

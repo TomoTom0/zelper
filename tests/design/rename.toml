@@ -1,14 +1,24 @@
-# rename操作（src/app/rename.rs）の検証条件。出典: test-plan §2.5・§2.9・DD-8・requirements §2.4
-# 対応test: tests/fake_backend/rename_add_remove.rs（部分3件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# rename操作（src/app/rename.rs）の検証条件。pane分の出典: test-plan §2.5・§2.9・DD-8・requirements §2.4
+# 対応test（1条件=1 test fnの1:1対応。設計書§2.3/3.4）:
+#   pane 3条件 = tests/fake_backend/rename_add_remove.rs
+#   session 12条件（TASK-95テスト先行作成・実装前fail-first）:
+#     L2 5条件 = tests/fake_backend/rename_add_remove.rs（状態書き換え・mute黙失敗検出・
+#       呼出失敗・事後list失敗class保持・空白含み名受理）
+#     L3 7条件 = tests/cli/list_read_send.rs（成功argv/報告・不在candidates・衝突・
+#       同一名・不正新名・EXITED拒否・probe dispatch。shimのFAKE_SESSIONS〔EXITED行混在可〕・
+#       FAKE_SESSIONS_EMPTY・${FAKE_LOG}.renamed〔rename-session作用のlist-sessions応答反映〕）
+# 層帰属（TASK-95設計§2.10: remove-session.toml先例に倣う）: parse文法・help出現・exit code
+#   実出力・文面・FAKE_LOG argv列・envelope実出力・0-session/probe dispatchはL3。
+#   app層class mapping・FakeBackend状態遷移・呼出契約・mute/fail注入による検出はL2
 [meta]
 feature = "rename"
 source_file = "src/app/rename.rs"
-verified = true
-verified_at = "2026-09-13"
-verified_by = "claude"
-test_command = "cargo test --test fake_rename_add_remove"
-source_hash = "9b151626155ce57c8e9ad5f4455b0acd1ea4c5d4"
-note = ""
+verified = false
+verified_at = ""
+verified_by = ""
+test_command = "cargo test"
+source_hash = ""
+note = "TASK-95テスト先行更新（設計: tmp/tasks/tm-95/design_rename-session.md）: rename session条件12件を追加。session条件がL2/L3両層に跨るためtest_commandをcargo testへ拡大。verified/source_hashは追加条件が全件緑化した実装工程で再設定（pane分3条件は2026-09-13緑化実績あり）。src/zellij/process.rs（rename_session trait実装。trait定義はsrc/zellij/mod.rs）・src/cli.rs（RenameTarget::Session）・src/main.rs（RenameTarget::Session例外dispatch・probe backend）も検証対象。CLI parse文法・help出現はcli-grammar.tomlが分担"
 
 [[condition]]
 id = "rename.pane-rename-call-and-postcondition"
@@ -36,6 +46,135 @@ source = "docs/testing/test-plan.md §2.5・§2.9（サイレント成功の検�
 description = "renameのサイレント成功対策の構成固定: postcondition（list-panes再取得によるtitle反映確認）を経る実行経路が無検証の成功を返さない構造であること。§2.9のclose-pane exit 0無操作検出と同型のpostcondition機構（設計書§8.3: rename側で条件化）。検証限界: FakeBackendはrename-paneで必ずtitleを反映するためtitle不変のno-op系列が注入不能。本testはstate整合（pane消失なし・実行成功）までのassertであり、title不変系列のVerificationFailed exit 7実経路はL4実zellijでの検証となる（test fileのコメントどおり）"
 given = "terminal_1が1件のFakeBackendに対するrename::run_pane(b, 1, x)の実行後のstate"
 expect_return = "Okかつstate整合（panes.len()=1。titleの書き換えとpaneの同一性はfake実装上常に成立）"
+
+[[condition]]
+id = "rename.session-success-argv-and-report"
+source_lines = "tests/cli/list_read_send.rs:3426"
+target_function = "ZellijBackend::rename_session → rename::run_session（実行+報告）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.0（grammar: zelper rename session NAME NEW_NAME [--json]）・§2.7（backend argvは zellij --session <from> action rename-session <to> のaction形式〔top-level rename-sessionは0.44.3に存在しない・M1/M3〕）・§2.6（human報告: renamed session 'old' -> 'new'〔user指定文面・空白含み名のためquote必須〕/ JSON: data.renamed_session=旧名・data.name=新名）・§2.5（postcondition: 事後list_sessionsで旧名消失+新名running出現）"
+description = "rename session成功経路のargvと報告契約: 実行は `--session <from> action rename-session <to>` のaction形式1回で行われ（top-level形式は使わない・成功stdout/stderrは空〔実測M4 H〕）、事後list-sessions再取得のpostcondition（旧名消失+新名running出現）を通過したうえでhuman 1行 / JSON envelope（renamed_session=旧名・name=新名。paneのrenamed・tabのrenamed_tab流儀の継承）で報告する"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働1件・list-sessions応答は${FAKE_LOG}.renamedの記録で行名を差し替え）に対する zelper rename session old new のhuman/JSON各実行"
+expect_return = "いずれもexit 0。FAKE_LOGに `--session old action rename-session new` がちょうど1回（action形式。top-level `rename-session` 開始行なし）。humanは `renamed session 'old' -> 'new'` 1行。JSONはdata.renamed_session=old・data.name=new"
+
+[[condition]]
+id = "rename.session-missing-name-notarget-with-candidates"
+source_lines = "tests/cli/list_read_send.rs:3482"
+target_function = "rename::run_session（事前存在確認: list_sessions EXITED込み）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.1（旧NAME事前存在確認はlist_sessions〔EXITED込み〕。不在はNoTarget・candidates=全行のname〔EXITED込み〕・行0件は「no zellij sessions found」文面——remove sessionのremove::session_not_foundと同一基準・同一文面群。単一対象のため不在文面は単数形 session 'NAME' not found）・§2.6表"
+description = "旧NAME不在の分類: NAMEがlist_sessionsの行（RUNNING・EXITEDとも）に存在しない場合はNoTarget（exit 3）で中断し、candidatesには全行のname（EXITED行も含む）を出す（remove sessionと同一基準。agentの修正導線が同じになる）。一覧が完全0件（0-session環境）の場合は候補列出力ではなく「no zellij sessions found」の文面でNoTargetになる。いずれもrename呼出は不発（fail-fast）"
+given = "fake zellij shimに対する zelper rename session NAME --json の各構成: (i) FAKE_SESSIONS=稼働1件+EXITED行1件の環境で行に存在しないNAME（ghost）を指定 (ii) FAKE_SESSIONS_EMPTY=1（0-session環境）でNAMEを指定"
+expect_return = "(i) exit 3（NoTarget）。error.candidatesに稼働名とEXITED名の両方を含む。messageは単数形のsession不在文面。(ii) exit 3（NoTarget）。messageはno zellij sessions foundを含む。いずれもFAKE_LOGにrename-session呼出なし・共通解離文面（no running zellij session found）を含まない"
+
+[[condition]]
+id = "rename.session-new-name-collision-preflight"
+source_lines = "tests/cli/list_read_send.rs:3538"
+target_function = "rename::run_session（NEW_NAME衝突事前検査: EXITED込み）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.2（事前list_sessions一覧でNEW_NAMEと同名の行〔EXITED行を含む〕が存在すればPreflight exit 7でfail-fast拒否。文面はadd sessionと同一形式 session already exists: 'NEW_NAME'。衝突黙失敗〔M4 I: rc=0・旧名消失・既存名のみ残存〕がwrap側の事前検査なしには検出不能であることが根拠。EXITED込みはEXITED名へのrename挙動が未測定のため安全側）・§2.6表"
+description = "NEW_NAME衝突の事前fail-fast: NEW_NAMEが既存行（running・EXITEDの両方）と同名の場合はPreflight（exit 7）で状態変更前に拒否する。zellijは既存名へのrenameをrc=0・両stream空の黙って失敗として受け入れる（M4 I実測）ため、事前検査が唯一の防衛。文面はadd sessionと同一の session already exists 形式"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働 + taken稼働 + deadname EXITED行）に対する zelper rename session の各構成: (i) old → taken（running行と衝突） (ii) old → deadname（EXITED行と衝突）"
+expect_return = "いずれもexit 7（Preflight）。messageは session already exists: 'taken' / 'deadname' の形。FAKE_LOGにrename-session呼出なし（fail-fast）"
+
+[[condition]]
+id = "rename.session-same-name-usage-error"
+source_lines = "tests/cli/list_read_send.rs:3573"
+target_function = "rename::run_session（app層冒頭の同一名検査）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.2（NEW_NAME == NAMEはUsage exit 2・NEW_NAME must differ from NAMEとして、一覧取得より前にapp層冒頭で拒否。zellijは同一名renameをrc=0のno-op成功として受け入れる〔M95-B実測〕が、postconditionの旧名消失が同一名では原理的に不成立のためVerificationFailedへ誤分類される唯一の系——構文的に無意味な入力としてのfail-fast）・§2.6表・§4軸E"
+description = "同一名renameのUsage事前拒否: NAME == NEW_NAMEは一覧取得より前にUsage（exit 2）で拒否する（無駄なbackend呼び出しをしない。app層検査でclapが表現できない Semantics を担う）。同一名を放置するとno-op成功がpostconditionでVerificationFailedに誤分類される"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働）に対する zelper rename session old old --json の実行"
+expect_return = "exit 2（Usage）。error.class=Usage。messageはmust differを含む。FAKE_LOGにlist-sessions呼出・rename-session呼出ともになし（一覧取得より前のfail-fast）"
+
+[[condition]]
+id = "rename.session-invalid-new-name-usage-error"
+source_lines = "tests/cli/list_read_send.rs:3606"
+target_function = "rename::run_session（app層冒頭のNEW_NAME validation）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.3（wrap側事前検査は (a) 空文字 (b) '/'含み の2拒否のみ〔いずれもUsage exit 2・一覧取得より前〕。空文字はrc=0両stream空の黙失敗〔M95-C1〕・'/'含みはrc=0でcacheのsession_info directoryのみnested pathへ移動する部分的適用〔M95-C2〕のため事前検査必須。whitelist等の文字種validationは行わない——空白含み名はzellijが受理する〔M95-C3〕ため）・§2.6表・§4軸D"
+description = "NEW_NAME validationの最小set: 空文字と'/'含みNEW_NAMEはUsage（exit 2）で一覧取得より前に拒否する（観測された黙失敗・状態破壊系のみ。先頭'-'はclapが拒否済みのため二重検査しない）。この2つ以外の文字種を事前拒否しないことの検出はwhitespace-name-accepted条件が担う"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働）に対する zelper rename session の各構成: (i) old → 空文字列 (ii) old → a/b（'/'含み）"
+expect_return = "いずれもexit 2（Usage）。error.class=Usage。FAKE_LOGにlist-sessions呼出・rename-session呼出ともになし（一覧取得より前のfail-fast）"
+
+[[condition]]
+id = "rename.session-exited-name-preflight-refused"
+source_lines = "tests/cli/list_read_send.rs:3643"
+target_function = "rename::run_session（EXITED行の事前拒否）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.4（NAMEがEXITED行〔exited == true〕に一致する場合はPreflight exit 7でfail-fast拒否。文面: cannot rename an EXITED (dead) session 'NAME' (attach to resurrect it first)。action rename-sessionは対象sessionのserver processへの接続を必要としserver不在名への呼び出しは失敗のみ〔M95-A/D実測〕のため、成功系列が存在せず事前拒否が無駄なzellij呼び出しを省く。remove sessionのEXITED受理との対比は「対応する成功操作の有無」）・§2.6表・§4軸C"
+description = "EXITED sessionのrename不可: NAMEが事前一覧のEXITED行に一致する場合はPreflight（exit 7）で状態変更前に拒否し、resurrection（attach）への案内文面を出す（死dataへのaction系呼び出しは失敗のみのため）。存在確認（行にあるか=NoTarget境界）と実行可否判定（runningか=Preflight境界）は別個の検査であることの固定"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働 + deadx EXITED行）に対する zelper rename session deadx --json の実行"
+expect_return = "exit 7（Preflight）。messageはcannot rename an EXITEDを含みattach（resurrection案内）を含む。FAKE_LOGにrename-session呼出なし（fail-fast）"
+
+[[condition]]
+id = "rename.session-state-rewrite-on-success"
+source_lines = "tests/fake_backend/rename_add_remove.rs:219"
+target_function = "ZellijBackend::rename_session（FakeBackend状態遷移）+ rename::run_session"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.9（L2 FakeBackendのrename_session実装: record `rename-session@{from} {to}`〔list_tabs_forのlist-tabs@{session}流儀。fail_opのprefix照合で失敗注入可〕+ sessions内のname == from行をname = toへ書き換え〔exitedは不変〕）・§2.7（trait signature）"
+description = "成功時のbackend状態書き換え契約: rename_session呼出成功（Ok）時はlist_sessions状態のfrom行がtoへ書き換わる（exited fieldは不変——renameは実行状態を変えない）。呼出記録は `rename-session@<from> <to>` 形式。postcondition検証（事後一覧での旧名消失+新名running出現）はこの状態書き換えの上に成立する"
+given = "FakeBackend（sessionsにold〔exited=false〕とdead1〔exited=true〕）に対するrename::run_session(b, old, new, false)"
+expect_return = "Ok。callsに `rename-session@old new` あり。list_sessions状態はold行がnewへ書き換わり（names = [new, dead1]）・書き換え行のexitedはfalseのまま（不変）"
+
+[[condition]]
+id = "rename.session-silent-noop-detected-by-postcondition"
+source_lines = "tests/fake_backend/rename_add_remove.rs:239"
+target_function = "rename::run_session（postcondition構成）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.5（postcondition: rename呼出後にlist_sessionsを1回取得し (1) 旧NAME行の消失 (2) NEW_NAME行が存在しexited == false の両方を確認。不成立はVerificationFailed exit 7・文面 rename of session 'NAME' did not take effect (unchanged in list-sessions)。衝突黙失敗〔M4 I〕・no-op黙失敗〔M95-B/C1〕など失敗の現れ方が複数あるため両条件必須）・§2.6表・§4軸B"
+description = "rc=0黙失敗のpostcondition検出: rename_session呼出がOkでもlist_sessions状態が書き換わらない系列（rc=0黙失敗。M4 I型）は、事後一覧のpostcondition検証でVerificationFailed（exit 7）として報告する。無検証の成功を返さない構造の固定（rename paneのsilent-noop検出・DD-8サイレント成功対策と同型）"
+given = "FakeBackend（sessionsにold稼働）へmute_rename_session()（rename_session呼出はOkだがsessionsを書き換えない——rc=0黙失敗模擬）を注入したrename::run_session(b, old, new, false)"
+expect_return = "Err（class=VerificationFailed・exit 7）。messageはdid not take effectを含む。callsに `rename-session@old new` あり（呼出自体はrc=0成功扱い）"
+
+[[condition]]
+id = "rename.session-backend-failure-operation-failed"
+source_lines = "tests/fake_backend/rename_add_remove.rs:268"
+target_function = "rename::run_session（backend呼出失敗）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.6表（rename呼出失敗〔zellij非zero終了・rc=0+stderr〔race時の不在名等〕・timeout〕はOperationFailed exit 5）・§2.9（fail_opのprefix照合〔record内starts_with〕により失敗注入可）"
+description = "rename_session呼出自体の失敗はOperationFailedとして伝播する（postcondition検証に到達しない失敗経路。exit 5）。呼出失敗時のclassとexit code対応の維持（事前検査〔Usage/NoTarget/Preflight〕と実行段失敗〔OperationFailed〕の分離）"
+given = "FakeBackend（sessionsにold稼働）へrename_session呼出をinject_failure(\"rename-session@\")で失敗させたrename::run_session(b, old, new, false)"
+expect_return = "Err（class=OperationFailed・exit 5）。callsに `rename-session@old new` あり（失敗注入の観測）"
+
+[[condition]]
+id = "rename.session-postcondition-list-failure-preserves-class"
+source_lines = "tests/fake_backend/rename_add_remove.rs:288"
+target_function = "rename::run_session（事後一覧取得失敗のclass保持伝播）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.5（事後一覧取得の失敗は元class/exitを保持しmessageへ文脈付与〔renamed session 'NAME' but failed to confirm: <元message>——add session DD-14・remove sessionと同一pattern。rename呼出が成功済みの可能性があるため〕）・§2.6表・§2.9（L2 FakeBackend: fail_list_sessions_after_rename注入〔rename-session@呼出観測後のlist_sessions呼出のみ失敗。事前確認は成功。fail_opは先頭一致で事前確認側に当たるため専用arm〕）"
+description = "事後一覧取得失敗の報告: rename呼出成功後のlist_sessions呼出が失敗する系列では、実行済みの結果を検証できないため元のerror class/exitを保持したままmessageへ文脈（but failed to confirm）を付与して報告する（OperationFailedへの素通しでもVerificationFailedへの丸めでもないclass保持。OperationFailed・ZellijUnavailableの両注入でclass/exit保持を検証——class保持が本質）"
+given = "FakeBackend（sessionsにold稼働）へfail_list_sessions_after_rename()（rename-session@呼出を1回観測した後のlist_sessions呼出のみ失敗注入）した状態でのrename::run_session(b, old, new, false)。classは既定のOperationFailedとinject_failure_asによるZellijUnavailableの2種"
+expect_return = "いずれもErr。classは注入と同一の保持（OperationFailedならexit 5・ZellijUnavailableならexit 4）。messageはbut failed to confirmとinjected failureを含む。callsに `rename-session@old new` あり（実行済み）"
+
+[[condition]]
+id = "rename.session-dispatch-via-probe-backend"
+source_lines = "tests/cli/list_read_send.rs:3678"
+target_function = "main.rs run（RenameTarget::Session例外dispatch: probe backend + check_capability）→ rename::run_session"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.7（dispatchはRenameTarget::Session例外dispatch——ZellijCliBackend::new(\"zelper-probe-unused\") + check_capability → rename::run_session(&probe, ...)。旧NAMEの存在確認はlist_sessionsで完結し対象session解決〔mk_backend〕を必要としない。共通経路のまま実装すると0-session環境でresolve_sessionのNoTarget〔共通解離文面〕が先に立ち本機能自身の事前確認文面に到達しない。global --session flagは無視——list/add/remove sessionと同一規約）・§4軸F"
+description = "rename sessionの例外dispatch: 対象session解決（mk_backend）を経ないprobe backend直接構築により、zellij sessionが1つも存在しない環境でもrename sessionが事前確認まで到達する（共通解離経路の文面で失敗する回帰の検出）。事前確認文面（no zellij sessions found）がrun_session層由来であることと、probe backend経由でlist-sessions呼出が発生していることで検証する"
+given = "fake zellij shim（FAKE_SESSIONS_EMPTY=1 = 0-session環境）に対する zelper rename session foo new --json の実行"
+expect_return = "exit 3（NoTarget）。messageはno zellij sessions foundを含み、共通解離経路の文面（no running zellij session found）を含まない。FAKE_LOGに `list-sessions -n` 呼出あり（probe backendでzellijを呼んでいる）・rename-session呼出なし"
+
+[[condition]]
+id = "rename.session-whitespace-name-accepted"
+source_lines = "tests/fake_backend/rename_add_remove.rs:334"
+target_function = "rename::run_session（NEW_NAME文字種validationを行わない）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.3（拒否するのは空文字と'/'含みのみ。空白含み名はzellijが正常に受理する〔実測M95-C3: s3 → \"a b\" rename成功〕ためwhitelistはzellij受理名の不当な拒否になる。観察されていない文字種を推測で拒否しない——すり抜けはpostconditionが最終防衛）・§5実装上の注意（空白含みNEW_NAMEはL3 shimのrenamed状態file〔space区切り〕で模擬不能なためL2〔FakeBackendは文字列で保持〕が担う）・§4軸D"
+description = "空白含みNEW_NAMEの受理: 空白を含むNEW_NAME（実zellij受理・M95-C3）は事前検査で拒否されずそのまま実行され、session名として書き換わる（whitelist検査を導入していないことの検出。invalid-new-name条件〔空文字・'/'のみ拒否〕と対をなす）。human報告文面のquote（'old'）は空白含み名に必須である根拠"
+given = "FakeBackend（sessionsにs3稼働）に対するrename::run_session(b, s3, \"a b\", false)"
+expect_return = "Ok。callsに `rename-session@s3 a b` あり。list_sessions状態の当該行nameは「a b」（空白含みのまま）"
+
+[[excluded]]
+item = "事前list_sessions取得失敗のclass/exit伝播検証（一覧取得失敗は0件へ丸めず元class/exitのまま伝播）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.6表（事前list_sessions取得失敗 → 元class/exitのまま伝播。0件へ丸めない・TASK-93 D5）"
+reason = "app層の独自分岐なし（backend呼び出しの`?`伝播のみ）。backendのclass伝播契約自体はTASK-93で確定済みでattach.rsのL2条件（fail_op事前確認失敗・postcheck arm事後確認失敗の2系）が検証済み。run_session側の呼出構成（事前1回の取得を全判定に共用）はcollision/exited/missing各条件のgivenが担保"
+decided_at = "2026-11-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "FAKE_FAIL_RENAME_SESSION / FAKE_MUTE_RENAME_SESSIONのL3条件での行使（shimのrename-session応答制御機構による呼出失敗・黙失敗のL3実出力検証）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.10（FAKE_*行使分担: 両機構の行使はL3条件では行わない——呼出失敗・黙失敗系の検証はL2条件〔fail_op・mute_rename_session注入〕が担う。FAKE_MUTE_DELETE_SESSIONの黙失敗検証がremove-sessionでL2のmute注入側で担われていた先例と同一分担。shim側両機構は`--session <from> action rename-session <to>` argv形式への失敗応答一式〔実zellij応答形式の再現資産〕として維持——将来のL3側検証追加時に行使）"
+reason = "設計§2.10の行使分担決定（L2のfail_op/mute注入条件8/9/10が同系列を検証済み）。機構自体はshimへ実装済みのため除外は検証の欠ではなく層間の分担"
+decided_at = "2026-11-13"
+decided_by = "claude"
+
+[[excluded]]
+item = "EXITED行そのものへのaction rename-session挙動の直接実証（実zellij 0.44.3でEXITED行を生成してrenameを試る系列）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.4（EXITED行そのものへのaction rename-sessionの直接実証はEXITED行が再現不能なため未達〔§3根拠6〕。「行なし死data」「不在名」の失敗実測〔M95-A/D〕からの推測として扱う。事前拒否により当該経路はzellerから到達不能になるため、推測が外れても表面化しない）"
+reason = "EXITED行をlist-sessionsへ出現させる生成経路が特定不能（TASK-84 M6〜M8・M95ともSIGKILL/SIGTERMいずれでも不出現）。exited-name-preflight-refused条件の事前拒否によりzellerから当該経路は到達不能。実機EXITED行はL4実測記録が正本"
+decided_at = "2026-11-13"
+decided_by = "claude"
 
 [[excluded]]
 item = "rename tab（rename-tab-by-id <id> <name>呼び出し・postconditionのname反映確認）"

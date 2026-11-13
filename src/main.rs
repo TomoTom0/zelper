@@ -31,6 +31,7 @@ fn wants_json(cli: &Cli) -> bool {
         Verb::Rename { target } => match target {
             RenameTarget::Pane { json, .. } => *json,
             RenameTarget::Tab { json, .. } => *json,
+            RenameTarget::Session { json, .. } => *json,
         },
         Verb::Resize { target } => match target {
             ResizeTarget::Pane { json, .. } => *json,
@@ -112,6 +113,21 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
             zelper::app::send::run(backend.as_ref(), panes, filter, text, keys, *enter, *json)
         }
         Verb::Rename { target } => {
+            // RenameTarget::Sessionは例外dispatch（DD-14・TASK-95設計§2.7）: 旧NAMEの
+            // 存在確認はlist_sessions（top-level argv）で完結し対象session解決
+            // （mk_backend）を必要としないため、list/add/remove sessionと同一の
+            // probe backend（capability checkのみ）で直接構築する（0-session環境でも
+            // 本機能自身の事前確認文面まで到達。global --session flagは無視）
+            if let zelper::cli::RenameTarget::Session {
+                name,
+                new_name,
+                json,
+            } = target
+            {
+                let probe = ZellijCliBackend::new("zelper-probe-unused");
+                check_capability(&probe)?;
+                return zelper::app::rename::run_session(&probe, name, new_name, *json);
+            }
             let backend = mk_backend(&cli)?;
             match target {
                 zelper::cli::RenameTarget::Pane { pane, name, json } => {
@@ -119,6 +135,10 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
                 }
                 zelper::cli::RenameTarget::Tab { tab, name, json } => {
                     zelper::app::rename::run_tab(backend.as_ref(), tab, name, *json)
+                }
+                // Sessionは上記の例外dispatch（probe backend）で処理済み
+                zelper::cli::RenameTarget::Session { .. } => {
+                    unreachable!("RenameTarget::Session is dispatched via probe backend above")
                 }
             }
         }

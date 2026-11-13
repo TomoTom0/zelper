@@ -594,6 +594,15 @@ impl ZellijBackend for ZellijCliBackend {
         ])?;
         Ok(())
     }
+
+    fn rename_session(&self, from: &str, to: &str) -> Result<(), ZelperError> {
+        // session名変更（TASK-95設計§2.7）。`zellij --session <from> action
+        // rename-session <to>`（M4 Hで動作実証済みの形式そのもの。top-level
+        // rename-sessionは0.44.3に存在しない・M1/M3）。rc=0+stderr空判定
+        // （DD-3.1）はrun_action_asが担う
+        self.run_action_as(from, &["rename-session", to])?;
+        Ok(())
+    }
 }
 
 /// run_interactive用のstderr capture（DD-14）。親自身のfd 2を一時的なcapture

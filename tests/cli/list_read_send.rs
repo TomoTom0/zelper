@@ -42,6 +42,13 @@ if [[ "$1" == "list-sessions" ]]; then
   if [[ -s "${FAKE_LOG}.deleted" ]]; then
     all="$(printf '%s\n' "$all" | awk 'NR==FNR { del[$1]=1; next } !($1 in del)' "${FAKE_LOG}.deleted" -)"
   fi
+  # TASK-95: ${FAKE_LOG}.renamed（rename-session handlerの記録）に含まれる
+  # from名の行は応答行の先頭field（session名）をto名へ差し替える
+  # （rename-session後のlist-sessions再取得 = postcondition検証への応答反映。
+  # .deletedの除外機構と同型の状態file機構。行のEXITED表記等の残りは不変）
+  if [[ -s "${FAKE_LOG}.renamed" ]]; then
+    all="$(printf '%s\n' "$all" | awk 'NR==FNR { rn[$1]=$2; next } $1 in rn { $1=rn[$1] } { print }' "${FAKE_LOG}.renamed" -)"
+  fi
   printf '%s\n' "$all"
   exit 0
 fi
@@ -295,6 +302,22 @@ if [[ "$3" == "action" ]]; then
         ' "$state" > "${state}.new" && mv "${state}.new" "$state"
       fi
       echo "ok"; exit 0;;
+    # TASK-95: `zellij --session <from> action rename-session <to>`（run_action_as
+    # 形式・M4 H実測）。FAKE_FAIL_RENAME_SESSION（失敗させるfrom名のspace区切り
+    # list）に一致するfromはrc=1 + stderrで失敗（実行段の失敗注入。zellerの事前
+    # 検査で不在・衝突へは到達しないため汎用失敗応答——FAKE_FAIL_DELETE_SESSION
+    # と同一pattern。L3条件では行使しないが実zellij応答形式の再現資産として機構
+    # を維持〔設計§2.10行使分担〕）。FAKE_MUTE_RENAME_SESSION=1はrc=0だが
+    # ${FAKE_LOG}.renamedへ記録しない（rc=0黙失敗模擬。M4 I型）。通常はrc=0 +
+    # renamed状態fileへ `<from> <to>` 行を追記
+    rename-session)
+      for fail in $FAKE_FAIL_RENAME_SESSION; do
+        if [[ "$fail" == "$sess" ]]; then echo "boom" >&2; exit 1; fi
+      done
+      if [[ -z "$FAKE_MUTE_RENAME_SESSION" ]]; then
+        echo "$sess $1" >> "${FAKE_LOG}.renamed"
+      fi
+      exit 0;;
     # TASK-88: FAKE_FAIL_MOVE_TAB設定時はmove-tabを非zero終了させる。未設定時は
     # FAKE_TABS_JSONの状態file上で1 position移動（edgeはwrap）し、各行のposition
     # fieldを行番号へ再採番する（tab交換の2d-1回呼出に対してpostconditionの
@@ -362,6 +385,10 @@ exit 0
     // 初期化する（.sessionsと同一の理由: PID再利用でdirを再利用した際の前回削除
     // 分の残留を排除。空fileはshimの [[ -s ]] で「無し」と同一扱い）
     std::fs::write(dir.join("calls.log.deleted"), "").unwrap();
+    // TASK-95: rename-session handlerの記録（${FAKE_LOG}.renamed）もsetup時に
+    // 初期化する（.deletedと同一の理由: PID再利用でdirを再利用した際の前回分の
+    // 残留を排除。空fileはshimの [[ -s ]] で「無し」と同一扱い）
+    std::fs::write(dir.join("calls.log.renamed"), "").unwrap();
     // TASK-65: FAKE_PANES_JSONのpane状態file（${FAKE_LOG}.panes）もsetup時に
     // 削除する（PID再利用で既存dirを再利用した際の前回のrename/close/new-pane
     // 作用後状態の残留を排除。tabsと同一の理由）
@@ -3379,5 +3406,305 @@ fn remove_session_success_report_results_and_human_lines() {
     assert!(
         results.iter().all(|r| r["ok"] == true),
         "results: {results:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// rename session（TASK-95・rename.tomlのL3層7条件。設計
+// tmp/tasks/tm-95/design_rename-session.md §2/§2.10。shimのFAKE_SESSIONS
+// 〔EXITED行混在可〕・FAKE_SESSIONS_EMPTY〔0-session環境〕・${FAKE_LOG}.renamed
+// 〔rename-session作用のlist-sessions応答反映〕。FAKE_FAIL_RENAME_SESSION /
+// FAKE_MUTE_RENAME_SESSIONは機構のみ維持——呼出失敗・黙失敗系の検証はL2の
+// fail_op/mute注入条件が担う〔設計§2.10行使分担〕。L2層5条件は
+// tests/fake_backend/rename_add_remove.rs）
+
+/// rename session成功経路のargvと報告（§2.0/2.6/2.7）: 実行は
+/// `--session <from> action rename-session <to>` のaction形式1回（top-level
+/// rename-sessionはzellij 0.44.3に存在しない・M1/M3）。postcondition
+/// （list-sessions再取得で旧名消失+新名running出現）通過後にhuman 1行 /
+/// JSON envelope（renamed_session=旧名・name=新名）で報告
+// [covers:rename.session-success-argv-and-report]
+#[test]
+fn rename_session_success_argv_and_report() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = "old [Created 1m ago] (current)";
+    // human: 報告1行（quote付き・user指定文面）
+    let (mut cmd, log) = zelper("rename-sess-report-human");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["rename", "session", "old", "new"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(out).unwrap();
+    assert_eq!(
+        stdout,
+        "renamed session 'old' -> 'new'\n",
+        "stdout: {stdout:?}"
+    );
+    let cs = calls(&log);
+    // argv契約: action形式ちょうど1回
+    assert_eq!(
+        cs.iter()
+            .filter(|c| **c == "--session old action rename-session new")
+            .count(),
+        1,
+        "calls: {cs:?}"
+    );
+    // top-level rename-session argvは使わない
+    assert!(
+        !cs.iter().any(|c| c.starts_with("rename-session")),
+        "calls: {cs:?}"
+    );
+
+    // JSON: data.renamed_session=旧名・data.name=新名
+    let (mut cmd, _) = zelper("rename-sess-report-json");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["rename", "session", "old", "new", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["renamed_session"], "old");
+    assert_eq!(v["data"]["name"], "new");
+}
+
+/// 旧NAME不在の分類（§2.1）: NAMEがlist_sessionsの行（RUNNING・EXITEDとも）に
+/// 存在しない場合はNoTarget（exit 3）でcandidates=全行名（EXITED込み）。一覧が
+/// 完全0件（0-session環境）の場合は「no zellij sessions found」文面。いずれも
+/// rename呼出不発（fail-fast）
+// [covers:rename.session-missing-name-notarget-with-candidates]
+#[test]
+fn rename_session_missing_name_is_notarget_with_candidates() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) 不在NAME: candidatesに稼働名とEXITED名の両方（EXITED込み）
+    let (mut cmd, log) = zelper("rename-sess-missing");
+    let out = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "old [Created 1m ago] (current)\n\
+             deadx [Created 2m ago] (EXITED - attach to resurrect)",
+        )
+        .args(["rename", "session", "ghost", "new", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    // 単一対象のため単数形のsession不在文面（removeの複数名前提文面と異なる点）
+    assert!(msg.contains("not found"), "message: {msg}");
+    // 共通解離経路の文面ではない
+    assert!(!msg.contains("no running zellij session found"), "message: {msg}");
+    let cands = v["error"]["candidates"].as_array().unwrap();
+    assert!(cands.iter().any(|c| c == "old"), "candidates: {cands:?}");
+    assert!(cands.iter().any(|c| c == "deadx"), "candidates: {cands:?}");
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("rename-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (ii) 行0件（0-session環境）: no zellij sessions found文面
+    let (mut cmd, _) = zelper("rename-sess-missing-zero");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["rename", "session", "foo", "bar", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("no zellij sessions found"), "message: {msg}");
+}
+
+/// NEW_NAME衝突の事前fail-fast（§2.2）: NEW_NAMEが既存行（running・EXITEDの
+/// 両方）と同名の場合はPreflight（exit 7）で状態変更前に拒否。文面はadd session
+/// と同一形式（zellijは既存名へのrenameをrc=0・両stream空の黙って失敗として
+/// 受け入れる〔M4 I実測〕ため、wrap側の事前検査が唯一の防衛）
+// [covers:rename.session-new-name-collision-preflight]
+#[test]
+fn rename_session_new_name_collision_is_preflight() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = "old [Created 1m ago] (current)\n\
+                    taken [Created 2m ago]\n\
+                    deadname [Created 3m ago] (EXITED - attach to resurrect)";
+    for (i, new_name) in ["taken", "deadname"].iter().enumerate() {
+        let (mut cmd, log) = zelper(&format!("rename-sess-collision-{i}"));
+        let out = cmd
+            .env("FAKE_SESSIONS", sessions)
+            .args(["rename", "session", "old", new_name, "--json"])
+            .assert()
+            .failure()
+            .code(7)
+            .get_output()
+            .stdout
+            .clone();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["error"]["class"], "Preflight", "case {i}");
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("session already exists"), "message: {msg}");
+        assert!(msg.contains(new_name), "message: {msg}");
+        assert!(
+            !calls(&log).iter().any(|c| c.contains("rename-session")),
+            "case {i} calls: {:?}",
+            calls(&log)
+        );
+    }
+}
+
+/// 同一名renameのUsage事前拒否（§2.2）: NAME == NEW_NAMEは一覧取得より前に
+/// Usage（exit 2）で拒否する（無駄なbackend呼び出しをしない。放置すると
+/// zellijのno-op rc=0成功〔M95-B実測〕がpostconditionでVerificationFailedに
+/// 誤分類される唯一の系）
+// [covers:rename.session-same-name-usage-error]
+#[test]
+fn rename_session_same_name_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("rename-sess-same-name");
+    let out = cmd
+        .env("FAKE_SESSIONS", "old [Created 1m ago] (current)")
+        .args(["rename", "session", "old", "old", "--json"])
+        .assert()
+        .failure()
+        .code(2)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "Usage");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("must differ"), "message: {msg}");
+    // 一覧取得より前のfail-fast（list-sessions・rename-sessionとも不発。
+    // check_capabilityの--version呼び出しはdispatch契約上発生する）
+    let cs = calls(&log);
+    assert!(!cs.iter().any(|c| c == "list-sessions -n"), "calls: {cs:?}");
+    assert!(
+        !cs.iter().any(|c| c.contains("rename-session")),
+        "calls: {cs:?}"
+    );
+}
+
+/// NEW_NAME validationの最小set（§2.3）: 空文字と'/'含みNEW_NAMEはUsage
+/// （exit 2）で一覧取得より前に拒否する（観測された黙失敗〔空文字・M95-C1〕・
+/// 状態破壊〔'/'含みはcacheのsession_info directoryがnested pathへ部分移動・
+/// M95-C2〕系のみ。それ以外の文字種は事前拒否しない——受理側は
+/// whitespace-name-accepted条件〔L2〕が検出）
+// [covers:rename.session-invalid-new-name-usage-error]
+#[test]
+fn rename_session_invalid_new_name_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    for (i, new_name) in ["", "a/b"].iter().enumerate() {
+        let (mut cmd, log) = zelper(&format!("rename-sess-invalid-{i}"));
+        let out = cmd
+            .env("FAKE_SESSIONS", "old [Created 1m ago] (current)")
+            .args(["rename", "session", "old", new_name, "--json"])
+            .assert()
+            .failure()
+            .code(2)
+            .get_output()
+            .stdout
+            .clone();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(
+            v["error"]["class"], "Usage",
+            "case {i} (new_name={new_name:?})"
+        );
+        let cs = calls(&log);
+        assert!(
+            !cs.iter().any(|c| c == "list-sessions -n"),
+            "case {i} calls: {cs:?}"
+        );
+        assert!(
+            !cs.iter().any(|c| c.contains("rename-session")),
+            "case {i} calls: {cs:?}"
+        );
+    }
+}
+
+/// EXITED sessionのrename不可（§2.4）: NAMEが事前一覧のEXITED行に一致する場合は
+/// Preflight（exit 7）で状態変更前に拒否しresurrection（attach）への案内文面を
+/// 出す（server不在名へのaction系呼び出しは失敗のみ〔M95-A/D実測〕のため。
+/// 存在確認〔行にあるか=NoTarget境界〕と実行可否判定〔runningか=Preflight境界〕
+/// は別個の検査であることの固定）
+// [covers:rename.session-exited-name-preflight-refused]
+#[test]
+fn rename_session_exited_name_is_refused() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("rename-sess-exited");
+    let out = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "old [Created 1m ago] (current)\n\
+             deadx [Created 2m ago] (EXITED - attach to resurrect)",
+        )
+        .args(["rename", "session", "deadx", "new", "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "Preflight");
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("cannot rename an EXITED"), "message: {msg}");
+    assert!(msg.contains("attach"), "message: {msg}");
+    assert!(
+        !calls(&log).iter().any(|c| c.contains("rename-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// rename sessionの例外dispatch（§2.7）: 対象session解決（mk_backend）を経ない
+/// probe backend直接構築により、zellij sessionが1つも存在しない環境でも
+/// rename sessionが事前確認まで到達する（共通経路のまま実装すると
+/// resolve_sessionのNoTarget〔共通解離文面〕が先に立ち本機能自身の事前確認
+/// 文面に到達しない回帰の検出）
+// [covers:rename.session-dispatch-via-probe-backend]
+#[test]
+fn rename_session_dispatches_via_probe_backend() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("rename-sess-probe-dispatch");
+    let out = cmd
+        .env("FAKE_SESSIONS_EMPTY", "1")
+        .args(["rename", "session", "foo", "bar", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    let msg = v["error"]["message"].as_str().unwrap();
+    // run_session層の文面（事前存在確認まで到達）。共通解決経路の文面ではない
+    assert!(msg.contains("no zellij sessions found"), "message: {msg}");
+    assert!(
+        !msg.contains("no running zellij session found"),
+        "message: {msg}"
+    );
+    let cs = calls(&log);
+    // probe backend経由でlist-sessions呼出は発生している（0-session環境で動作）。
+    // 記録はshimの `echo "$*"`（= `list-sessions -n`。backend list_sessionsの
+    // 確定argv・TASK-93 D1）
+    assert!(cs.iter().any(|c| c == "list-sessions -n"), "calls: {cs:?}");
+    assert!(
+        !cs.iter().any(|c| c.contains("rename-session")),
+        "calls: {cs:?}"
     );
 }
