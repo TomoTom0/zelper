@@ -4057,3 +4057,62 @@ fn rename_tab_success_argv_and_report() {
     assert_eq!(v["data"]["renamed_tab"], 0);
     assert_eq!(v["data"]["name"], "newtab");
 }
+
+// TASK-69 minor-3: remap --tab TABSPECのparse受理・mainからのRemapArgs.tab引き渡し
+// （remap-sequence.tomlのtab-spec系3条件はRemapArgs.tab直接代入のためこの段が
+// 未検証）。--tab build（一意名）指定のdry-run JSON planにtab絞り込みが反映される:
+// anchor=対象tab（active tab 0でない）・source=対象tabのpaneのみ
+// [covers:cli-grammar.remap-tab-spec-parse-scopes-plan]
+#[test]
+fn remap_tab_spec_parse_scopes_plan() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("remap-tabspec");
+    cmd.env(
+        "FAKE_PANES_JSON",
+        format!(
+            "[{},{},{},{},{}]",
+            pane_json(1, "a", 0, 50, 0),
+            pane_json(2, "b", 50, 50, 0),
+            pane_json(3, "c", 0, 30, 1),
+            pane_json(4, "d", 30, 30, 1),
+            pane_json(5, "e", 60, 30, 1)
+        ),
+    )
+    .env(
+        "FAKE_TABS_JSON",
+        format!(
+            "[{},{}]",
+            tab_json(0, "Tab #1", 2, 0),
+            tab_json(1, "build", 3, 1)
+        ),
+    )
+    .args([
+        "remap",
+        "--inline",
+        "layout {\n    tab {\n        pane\n        pane\n        pane\n    }\n}\n",
+        "--tab",
+        "build",
+        "--dry-run",
+        "--json",
+    ]);
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let data = &v["data"];
+    assert_eq!(
+        data["anchor"], 1,
+        "anchorは--tab対象tab（active tab 0でない）: {data}"
+    );
+    assert_eq!(data["m"], 3, "raw: {data}");
+    assert_eq!(data["k"], 1, "raw: {data}");
+    let source = data["source"].as_array().cloned().unwrap_or_default();
+    let ids: Vec<&str> = source
+        .iter()
+        .map(|p| p["pane"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["terminal_3", "terminal_4", "terminal_5"],
+        "sourceは対象tabのpaneのみ（tab 0のpane不載）: {data}"
+    );
+}

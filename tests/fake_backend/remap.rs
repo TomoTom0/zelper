@@ -2763,21 +2763,36 @@ fn reconciliation_early_return_ignores_earlier_group_closes() {
 
 // ---- TASK-69: --tab TABSPEC絞り込み（DD-10.5/10.6/10.14・D10） ----
 
-/// --tab TABSPEC検証用fixture: tab 0（active・pane 2件）+ tab 1 build（非active・pane 3件）
+/// --tab TABSPEC検証用fixture: tab 0（active・pane 2件+scope外確認用floating 1件）
+/// + tab 1 build（非active・pane 3件）
 fn two_tabs_target_three() -> (Vec<PaneState>, Vec<TabState>) {
+    let mut panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+        pane_at(4, "d", 1, 1, 0, 50, Some("cmd4")),
+        pane_at(5, "e", 1, 1, 10, 0, Some("cmd5")),
+    ];
+    // scope外（tab 0）のfloating pane（r8のC1回帰と同じ選択的terminal構成）
+    let mut floating = pane_at(9, "float", 0, 0, 0, 0, Some("htop"));
+    floating.is_floating = true;
+    panes.push(floating);
     (
-        vec![
-            pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
-            pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
-            pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
-            pane_at(4, "d", 1, 1, 0, 50, Some("cmd4")),
-            pane_at(5, "e", 1, 1, 10, 0, Some("cmd5")),
-        ],
+        panes,
         vec![
             tab_state(0, 0, "t0", true, 2),
             tab_state(1, 1, "build", false, 3),
         ],
     )
+}
+
+/// floating pane（terminal_9）がtab 0でfloatingのまま生存しているか
+fn floating_stays_in_tab0(b: &FakeBackend) -> bool {
+    b.state
+        .borrow()
+        .panes
+        .iter()
+        .any(|p| p.id == PaneKindId::Terminal(9) && p.is_floating && p.tab_id == TabId(0))
 }
 
 // [covers:remap-sequence.tab-spec-scopes-source-and-anchor-to-target-tab]
@@ -2841,7 +2856,47 @@ fn tab_spec_scopes_source_and_anchor_to_target_tab() {
         assert_eq!(l.name, "t0", "raw: {l:?}");
         assert_eq!(l.position, 0, "raw: {l:?}");
         assert_eq!(l.selectable_tiled, 2, "raw: {l:?}");
+        // scope外（tab 0）のfloating paneは通常実行のPreflight error対象外
+        // （r8のsession全体scopeとは違い--tab絞り込みでscope外になるため）
+        assert!(
+            !calls.iter().any(|c| c.starts_with("toggle-embed")),
+            "scope外floatingはtoggleしない: {calls:?}"
+        );
+        assert!(
+            floating_stays_in_tab0(&b),
+            "scope外floatingはfloatingのままtab 0に生存: {:?}",
+            b.state.borrow().panes
+        );
     }
+
+    // (b) --embed-floating指定時もscope外（tab 0）floatingはtoggle対象外
+    // （floating抽出のin_scope判定。r8のC1回帰と対になる--tab側の限定）
+    let (panes, tabs) = two_tabs_target_three();
+    let b = FakeBackend::new(panes, tabs);
+    let mut a = args(false);
+    a.tab = Some("build");
+    a.embed_floating = true;
+    let outcome = with_isolated_xdg(|_| run(&b, &a).expect("scope内floating不在で成功"));
+    let calls = b.calls();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("toggle-embed")),
+        "scope外floatingはembed指定でもtoggleしない: {calls:?}"
+    );
+    assert!(
+        floating_stays_in_tab0(&b),
+        "scope外floatingはfloatingのまま: {:?}",
+        b.state.borrow().panes
+    );
+    assert_eq!(
+        tiled_count(&b, TabId(1)),
+        3,
+        "sourceはtab 1の3 paneのまま（floating混入なし）"
+    );
+    assert_eq!(
+        outcome.leftover_tabs.len(),
+        1,
+        "tab 0はleftover: {outcome:?}"
+    );
 }
 
 // [covers:remap-sequence.tab-spec-unresolvable-is-no-target]

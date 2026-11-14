@@ -1,5 +1,5 @@
 # CLI文法・排他・PANESPEC・session解決・completion（src/cli.rs）の検証条件。出典: test-plan §2.1・§2.9・DD-1.2〜1.7・TASK-93設計書（session-zero-missing.md D3: --session不在名の事前存在確認）
-# 対応test: tests/cli/list_read_send.rs（部分26件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# 対応test: tests/cli/list_read_send.rs（部分28件。1条件=1 test fnの1:1対応。設計書§2.3/3.4。TASK-100のresize-equalize 1件とTASK-69のremap --tab 1件を含む）
 [meta]
 feature = "cli-grammar"
 source_file = "src/cli.rs"
@@ -8,7 +8,7 @@ verified_at = "2026-11-14"
 verified_by = "claude"
 test_command = "cargo test --test cli_list_read_send"
 source_hash = "35298cff5ee4d175702f37edd3fe8a28565ad105"
-note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）・Remap::layoutへvalue_parser適用（remap-positional-path条件の緑化）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象。TASK-93（2026-11-12）条件書更新: session-flag-missing-name-notargetを追加（D3: --session不在名はresolve_session の事前存在確認でNoTarget。EXITED名は存在扱いで通過）・session-multiple-and-none-running-errorへFAKE_SESSIONS_EMPTY第三構成を追加（D1 decode後は完全0件もNoTarget。shimの0件文面はstderr化済み）・session-flag-priority-and-env-resolutionへenv解決経路のlist-sessions不呼出assertを追加（D3適用範囲限定の回帰検出）。テスト先行のため新規・更新分はfail-first状態（src/cli.rs自体は不変・resolve_session〔src/app/mod.rs〕が未実装でsession-flag-missing-name-notargetとsession-multiple第三構成が赤）——（当時記録。TASK-93実装〔resolve_sessionの事前存在確認〕で全条件緑化・cargo test --test cli_list_read_send 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕。verified/verified_at/verified_by/source_hashはTASK-93実装に対する最終検証記録へ更新）。TASK-100（2026-11-14）: resize-equalize-tab-panes-conflict-is-usage-errorを追加（26→27条件。--tab×PANESPEC排他のD3構成。テスト先行で追加時は(i)(ii)が現行実装の--tab黙無視PANESPEC経路exit 0により赤〔対照正例は緑〕。実装工程でEqualize::panesへclap conflicts_with属性を付与し全条件緑化・cargo test --test cli_list_read_send 全98test pass・verify-conditions pass。verified/verified_at/verified_by/source_hashはTASK-100実装に対する最終検証記録へ更新）"
+note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）・Remap::layoutへvalue_parser適用（remap-positional-path条件の緑化）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象。TASK-93（2026-11-12）条件書更新: session-flag-missing-name-notargetを追加（D3: --session不在名はresolve_session の事前存在確認でNoTarget。EXITED名は存在扱いで通過）・session-multiple-and-none-running-errorへFAKE_SESSIONS_EMPTY第三構成を追加（D1 decode後は完全0件もNoTarget。shimの0件文面はstderr化済み）・session-flag-priority-and-env-resolutionへenv解決経路のlist-sessions不呼出assertを追加（D3適用範囲限定の回帰検出）。テスト先行のため新規・更新分はfail-first状態（src/cli.rs自体は不変・resolve_session〔src/app/mod.rs〕が未実装でsession-flag-missing-name-notargetとsession-multiple第三構成が赤）——（当時記録。TASK-93実装〔resolve_sessionの事前存在確認〕で全条件緑化・cargo test --test cli_list_read_send 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕。verified/verified_at/verified_by/source_hashはTASK-93実装に対する最終検証記録へ更新）。TASK-100（2026-11-14）: resize-equalize-tab-panes-conflict-is-usage-errorを追加（26→27条件。--tab×PANESPEC排他のD3構成。テスト先行で追加時は(i)(ii)が現行実装の--tab黙無視PANESPEC経路exit 0により赤〔対照正例は緑〕。実装工程でEqualize::panesへclap conflicts_with属性を付与し全条件緑化・cargo test --test cli_list_read_send 全98test pass・verify-conditions pass。verified/verified_at/verified_by/source_hashはTASK-100実装に対する最終検証記録へ更新）。TASK-69（2026-11-14）: remap-tab-spec-parse-scopes-planを追加（27→28条件。remap --tab TABSPECのparse受理・mainからのRemapArgs.tab引き渡しをdry-run JSON planのanchor/source〔tab絞り込み反映〕で検証。コードレビューminor-3対応: L2のtab-spec系3条件はRemapArgs.tab直接代入のためこの段が未検証だった。実装変更を伴わないためfail-firstでなく既存実装に対して緑〔cargo test --test cli_list_read_send remap_tab_spec〕。src/cli.rs不変のためsource_hash不変）"
 
 [[condition]]
 id = "cli-grammar.session-auto-resolve-single-live-with-exited"
@@ -252,4 +252,13 @@ source = "docs/design/detailed-design.md DD-1.2（grammar: [--tab TABSPEC | PANE
 description = "equalizeの対象指定（PANESPEC群 / --tab）の相互排他の負荷側: 併用はclap属性（conflicts_with）によるparse段拒否でusage error（exit 2・clap標準文面。--json指定時もclap形式のまま）。現行実装は排他指定がなくPANESPEC群を優先して--tabを黙無視する（意図しないpane操作の黙誤動作）ためfail-first条件。PANESPEC 0個+--tab（TASK-68・resize.toml L2が担当）とPANESPEC群+--tabなし（cli-grammar.resize-parse-emits-typed-argvが担当）の各正常系は不変"
 given = "FAKE_PANES_JSON（tab 1所属・同一row・cols=10/30のterminal_3/4）+ FAKE_TABS_JSON（tab 0/1の2行。--tab 1のID解決に必要）で (i) zelper resize equalize 3 --tab 1（positional先） (ii) zelper resize equalize --tab 1 3（option先） (iii) 対照正例 zelper resize equalize --tab 1（--tab単独）の各実行"
 expect_return = "(i)(ii) ともexit 2・stderrが\"cannot be used with\"を含む・action resize argvは不発（parse段拒否・backend呼出ゼロ）。(iii) exit 0（.success()）かつFAKE_LOGにtab 1のterminal_3/terminal_4へのaction resize呼出（equalize適用）。fail-first: (i)(ii)は現行実装（排他なし・--tab黙無視のPANESPEC経路）ではterminal_3単独no-opのequalize成功でexit 0となるため赤（exit 2期待に対しexit 0）"
+
+[[condition]]
+id = "cli-grammar.remap-tab-spec-parse-scopes-plan"
+source_lines = "tests/cli/list_read_send.rs:4065"
+target_function = "remap構文（--tab TABSPEC受理・main引き渡し）"
+source = "docs/design/detailed-design.md DD-1.2（remap [--tab TABSPEC]）・DD-1.3（TABSPEC = tab ID（整数）または一意なtab名）・DD-10.5/10.6（--tab時のscope絞り込み・anchor切替） + TASK-69 body（コードレビューminor-3対応）"
+description = "remap --tab TABSPECのparse表面: clapが--tab値を受理しmainからRemapArgs.tabへ引き渡される（remap-sequence.tomlのtab-spec系3条件はRemapArgs.tabへの直接代入のためこの段が未検証だった）。dry-run --jsonのplan出力で検証する: --tab build（一意名）指定時のdata.anchorが対象tab id（active tabでない）・data.sourceが対象tabのpaneのみ（他tabのpaneは載らない）・M/kが対象tabのsourceで立つ。plan実体（絞り込み・anchor・NoTarget・鋳型0単tab適用）はremap-sequence.tomlのtab-spec系3条件が管轄（本条件はparse・引き渡しの表面）。実装変更を伴わないためfail-firstでない（既存実装に対して緑）"
+given = "tab 0（active・pane 2件）とtab 1 build（pane 3件）のfake zellij shim（FAKE_PANES_JSON/FAKE_TABS_JSON）に対するzelper remap --inline <3-slot layout> --tab build --dry-run --json の実行"
+expect_return = "exit 0・ok:true。data.anchor==1（対象tab。active tab 0でない）・data.sourceはterminal_3/4/5の3件のみ（terminal_1/2不載）・data.m==3・data.k==1"
 
