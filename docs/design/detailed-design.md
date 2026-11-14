@@ -173,7 +173,7 @@ zelper move pane 5 left --to-tab 3   # directionと--to-tabは三者排他違反
 ## DD-2. Domain / state model
 
 ```rust
-pub struct SessionRef { pub name: String }            // session名。ID概念はzellijに不存在
+pub struct SessionRef { pub name: String, pub created: Option<String>, pub current: bool, pub exited: bool }  // list-sessions -n行のparse結果（DD-3.4）。ID概念はzellijに不存在
 pub struct TabId(pub u32);                            // zellij tab ID。再利用されるため不安定キー（参照は「取得直後に消費」）
 pub enum PaneKindId { Terminal(u32), Plugin(u32) }    // 表示は "terminal_N"/"plugin_N"
 pub struct Geometry { pub x: u32, pub y: u32, pub rows: u32, pub cols: u32 }
@@ -273,7 +273,7 @@ pub struct OverrideSpec {
 ### 3.4 構造化出力のparse
 
 - `list-panes -a --json` / `list-tabs -a --json` / `current-tab-info --json` をserdeでPaneInfo/TabInfoとして直接decode（field一覧はcapabilities §2）
-- `list-sessions`はJSON不在のため `list-sessions -n` のテキストをparse（`NAME [Created X ago]`形式）。EXITED行（`NAME [...] (EXITED - attach to resurrect)`）もcreated/current/exited flag付きで返し、実行中のみへの絞り込みは呼び出し側（resolve_session・list sessions表示）が行う
+- `list-sessions`はJSON不在のため `list-sessions -n` のテキストをparseする。行構造はzellij 0.44.3 `print_sessions`で固定（source突合・実測確定）: `[Created <duration> ago]`節は無条件で常に存在しname直後に置かれる。suffixは`(current)`/`(EXITED - attach to resurrect)`の排他一択（両立なし）でCreated節の後の行末に置かれ、suffixなし行は行末に空白が残る。抽出は生成節へのanchor化（TASK-99・2026-11-14。設計書: `tmp/tasks/tm-99/design_parse-field-pollution.md`）: `t = line.trim_end()`（行末空白対応）として exited = `t.ends_with("(EXITED - attach to resurrect)")`・current = `t.ends_with("(current)")`・created = `t.rfind("[Created ")`以降の最初の`]`まで（`strip_prefix("Created ")`。`[Created `不在ならNone）・name = `split_whitespace`先頭word（不変）。名前が行区切り（改行）を含まない限り名前内容は行末に来ないため、ends_with/rfind判定は名前の部分文字列（`EXITED`・`(current)`・`[`等を含む名前）から汚染されない。残余制限: nameの先頭word化（空白含み名の切り詰め）はTASK-98領域、改行含み名は行分割が破壊される残存系列（対象外）。EXITED行もcreated/current/exited flag付きで返し、実行中のみへの絞り込みは呼び出し側（resolve_session・list sessions表示）が行う
 - `new-pane`/`new-tab`のstdout（`terminal_N` / 整数）をparseしてID取得
 - layout一覧: zellijに列挙APIがないため、layout_dir（`ZELLIJ_LAYOUT_DIR`環境変数 > `~/.config/zellij/layouts`）をzelperが直接読む。dir不存在時は空リスト。config.kdlの`layout_dir`読み取りはv1対象外（利用者は`ZELLIJ_LAYOUT_DIR`で一致させる。MR-4で確定）。SIZE/MODIFIEDのstatはsymlinkをたどったlink先の実体statを用い、参照先のstat取得失敗時は名前を一覧に残して値なし（DD-4.1。TASK-82）。layout_dir自体のread_dir失敗（不存在・壊れたsymlink・循環参照等）は空一覧のまま（既存挙動）
 
