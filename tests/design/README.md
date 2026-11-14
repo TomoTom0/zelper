@@ -12,7 +12,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（20 file・326条件）
+## 条件書一覧（20 file・327条件）
 
 verified列はmeta検証記録（verified = true）の実績値（TASK-97テスト先行のrenameは実装工程で全条件緑化後にtrueへ再記録済み——TASK-66のtab系3条件追加時もverified=trueを維持（実装変更を伴わないため）。TASK-93の4 file〔cli-grammar・list-display・backend-process・attach-detach〕・TASK-96のattach-detach追加分は実装工程で全条件緑化後にtrueへ再記録済み）。
 
@@ -26,7 +26,7 @@ verified列はmeta検証記録（verified = true）の実績値（TASK-97テス�
 | 6 | list-display | src/app/list.rs | cli_list_read_send（部分11件）+ lib src/app/list.rs（3件） | 14 | true |
 | 7 | rename | src/app/rename.rs | fake_rename_add_remove（pane 3件+tab L2 2件〔TASK-66〕+session L2 7件〔TASK-97で先頭`-`新名拒否を追加〕）+ cli_list_read_send（session L3 7件+tab L3 1件〔TASK-66〕） | 20 | true |
 | 8 | add-remove | src/app/remove.rs | fake_rename_add_remove（L2 9件〔TASK-67で部分失敗2系を追加〕）+ cli_list_read_send（部分2件・L3〔TASK-67〕） | 11 | true |
-| 9 | resize | src/app/resize.rs | fake_resize（7件） | 7 | true |
+| 9 | resize | src/app/resize.rs | fake_resize（8件〔TASK-68で--tab TABSPEC系を追加〕） | 8 | true |
 | 10 | layout-planner | src/app/remap.rs | layout_planner（26件） | 26 | true |
 | 11 | layout-generator | src/layout/generator.rs | layout_generator（14件） | 14 | true |
 | 12 | companion-seed | src/companion.rs | companion_seed（14件） | 14 | true |
