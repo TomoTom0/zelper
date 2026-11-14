@@ -3,13 +3,15 @@
 #   〔rename_session_check_order_missing_and_exited_before_collision〕は不在・EXITED
 #   両条件の複合違反caseとして2条件のtagを持つ）:
 #   pane 3条件 = tests/fake_backend/rename_add_remove.rs
-#   session 13条件（TASK-95テスト先行作成・実装前fail-first。コードレビュー対応で
+#   session 14条件（TASK-95テスト先行作成・実装前fail-first。コードレビュー対応で
 #     whitespace条件を受理からUsage事前拒否へ反転〔blocker-1〕しpostcondition
-#     独立保護条件を追加〔warn-2〕）:
-#     L2 6条件 = tests/fake_backend/rename_add_remove.rs（状態書き換え・mute黙失敗検出・
-#       呼出失敗・事後list失敗class保持・空白含み名拒否・postcondition両判定の独立保護）
+#     独立保護条件を追加〔warn-2〕。TASK-97テスト先行: 条件5へ先頭`-`（`--`経由）案を
+#     4案目に追加しL2新条件1件〔NEW_NAME先頭`-`検査〕を追加）:
+#     L2 7条件 = tests/fake_backend/rename_add_remove.rs（状態書き換え・mute黙失敗検出・
+#       呼出失敗・事後list失敗class保持・空白含み名拒否・先頭`-`新名拒否〔TASK-97〕・
+#       postcondition両判定の独立保護）
 #     L3 7条件 = tests/cli/list_read_send.rs（成功argv/報告・不在candidates・衝突・
-#       同一名・不正新名・EXITED拒否・probe dispatch。shimのFAKE_SESSIONS〔EXITED行混在可〕・
+#       同一名・不正新名〔TASK-97で先頭`-`（`--`経由）案追加〕・EXITED拒否・probe dispatch。shimのFAKE_SESSIONS〔EXITED行混在可〕・
 #       FAKE_SESSIONS_EMPTY・${FAKE_LOG}.renamed〔rename-session作用のlist-sessions応答反映〕）
 # 層帰属（TASK-95設計§2.10: remove-session.toml先例に倣う）: parse文法・help出現・exit code
 #   実出力・文面・FAKE_LOG argv列・envelope実出力・0-session/probe dispatchはL3。
@@ -17,12 +19,12 @@
 [meta]
 feature = "rename"
 source_file = "src/app/rename.rs"
-verified = true
-verified_at = "2026-11-13"
-verified_by = "claude"
-test_command = "cargo test"
-source_hash = "c469616d28831ba6f2b342fc82ffad743d3f608a"
-note = "TASK-95実装工程で全条件緑化・検証記録を再設定（設計: tmp/tasks/tm-95/design_rename-session.md。session条件はテスト先行作成〔fail-first確認済み〕→実装で緑化）。コードレビュー（codex_review_impl.log・rework-needed）5指摘への対応: 空白含みNEW_NAMEの受理からUsage事前拒否への設計変更〔blocker-1。parse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能・postcondition必敗。旧条件rename.session-whitespace-name-acceptedは意味反転のため新id rename.session-whitespace-name-rejectedへ差し替え〕・postcondition各判定の独立保護条件追加〔warn-2。fake.rsのrename_post_inject注入〕・assert強化〔warn-3。成功系呼出列完全一致・複合違反入力での検査優先順位固定（不在/EXITEDがNEW_NAME衝突に優先）・不在/衝突/同一名/不正新名/EXITED各文面とcandidatesの完全一致化〕・exited条件のgiven誤記修正〔note-4〕。run_sessionの実行順序は設計§2.8: app層Usage検査（空文字/'/'含み/空白含み/同一名）→事前list_sessions 1回（不在NoTarget/EXITED旧名/NEW_NAME衝突の全判定に共用）→rename呼出→事後list_sessions postcondition（旧名消失+新名running出現）→報告。src/zellij/process.rs（rename_session trait実装。trait定義はsrc/zellij/mod.rs）・src/cli.rs（RenameTarget::Session）・src/main.rs（RenameTarget::Session例外dispatch・probe backend）も検証対象。CLI parse文法・help出現はcli-grammar.tomlが分担（DD-1.6へ追加したsession例のparse表面はrename.session-success-argv-and-reportが検証——cli-grammar.toml同条件のdescriptionに分担記載）"
+verified = false
+verified_at = ""
+verified_by = ""
+test_command = ""
+source_hash = ""
+note = "TASK-95実装工程で全条件緑化・検証記録を再設定（設計: tmp/tasks/tm-95/design_rename-session.md。session条件はテスト先行作成〔fail-first確認済み〕→実装で緑化）。コードレビュー（codex_review_impl.log・rework-needed）5指摘への対応: 空白含みNEW_NAMEの受理からUsage事前拒否への設計変更〔blocker-1。parse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能・postcondition必敗。旧条件rename.session-whitespace-name-acceptedは意味反転のため新id rename.session-whitespace-name-rejectedへ差し替え〕・postcondition各判定の独立保護条件追加〔warn-2。fake.rsのrename_post_inject注入〕・assert強化〔warn-3。成功系呼出列完全一致・複合違反入力での検査優先順位固定（不在/EXITEDがNEW_NAME衝突に優先）・不在/衝突/同一名/不正新名/EXITED各文面とcandidatesの完全一致化〕・exited条件のgiven誤記修正〔note-4〕。run_sessionの実行順序は設計§2.8: app層Usage検査（空文字/'/'含み/空白含み/同一名）→事前list_sessions 1回（不在NoTarget/EXITED旧名/NEW_NAME衝突の全判定に共用）→rename呼出→事後list_sessions postcondition（旧名消失+新名running出現）→報告。src/zellij/process.rs（rename_session trait実装。trait定義はsrc/zellij/mod.rs）・src/cli.rs（RenameTarget::Session）・src/main.rs（RenameTarget::Session例外dispatch・probe backend）も検証対象。CLI parse文法・help出現はcli-grammar.tomlが分担（DD-1.6へ追加したsession例のparse表面はrename.session-success-argv-and-reportが検証——cli-grammar.toml同条件のdescriptionに分担記載）。TASK-97テスト先行（実装前fail-first）: rename session NEW_NAME先頭`-`検査追加（設計: tmp/tasks/tm-97/design_rename-leading-dash.md §2.1-§2.3・§2.5）——条件5（invalid-new-name-usage-error・id不変）へ`--`経由の先頭`-`案を4案目として追加（JSON検証は--jsonを--より前に置く形式）し、L2新条件rename.session-leading-dash-new-name-rejected（検査順固定: 先頭`-`は'/'・whitespace後・同一名differ前。旧NAME=\"-x\"一覧存在時のbackend到達契約保護〔旧NAMEは文字種検査対象外〕）を追加。実装前のため追加case・条件は赤（fail-first確認: tmp/tasks/tm-97/test_red_l3.log・test_red_l2.log）。meta.verified・検証記録はTASK-97実装工程で全条件緑化後に再設定する"
 
 [[condition]]
 id = "rename.pane-rename-call-and-postcondition"
@@ -89,16 +91,16 @@ expect_return = "exit 2（Usage）。error.class=Usage。messageはmust differ�
 
 [[condition]]
 id = "rename.session-invalid-new-name-usage-error"
-source_lines = "tests/cli/list_read_send.rs:3668"
+source_lines = "tests/cli/list_read_send.rs:3674"
 target_function = "rename::run_session（app層冒頭のNEW_NAME validation）"
-source = "tmp/tasks/tm-95/design_rename-session.md §2.3（wrap側事前検査は (a) 空文字 (b) '/'含み (c) 空白含み の3拒否〔いずれもUsage exit 2・一覧取得より前〕。空文字はrc=0両stream空の黙失敗〔M95-C1〕・'/'含みはrc=0でcacheのsession_info directoryのみnested pathへ移動する部分的適用〔M95-C2〕・空白含みはzellij受理後もparse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能〔postcondition必敗〕のため事前検査必須。先頭'-'はclapが拒否済みのため二重検査しない。それ以外の文字種の推測拒否は行わない——すり抜けはpostconditionが最終防衛）・§2.6表・§4軸D"
-description = "NEW_NAME validationの最小set: 空文字・'/'含み・空白含みNEW_NAMEはUsage（exit 2）で一覧取得より前に拒否する（観測された黙失敗・状態破壊系と世界modelで復元不能な系のみ。先頭'-'はclapが拒否済みのため二重検査しない）。空白caseはL3（本条件）とL2（whitespace-name-rejected条件）の両層で検証"
-given = "fake zellij shim（FAKE_SESSIONS=old稼働）に対する zelper rename session の各構成: (i) old → 空文字列 (ii) old → a/b（'/'含み） (iii) old → a b（空白含み）"
-expect_return = "いずれもexit 2（Usage）。error.class=Usage。messageは NEW_NAME must not be empty / NEW_NAME must not contain '/' / NEW_NAME must not contain whitespace の完全一致。FAKE_LOGにlist-sessions呼出・rename-session呼出ともになし（一覧取得より前のfail-fast）"
+source = "tmp/tasks/tm-95/design_rename-session.md §2.3（wrap側事前検査は (a) 空文字 (b) '/'含み (c) 空白含み の3拒否〔いずれもUsage exit 2・一覧取得より前〕。空文字はrc=0両stream空の黙失敗〔M95-C1〕・'/'含みはrc=0でcacheのsession_info directoryのみnested pathへ移動する部分的適用〔M95-C2〕・空白含みはzellij受理後もparse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能〔postcondition必敗〕のため事前検査必須。先頭'-'はTASK-95時点ではclap拒否済みのため二重検査不要と判断していたが、TASK-97で`--`option終端経由の通過系列（TASK-96実証）により判断を撤回して検査追加〔下記出典〕。それ以外の文字種の推測拒否は行わない——すり抜けはpostconditionが最終防衛）・§2.6表・§4軸D + tmp/tasks/tm-97/design_rename-leading-dash.md §2.1（NEW_NAME検査へ先頭`-`を4種目として追加。`--`option終端経由の通過系列が`--`挿入なしの zellij --session <from> action rename-session <to> 組み立て〔src/zellij/process.rs rename_session〕へ到達するためzeller側clap依存の拒否が成立せず、有効option一致値〔-c等〕の下流挙動は未測定・zellij側option集合はzeller管理外のためzellij委ねでは契約保証不能——世界modelに存在し得ない名前系列へのrenameをzeller側で確定拒否。add session NAME検査〔TASK-96〕と対称の4種目。違反はUsage exit 2・一覧取得より前・文面NEW_NAME must not start with '-'）・§2.2（検査順 empty → '/' → whitespace → 先頭`-` → 同一名differ）・§2.5（4案目のJSON検証は--jsonを--より前に置く形式——`--`以降の--jsonはpositional化するため）"
+description = "NEW_NAME validationの最小set: 空文字・'/'含み・空白含み・先頭`-`（`--`経由）NEW_NAMEはUsage（exit 2）で一覧取得より前に拒否する（観測された黙失敗・状態破壊系と世界modelで復元不能な系に加え、TASK-97で先頭`-`を4種目として追加——`--`option終端経由でCLI解析を通過するためclap依存の拒否が成立せず、世界modelに存在し得ない名前系列へのrenameをzeller側で確定拒否する〔add session NAME検査と対称〕。それ以外の文字種の推測拒否は行わない——すり抜けはpostconditionが最終防衛）。空白caseはL3（本条件）とL2（whitespace-name-rejected条件）の、先頭`-`caseはL3（本条件）とL2（session-leading-dash-new-name-rejected条件）の両層で検証"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働）に対する zelper rename session の各構成: (i) old → 空文字列 (ii) old → a/b（'/'含み） (iii) old → a b（空白含み） (iv) old --json -- -x（option終端`--`経由の先頭`-`。JSON検証は`--json`を`--`より前に置く——`--`以降の`--json`はpositional化するため）"
+expect_return = "いずれもexit 2（Usage）。error.class=Usage。messageは NEW_NAME must not be empty / NEW_NAME must not contain '/' / NEW_NAME must not contain whitespace / NEW_NAME must not start with '-' の完全一致。FAKE_LOGにlist-sessions呼出・rename-session呼出ともになし（一覧取得より前のfail-fast。capability検査用の--version呼出はdispatch契約上残るためログ全体の空は要求しない——argv単位の不在検証とする）"
 
 [[condition]]
 id = "rename.session-exited-name-preflight-refused"
-source_lines = "tests/cli/list_read_send.rs:3713, tests/fake_backend/rename_add_remove.rs:401"
+source_lines = "tests/cli/list_read_send.rs:3724, tests/fake_backend/rename_add_remove.rs:401"
 target_function = "rename::run_session（EXITED行の事前拒否）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.4（NAMEがEXITED行〔exited == true〕に一致する場合はPreflight exit 7でfail-fast拒否。文面: cannot rename an EXITED (dead) session 'NAME' (attach to resurrect it first)。action rename-sessionは対象sessionのserver processへの接続を必要としserver不在名への呼び出しは失敗のみ〔M95-A/D実測〕のため、成功系列が存在せず事前拒否が無駄なzellij呼び出しを省く。remove sessionのEXITED受理との対比は「対応する成功操作の有無」）・§2.6表・§4軸C・§2.8（EXITED判定はNEW_NAME衝突判定より優先。複合違反入力での優先順位固定はL2の優先順位test〔本条件とmissing条件の2条件のtagを持つ〕が担う）"
 description = "EXITED sessionのrename不可: NAMEが事前一覧のEXITED行に一致する場合はPreflight（exit 7）で状態変更前に拒否し、resurrection（attach）への案内文面を出す（死dataへのaction系呼び出しは失敗のみのため）。存在確認（行にあるか=NoTarget境界）と実行可否判定（runningか=Preflight境界）は別個の検査であることの固定。EXITED判定はNEW_NAME衝突判定より優先する（§2.8順序4が順序5に先行——EXITED行NAME×NEW_NAME衝突の複合違反では衝突でなくEXITED拒否）"
@@ -143,7 +145,7 @@ expect_return = "いずれもErr。classは注入と同一の保持（OperationF
 
 [[condition]]
 id = "rename.session-dispatch-via-probe-backend"
-source_lines = "tests/cli/list_read_send.rs:3751"
+source_lines = "tests/cli/list_read_send.rs:3762"
 target_function = "main.rs run（RenameTarget::Session例外dispatch: probe backend + check_capability）→ rename::run_session"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.7（dispatchはRenameTarget::Session例外dispatch——ZellijCliBackend::new(\"zelper-probe-unused\") + check_capability → rename::run_session(&probe, ...)。旧NAMEの存在確認はlist_sessionsで完結し対象session解決〔mk_backend〕を必要としない。共通経路のまま実装すると0-session環境でresolve_sessionのNoTarget〔共通解離文面〕が先に立ち本機能自身の事前確認文面に到達しない。global --session flagは無視——list/add/remove sessionと同一規約）・§4軸F"
 description = "rename sessionの例外dispatch: 対象session解決（mk_backend）を経ないprobe backend直接構築により、zellij sessionが1つも存在しない環境でもrename sessionが事前確認まで到達する（共通解離経路の文面で失敗する回帰の検出）。事前確認文面（no zellij sessions found）がrun_session層由来であることと、probe backend経由でlist-sessions呼出が発生していることで検証する"
@@ -167,6 +169,15 @@ source = "tmp/tasks/tm-95/design_rename-session.md §2.5（postconditionは (1) 
 description = "postcondition各判定の独立保護: 片方の判定のみを満たす事後状態——(a) 旧名残存+新名running行追加（旧名消失検査の独立保護） (b) 旧名・新名とも行消失（新名running出現検査の独立保護） (c) 旧名消失+新名がEXITED行で出現（exited == false検査の独立保護）——のいずれでもVerificationFailed（exit 7）になる。実装を旧名消失のみ・新名出現のみ・exited検査なしのいずれかへ弱めても本条件が検出する（fake.rsのrename_post_inject注入〔KeepOldAddNew / DropBoth / NewAsExited〕で3系列を再現）"
 given = "FakeBackend（sessionsにold稼働）へinject_rename_post注入（3系列それぞれ）したrename::run_session(b, old, new, false)"
 expect_return = "いずれの系列もErr（class=VerificationFailed・exit 7）。呼出列はlist-sessions → rename-session@old new → list-sessions（呼出自体はrc=0成功扱いで発行済み・状態作用のみ注入で差し替え）"
+
+[[condition]]
+id = "rename.session-leading-dash-new-name-rejected"
+source_lines = "tests/fake_backend/rename_add_remove.rs:450"
+target_function = "rename::run_session（app層冒頭のNEW_NAME validation: 先頭`-`）"
+source = "tmp/tasks/tm-97/design_rename-leading-dash.md §2.1（NEW_NAME検査へ先頭`-`を4種目として追加。`--`option終端経由の通過系列が`--`挿入なしの zellij --session <from> action rename-session <to> 組み立て〔src/zellij/process.rs rename_session〕へ到達するためzeller側clap依存の拒否が成立せず、有効option一致値〔-c等〕の下流挙動は未測定・zellij側option集合はzeller管理外のためzellij委ねでは契約保証不能——世界modelに存在し得ない名前系列〔先頭`-`名はCLI経路で作成不能〕へのrenameをzeller側で確定拒否。add session NAME検査〔TASK-96〕と対称）・§2.2（検査順 empty → '/' → whitespace → 先頭`-` → 同一名differ。先頭`-`は同一名differの前——文字種4種〔形式検査〕が関係検査〔differ〕に先行。文面NEW_NAME must not start with '-'）・§2.3（旧NAMEへの文字種Usage検査は追加しない——世界model〔一覧行〕にある名前は文字種にかかわらずrename対象とする既存契約を変えない。一覧存在時のbackend到達は既存契約の帰結）・§2.5 L2新条件欄"
+description = "先頭`-`NEW_NAMEのUsage事前拒否と検査順・旧NAME非検査の契約保護（L2）: 先頭`-`NEW_NAMEはUsage（exit 2）で一覧取得より前に拒否する（run_session直呼びのためclapを経由しない系列〔先頭`-`直値〕で検証）。あわせて (a) 先頭`-`×同一名の複合違反では先頭`-`優先（differ文面でない——§2.2の挿入位置保護） (b) 先頭`-`×'/'・先頭`-`×空白の複合違反では既存文字種優先（先頭`-`検査を'/'やwhitespaceより前に誤挿入する実装の検出——本taskが定める順序の固定。add側L2条件〔TASK-96〕はdifferを持たずrename側の挿入位置を保護しないためrename側で保護する） (c) 旧NAME=\"-x\"（一覧に行が存在しrunning）はUsage拒否されずbackend呼出へ到達（§2.3決定の契約保護——対称性から旧NAMEへもstarts_with('-')を誤追加する実装の検出）を担う。L3 shim条件（invalid-new-name-usage-errorの先頭`-`案）と対をなすL2側の検証"
+given = "FakeBackend（sessionsにs0〔exited=false〕）に対するrename::run_session(b, NAME, NEW_NAME, false)の各構成: (i) s0 → -x（先頭`-`単独） (ii) -x → -x（先頭`-`×同一名の複合違反） (iii) s0 → -a/b（'/'複合）と s0 → -a b（空白複合） (iv) sessionsに-x〔exited=false〕を置いた -x → new（旧NAME先頭`-`・一覧存在）"
+expect_return = "(i)(ii)(iii) いずれもErr（class=Usage・exit 2）。messageは (i)(ii) NEW_NAME must not start with '-'・(iii) NEW_NAME must not contain '/' / NEW_NAME must not contain whitespace の完全一致。calls空（list-sessions・rename-sessionとも不発——一覧取得より前のfail-fast）。(iv)はOk。callsは list-sessions → rename-session@-x new → list-sessions の完全一致（旧NAME=\"-x\"はUsage拒否されずbackend到達）"
 
 [[excluded]]
 item = "事前list_sessions取得失敗のclass/exit伝播検証（一覧取得失敗は0件へ丸めず元class/exitのまま伝播）"

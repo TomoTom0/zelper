@@ -432,3 +432,91 @@ fn rename_session_check_order_missing_and_exited_before_collision() {
         "cannot rename an EXITED (dead) session 'deadx' (attach to resurrect it first)"
     );
 }
+
+/// 先頭`-`NEW_NAMEのUsage事前拒否（TASK-97 §2.1/§2.2）: 先頭`-`NEW_NAMEは
+/// Usage（exit 2）で一覧取得より前に拒否する（`--`option終端経由の通過系列が
+/// `--`挿入なしのrename-session <to>組み立てへ到達するため入力段の確定拒否。
+/// add session NAME検査〔TASK-96〕と対称の4種目）。直呼びのためclapを経由
+/// しない系列（先頭`-`直値）で検証。あわせて (i) 先頭`-`×同一名の複合違反は
+/// 先頭`-`優先（同一名differの前——§2.2検査順の保護） (ii) 先頭`-`×'/'・
+/// 先頭`-`×空白の複合違反は既存文字種優先（先頭`-`検査を'/'やwhitespaceより
+/// 前に誤挿入する実装の検出——empty → '/' → whitespace → 先頭`-` → differの
+/// 順序固定。add側L2条件〔TASK-96〕はdifferを持たずrename側の挿入位置を保護
+/// しないためrename側で保護） (iii) 旧NAME="-x"（一覧に行存在・running）は
+/// Usage拒否されずbackend呼出へ到達（§2.3: 旧NAMEは文字種検査対象外——世界model
+/// にある名前はそのまま対象化。対称性から旧NAMEへもstarts_with('-')を誤追加
+/// する実装の検出）を担う。違反は全case実行後に一括報告（実装前fail-firstの
+/// 切り分け観測のため最初の違反で即panicしない）
+// [covers:rename.session-leading-dash-new-name-rejected]
+#[test]
+fn rename_session_rejects_leading_dash_in_new_name() {
+    // (NAME, NEW_NAME, 期待文面)。Usage検査はbackend呼出より前のためsessions内容は本質でない
+    let invalid_cases = [
+        ("s0", "-x", "NEW_NAME must not start with '-'"),
+        ("-x", "-x", "NEW_NAME must not start with '-'"),
+        ("s0", "-a/b", "NEW_NAME must not contain '/'"),
+        ("s0", "-a b", "NEW_NAME must not contain whitespace"),
+    ];
+    let mut failures: Vec<String> = vec![];
+    for (i, (name, new_name, expect_msg)) in invalid_cases.iter().enumerate() {
+        let b = FakeBackend::new(vec![], vec![]);
+        b.set_sessions(vec![sess("s0", false)]);
+        match zelper::app::rename::run_session(&b, name, new_name, false) {
+            Ok(()) => failures.push(format!(
+                "case {i} ({name:?} -> {new_name:?}): 検査不在により誤通過 (Okが返った)"
+            )),
+            Err(err) => {
+                if *err.class() != ErrorClass::Usage {
+                    failures.push(format!(
+                        "case {i} ({name:?} -> {new_name:?}): class={:?} (Usage期待)",
+                        err.class()
+                    ));
+                }
+                if err.exit_code() != 2 {
+                    failures.push(format!(
+                        "case {i} ({name:?} -> {new_name:?}): exit={} (2期待)",
+                        err.exit_code()
+                    ));
+                }
+                if err.message() != *expect_msg {
+                    failures.push(format!(
+                        "case {i} ({name:?} -> {new_name:?}): message={:?} ({expect_msg}期待)",
+                        err.message()
+                    ));
+                }
+                if !b.calls().is_empty() {
+                    failures.push(format!(
+                        "case {i} ({name:?} -> {new_name:?}): calls={:?} (空期待)",
+                        b.calls()
+                    ));
+                }
+            }
+        }
+    }
+
+    // (iv) 旧NAME="-x"（一覧存在・running）: Usage拒否されずbackend到達（§2.3契約保護）
+    {
+        let b = FakeBackend::new(vec![], vec![]);
+        b.set_sessions(vec![sess("-x", false)]);
+        match zelper::app::rename::run_session(&b, "-x", "new", false) {
+            Ok(()) => assert_eq!(
+                b.calls(),
+                vec!["list-sessions", "rename-session@-x new", "list-sessions"],
+                "case 4 (-x -> new) calls: {:?}",
+                b.calls()
+            ),
+            Err(err) => failures.push(format!(
+                "case 4 (-x -> new): 旧NAME先頭`-`が誤拒否された (class={:?} exit={} message={:?})",
+                err.class(),
+                err.exit_code(),
+                err.message()
+            )),
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "leading-dash new-name cases failed:\n{}",
+        failures.join("\n")
+    );
+}

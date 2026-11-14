@@ -3660,25 +3660,36 @@ fn rename_session_same_name_is_usage_error() {
     );
 }
 
-/// NEW_NAME validationの最小set（§2.3）: 空文字・'/'含み・空白含みNEW_NAMEは
-/// Usage（exit 2）で一覧取得より前に拒否する（空文字は黙失敗〔M95-C1〕・'/'含みは
-/// cacheのsession_info directoryがnested pathへ部分移動する状態破壊〔M95-C2〕・
-/// 空白含みはzellij受理後もlist_sessions行から復元不能〔parse_sessionsが先頭
-/// wordのみ名前化〕のため。それ以外の文字種は事前拒否しない）
+/// NEW_NAME validationの最小set（§2.3 + TASK-97 §2.1/§2.2）: 空文字・'/'含み・
+/// 空白含み・先頭`-`（`--`経由）の4種NEW_NAMEはUsage（exit 2）で一覧取得より
+/// 前に拒否する（空文字は黙失敗〔M95-C1〕・'/'含みはcacheのsession_info
+/// directoryがnested pathへ部分移動する状態破壊〔M95-C2〕・空白含みはzellij受理後も
+/// list_sessions行から復元不能〔parse_sessionsが先頭wordのみ名前化〕のため。
+/// 先頭`-`はTASK-97追加——`--`option終端経由の通過系列が`--`挿入なしの
+/// rename-session <to>組み立てへ到達するため入力段の確定拒否〔add session NAME
+/// 検査〔TASK-96〕と対称〕。それ以外の文字種は事前拒否しない）。先頭`-`は`--`
+/// （option終端）経由でCLI解析を通過させる——`--`なしはzeller側clapがexit 2で
+/// 拒否するが文面がclap形式（envelope不整合）のため本契約の対象外。4案目のJSON
+/// 検証は`--json`を`--`より前に置く（`--`以降の`--json`はpositional化するため）
 // [covers:rename.session-invalid-new-name-usage-error]
 #[test]
 fn rename_session_invalid_new_name_is_usage_error() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let cases = [
-        ("", "NEW_NAME must not be empty"),
-        ("a/b", "NEW_NAME must not contain '/'"),
-        ("a b", "NEW_NAME must not contain whitespace"),
+    // (base=`rename session old` + この引数列, 期待文面)。既存3案はNEW_NAME値に
+    // `-`がなく`--`不要のため元構成（NEW_NAMEの後ろに--json）のまま
+    let cases: [(&[&str], &str); 4] = [
+        (&["", "--json"], "NEW_NAME must not be empty"),
+        (&["a/b", "--json"], "NEW_NAME must not contain '/'"),
+        (&["a b", "--json"], "NEW_NAME must not contain whitespace"),
+        (&["--json", "--", "-x"], "NEW_NAME must not start with '-'"),
     ];
-    for (i, (new_name, expect_msg)) in cases.iter().enumerate() {
+    for (i, (case_args, expect_msg)) in cases.iter().enumerate() {
         let (mut cmd, log) = zelper(&format!("rename-sess-invalid-{i}"));
+        let mut args: Vec<&str> = vec!["rename", "session", "old"];
+        args.extend_from_slice(case_args);
         let out = cmd
             .env("FAKE_SESSIONS", "old [Created 1m ago] (current)")
-            .args(["rename", "session", "old", new_name, "--json"])
+            .args(&args)
             .assert()
             .failure()
             .code(2)
@@ -3688,11 +3699,11 @@ fn rename_session_invalid_new_name_is_usage_error() {
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(
             v["error"]["class"], "Usage",
-            "case {i} (new_name={new_name:?})"
+            "case {i} (args={case_args:?})"
         );
         // 文面は完全一致で検証
         let msg = v["error"]["message"].as_str().unwrap();
-        assert_eq!(msg, *expect_msg, "case {i} (new_name={new_name:?})");
+        assert_eq!(msg, *expect_msg, "case {i} (args={case_args:?})");
         let cs = calls(&log);
         assert!(
             !cs.iter().any(|c| c == "list-sessions -n"),
