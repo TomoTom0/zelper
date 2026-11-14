@@ -81,10 +81,12 @@ pub fn run_tab(
 /// main.rsからは対象session解離を必要としないprobe backendが渡される
 /// （RenameTarget::Session例外dispatch。設計§2.7）。
 ///
-/// 実行順序（設計§2.8）: app層Usage検査（空文字・'/'含み・空白含み・同一名
-/// ——空文字・'/'・同一名はzellijがrc=0で黙って失敗/部分適用する系列〔M4 I・
-/// M95-B/C1/C2〕、空白含みはzellijが受理してもlist_sessionsの世界modelで
-/// 復元不能なため、いずれも一覧取得より前にfail-fast）→ 事前list_sessions（1回の取得をNAME不在・
+/// 実行順序（設計§2.8 + TASK-97 §2.2）: app層Usage検査（空文字・'/'含み・
+/// 空白含み・先頭'-'・同一名——空文字・'/'・同一名はzellijがrc=0で黙って
+/// 失敗/部分適用する系列〔M4 I・M95-B/C1/C2〕、空白含みはzellijが受理しても
+/// list_sessionsの世界modelで復元不能なため、いずれも一覧取得より前に
+/// fail-fast。先頭'-'は黙失敗系列ではなく`--`通過系列の下流option解釈に
+/// 依存しない確定拒否として同じ位置で拒否〔TASK-97〕）→ 事前list_sessions（1回の取得をNAME不在・
 /// EXITED判定・NEW_NAME衝突の全判定に共用。存在確認はEXITED込み = remove
 /// sessionと同一基準）→ rename呼出（action形式・DD-3.1判定はbackendが担う）→
 /// 事後list_sessionsでpostcondition（旧名消失+新名running出現。rc=0黙失敗の
