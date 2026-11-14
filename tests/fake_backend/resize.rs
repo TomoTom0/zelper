@@ -120,3 +120,90 @@ fn equalize_rejects_floating() {
     let err = zelper::app::resize::run_equalize(&b, &["1".into()], None, false).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::Preflight);
 }
+
+fn tab(id: u32, name: &str, active: bool) -> TabState {
+    TabState {
+        id: TabId(id),
+        position: id,
+        name: name.to_string(),
+        active,
+        selectable_tiled_panes_count: 2,
+        selectable_floating_panes_count: 0,
+        are_floating_panes_visible: true,
+    }
+}
+
+/// --tab TABSPEC（TASK-68）のfixture: tab 0（cols=10/30の2 pane・非対象）と
+/// tab 1 build（cols=10/30の2 pane・対象 + exited pane 1件）の混在
+fn mixed_tab_fixture() -> (Vec<PaneState>, Vec<TabState>) {
+    let mut p3 = pane(3, "c", 0, 0, 30, 10);
+    p3.tab_id = TabId(1);
+    let mut p4 = pane(4, "d", 0, 100, 30, 30);
+    p4.tab_id = TabId(1);
+    let mut p5 = pane(5, "gone", 5, 200, 30, 10);
+    p5.tab_id = TabId(1);
+    p5.exited = true; // is_remap_source=false（同tab内の非対象pane）
+    (
+        vec![
+            pane(1, "a", 0, 0, 30, 10),
+            pane(2, "b", 0, 100, 30, 30),
+            p3,
+            p4,
+            p5,
+        ],
+        vec![tab(0, "Tab #1", true), tab(1, "build", false)],
+    )
+}
+
+// [covers:resize.equalize-tab-spec-selects-target-tab-panes]
+#[test]
+fn equalize_tab_spec_selects_target_tab_panes() {
+    // --tab指定はPANESPEC群指定と異なり対象tabのtiled pane（is_remap_source）を
+    // 黙選択する: 他tab pane・同tabのexited paneは対象外でerrorにしない
+    // （algorithmの均等化検証はPANESPEC系既存条件と共通のため、ここでは対象選択の
+    // 系列〔tab解決・選択・呼出列〕に絞る）
+    let resize_calls = |b: &FakeBackend| -> Vec<String> {
+        b.calls()
+            .iter()
+            .filter(|c| c.starts_with("resize "))
+            .cloned()
+            .collect()
+    };
+
+    // (i) 一意名指定: "build" → TabId(1)
+    let (panes, tabs) = mixed_tab_fixture();
+    let b = FakeBackend::new(panes, tabs);
+    zelper::app::resize::run_equalize(&b, &[], Some("build"), false).unwrap();
+    let cols = |b: &FakeBackend, id: u32| {
+        b.state
+            .borrow()
+            .panes
+            .iter()
+            .find(|p| p.id == PaneKindId::Terminal(id))
+            .map(|p| p.geometry.cols)
+            .unwrap()
+    };
+    // 対象2 paneは均等化（各1 stepでgoal到達）・非対象pane（他tab・exited）は不変
+    assert_eq!((cols(&b, 3), cols(&b, 4)), (20, 20));
+    assert_eq!((cols(&b, 1), cols(&b, 2), cols(&b, 5)), (10, 30, 10));
+    assert_eq!(
+        resize_calls(&b),
+        vec![
+            "resize terminal_3 increase right",
+            "resize terminal_4 decrease right",
+        ],
+        "対象tabの2 paneのみへ呼出（他tab・exited paneへの呼出なし）"
+    );
+
+    // (ii) ID指定: "1" → TabId(1)。同一の対象選択・呼出列
+    let (panes, tabs) = mixed_tab_fixture();
+    let b2 = FakeBackend::new(panes, tabs);
+    zelper::app::resize::run_equalize(&b2, &[], Some("1"), false).unwrap();
+    assert_eq!(
+        resize_calls(&b2),
+        vec![
+            "resize terminal_3 increase right",
+            "resize terminal_4 decrease right",
+        ]
+    );
+}
