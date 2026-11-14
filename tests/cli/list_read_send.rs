@@ -3509,7 +3509,10 @@ fn rename_session_missing_name_is_notarget_with_candidates() {
         "message: {msg}"
     );
     // candidates=全行のname（EXITED込み・行順）の完全一致
-    assert_eq!(v["error"]["candidates"], serde_json::json!(["old", "deadx"]));
+    assert_eq!(
+        v["error"]["candidates"],
+        serde_json::json!(["old", "deadx"])
+    );
     assert!(
         !calls(&log).iter().any(|c| c.contains("rename-session")),
         "calls: {:?}",
