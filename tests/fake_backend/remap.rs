@@ -3047,9 +3047,15 @@ fn override_layout_failure_reports_survival_and_partial_state() {
     assert_eq!(*err.class(), ErrorClass::OperationFailed);
     let m = err.message();
     assert!(m.contains("applying layout"), "失敗stepの区分: {m}");
+    // 実行済み/失敗/未実行の区分はpartial stateの内訳ごとに個別確認（「applied」
+    // 単体は「unapplied」にも一致し、group番号単体は冒頭の失敗位置にも一致する
+    // ため偽陽性になる。実装のpartial_phase文面: "partial state: groups 0..=0
+    // applied (tabs [...]), failed at group 1, not executed: groups 2..1"）
     assert!(
-        m.contains("applied") && m.contains("group 1") && m.contains("not executed"),
-        "実行済み/失敗/未実行の区分: {m}"
+        m.contains("partial state: groups 0..=0 applied")
+            && m.contains("failed at group 1")
+            && m.contains("not executed: groups"),
+        "実行済み/失敗/未実行の区分（partial stateの内訳）: {m}"
     );
     assert!(m.contains("no rollback"), "rollbackなし: {m}");
     assert!(
