@@ -69,10 +69,11 @@ fn sessions_marker_substrings_do_not_pollute_fields() {
                s0 [Created 1s ago] \n\
                d [Created 2m ago] (EXITED - attach to resurrect) \n\
                weird row without marker\n\
+               weird [foo]\n\
                live [Created 1m ago] (current)\n\
                d2 [Created 2m ago] (EXITED - attach to resurrect)\n";
     let s = parse_sessions(out);
-    assert_eq!(s.len(), 10);
+    assert_eq!(s.len(), 11);
     // 名2語目にEXITEDを含むrunning行 → exited=false（createdは真の生成節）
     assert_eq!(s[0].name, "x");
     assert!(!s[0].exited, "名中EXITEDのrunning行がexitedに汚染");
@@ -115,18 +116,28 @@ fn sessions_marker_substrings_do_not_pollute_fields() {
     );
     assert!(!s[6].current);
     assert_eq!(s[6].created.as_deref(), Some("2m ago"));
-    // `[Created `不在行 → created=None・flags false
+    // `[Created `不在行（`[`不含） → created=None・flags false
     assert_eq!(s[7].name, "weird");
     assert_eq!(s[7].created, None);
     assert!(!s[7].exited);
     assert!(!s[7].current);
-    // 本物suffix行の回帰（anchor化後もtrueを取る）
-    assert_eq!(s[8].name, "live");
-    assert!(s[8].current);
+    // `[`を含むが`[Created `marker不在の行 → created=None（設計§4: find('[')
+    // heuristicへは戻さない。fallback再導入だとcreated=Some("foo")になるため赤）
+    assert_eq!(s[8].name, "weird");
+    assert_eq!(
+        s[8].created, None,
+        "find('[') fallbackが再導入されname側の節を掴んだ: {:?}",
+        s[8].created
+    );
     assert!(!s[8].exited);
-    assert_eq!(s[9].name, "d2");
-    assert!(s[9].exited);
-    assert!(!s[9].current);
+    assert!(!s[8].current);
+    // 本物suffix行の回帰（anchor化後もtrueを取る）
+    assert_eq!(s[9].name, "live");
+    assert!(s[9].current);
+    assert!(!s[9].exited);
+    assert_eq!(s[10].name, "d2");
+    assert!(s[10].exited);
+    assert!(!s[10].current);
 }
 
 // [covers:backend-parser.created-ids-from-stdout]
