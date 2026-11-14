@@ -52,6 +52,83 @@ fn sessions_parse_flags_current_and_exited() {
     assert_eq!(live.len(), 2);
 }
 
+/// TASK-99: 名前の2語目以降（空白含み名）にmarker部分文字列（EXITED・(current)・
+/// `[Created`）を含む行でも、生成metadata field（exited/current/created）は名前由来
+/// の部分文字列で汚染されない。根拠はzellij 0.44.3の行形式の固定性——
+/// `[Created ...]`節は常時name直後・suffixは排他一択で行末（設計§2.1）。
+/// anchor化（ends_with/rfind・trim_end対応）後の期待値のため現行contains判定では赤
+// [covers:backend-parser.sessions-name-marker-substrings-do-not-pollute-fields]
+#[test]
+fn sessions_marker_substrings_do_not_pollute_fields() {
+    // trailing space付きの行（s0行・d行の行末）も意図的に含む
+    let out = "x EXITED [Created 2m ago]\n\
+               cur (current) [Created 1m ago]\n\
+               x [foo [Created 1m ago]\n\
+               pre [Created 5m ago] [Created 1m ago]\n\
+               y (EXITED - attach to resurrect) [Created 1m ago]\n\
+               s0 [Created 1s ago] \n\
+               d [Created 2m ago] (EXITED - attach to resurrect) \n\
+               weird row without marker\n\
+               live [Created 1m ago] (current)\n\
+               d2 [Created 2m ago] (EXITED - attach to resurrect)\n";
+    let s = parse_sessions(out);
+    assert_eq!(s.len(), 10);
+    // 名2語目にEXITEDを含むrunning行 → exited=false（createdは真の生成節）
+    assert_eq!(s[0].name, "x");
+    assert!(!s[0].exited, "名中EXITEDのrunning行がexitedに汚染");
+    assert!(!s[0].current);
+    assert_eq!(s[0].created.as_deref(), Some("2m ago"));
+    // 名2語目に(current)を含む行 → current=false
+    assert_eq!(s[1].name, "cur");
+    assert!(!s[1].current, "名中(current)行がcurrentに汚染");
+    assert!(!s[1].exited);
+    // 名2語目に`[`を含む行 → createdは真の生成節（名前側の節でない）
+    assert_eq!(s[2].name, "x");
+    assert_eq!(
+        s[2].created.as_deref(),
+        Some("1m ago"),
+        "名中`[`行のcreatedが名前側の節に汚染: {:?}",
+        s[2].created
+    );
+    // 名前が完全な[Created ...]を含む行 → 生成節=最後尾出現が選ばれる
+    assert_eq!(s[3].name, "pre");
+    assert_eq!(s[3].created.as_deref(), Some("1m ago"));
+    // 名前末尾が完全なEXITED suffix字面と一致するrunning行 → exited=false
+    assert_eq!(s[4].name, "y");
+    assert!(
+        !s[4].exited,
+        "名末尾EXITED字面のrunning行がexitedに汚染: {:?}",
+        s[4]
+    );
+    assert!(!s[4].current);
+    // suffixなし行のtrailing space → flags false・createdは取れる
+    assert_eq!(s[5].name, "s0");
+    assert!(!s[5].exited);
+    assert!(!s[5].current);
+    assert_eq!(s[5].created.as_deref(), Some("1s ago"));
+    // 本物suffixの後の空白 → exited=true（trim_end対応）
+    assert_eq!(s[6].name, "d");
+    assert!(
+        s[6].exited,
+        "本物suffix後空白行のexitedが落ちる: {:?}",
+        s[6]
+    );
+    assert!(!s[6].current);
+    assert_eq!(s[6].created.as_deref(), Some("2m ago"));
+    // `[Created `不在行 → created=None・flags false
+    assert_eq!(s[7].name, "weird");
+    assert_eq!(s[7].created, None);
+    assert!(!s[7].exited);
+    assert!(!s[7].current);
+    // 本物suffix行の回帰（anchor化後もtrueを取る）
+    assert_eq!(s[8].name, "live");
+    assert!(s[8].current);
+    assert!(!s[8].exited);
+    assert_eq!(s[9].name, "d2");
+    assert!(s[9].exited);
+    assert!(!s[9].current);
+}
+
 // [covers:backend-parser.created-ids-from-stdout]
 #[test]
 fn created_ids_parse() {

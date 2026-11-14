@@ -57,7 +57,7 @@ expect_return_shape = "stdoutがschema_version=1・ok=true・data.panes 3件・p
 
 [[condition]]
 id = "json-contract.cli-error-envelope-on-failure"
-source_lines = "tests/cli/list_read_send.rs:462"
+source_lines = "tests/cli/list_read_send.rs:476"
 target_function = "--json指定時のerror出力経路（main）"
 source = "docs/testing/test-plan.md §2.10 + docs/design/detailed-design.md DD-4.2（失敗時はerror envelope） + --json指定時の失敗にもerror envelopeが出ることの回帰（部分失敗のresultsもerror envelopeのdataへ同梱）"
 description = "--json指定時の失敗はstdoutへerror envelopeを出す（exit codeはerror class対応のまま）。MR-17回帰: --json利用者がstdoutだけで失敗を構造的に把握できる契約"

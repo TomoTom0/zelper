@@ -82,7 +82,8 @@ fn list_sessions_and_tabs() {
 }
 
 /// EXITED（dead session）が複数残っていても、list sessionsは対象session解決を
-/// 前提とせず一覧表示できる（実行中のみを表示）
+/// 前提とせず一覧表示できる（実行中のみを表示）。TASK-99: 名前2語目にmarker
+/// 部分文字列（EXITED）を含むrunning行もexited汚染なしで一覧に現れる
 // [covers:list-display.sessions-live-only-with-exited-present]
 #[test]
 fn list_sessions_works_with_exited_sessions() {
@@ -93,7 +94,8 @@ fn list_sessions_works_with_exited_sessions() {
             "FAKE_SESSIONS",
             "dead-a [Created 2h ago] (EXITED - attach to resurrect)\n\
              live-a [Created 1m ago] (current)\n\
-             dead-b [Created 3d ago] (EXITED - attach to resurrect)",
+             dead-b [Created 3d ago] (EXITED - attach to resurrect)\n\
+             x EXITED [Created 5m ago]",
         )
         .args(["list", "sessions", "--json"])
         .assert()
@@ -108,11 +110,23 @@ fn list_sessions_works_with_exited_sessions() {
         .iter()
         .map(|s| s["name"].as_str().unwrap())
         .collect();
-    assert_eq!(sessions, vec!["live-a"]);
+    // 汚染running行（x EXITED）も一覧に現れる（TASK-99 anchor化後の期待値。
+    // 旧期待値〔live-aのみ〕はfixture拡張に伴い更新）
+    assert_eq!(
+        sessions,
+        vec!["live-a", "x"],
+        "名2語目EXITEDのrunning行がexited汚染で一覧から消えた: {sessions:?}"
+    );
     // EXITED混在環境でも実行中行のmetadata（created/current/PANES）が取れる
     assert_eq!(v["data"]["sessions"][0]["created"], "1m ago");
     assert_eq!(
         v["data"]["sessions"][0]["panes_per_tab"],
+        serde_json::json!([2])
+    );
+    // 汚染行もmetadataが取れる（name=先頭word・created=真の生成節）
+    assert_eq!(v["data"]["sessions"][1]["created"], "5m ago");
+    assert_eq!(
+        v["data"]["sessions"][1]["panes_per_tab"],
         serde_json::json!([2])
     );
 }
@@ -3458,6 +3472,81 @@ fn remove_session_dead_selects_exited_rows_only() {
         !calls(&log).iter().any(|c| c.starts_with("delete-session")),
         "calls: {:?}",
         calls(&log)
+    );
+}
+
+/// TASK-99 §2.2-1: --dead対象選択はmarker部分文字列のfield汚染を受けない。
+/// 名前2語目にEXITEDを含むrunning行（zellij外部由来の空白含み名想定）が
+/// exited=trueに誤parseされると、--deadが当該行を汚染対象に選びtruncated名
+/// （先頭word x）でdelete-sessionを発行する破壊系系列になる。anchor化後は
+/// 本物EXITED suffix行のみが対象
+// [covers:remove-session.dead-selector-immune-to-marker-substring-pollution]
+#[test]
+fn remove_session_dead_immune_to_marker_substring_pollution() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = "x EXITED [Created 1m ago]\n\
+                   dead1 [Created 2m ago] (EXITED - attach to resurrect)";
+    // 実行1: --dry-run --json → planは本物deadのみ・delete-session不発
+    let (mut cmd, log) = zelper("remove-dead-polluted-dryrun");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "--dead", "--dry-run", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let targets = v["data"]["plan"]["targets"].as_array().unwrap();
+    assert_eq!(
+        targets.len(),
+        1,
+        "汚染running行（truncated名x）がplanへ混入: {targets:?}"
+    );
+    assert_eq!(targets[0]["name"], "dead1");
+    assert_eq!(targets[0]["state"], "dead");
+    assert!(
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
+        "dry-runでdelete-sessionが発行された: {:?}",
+        calls(&log)
+    );
+
+    // 実行2: --yes --json → delete-sessionは本物deadのみ（truncated名xへの呼出なし）
+    let (mut cmd, log) = zelper("remove-dead-polluted-yes");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "--dead", "--yes", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let results = v["data"]["results"].as_array().unwrap();
+    let names: Vec<&str> = results
+        .iter()
+        .map(|r| r["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["dead1"],
+        "報告へ汚染行（truncated名x）が混入: {results:?}"
+    );
+    assert!(
+        results.iter().all(|r| r["ok"] == true),
+        "results: {results:?}"
+    );
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session dead1 -f".to_string()],
+        "truncated名xへのdelete-session呼出あり: {cs:?}"
     );
 }
 

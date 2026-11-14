@@ -1,14 +1,14 @@
 # backend parser（src/zellij/parser.rs）の検証条件。出典: test-plan §2.3・DD-3.1/3.4/3.5・DD-10.5・DD-11・TASK-74設計書（remap-v2-matching-fix-task74.md §2.1/§2.3/§2.5）
-# 対応test: tests/unit/parser.rs（8件。1条件=1 test fnの1:1対応。設計書§3.4）
+# 対応test: tests/unit/parser.rs（9件。1条件=1 test fnの1:1対応。設計書§3.4。TASK-99のmarker部分文字列非汚染1件を含む）
 [meta]
 feature = "backend-parser"
 source_file = "src/zellij/parser.rs"
-verified = true
+verified = false
 verified_at = "2026-09-16"
 verified_by = "claude"
 test_command = "cargo test --test parser"
 source_hash = "fe3f98835e08d58525ed379d45ddf0de1014e1dd"
-note = "TASK-59: 移行時excluded 1件（zellijのerror出力→error class変換）をsrc/zellij/process.rs内test追加により条件化（backend-process.tomlへ新規起票）。TASK-74（2026-09-15）条件書更新: terminal-command-field-parsed・empty-output-parses-to-none-not-errorの2条件を追加。新期待値は未実装のためfail-first状態——（当時記録。その後の実装・test追従で解消済み・cargo test --test parser は全pass。TASK-74段階8コードレビューCR74-8補正）。verified_at/by/test_command/source_hashはTASK-74前実装に対する最終検証記録"
+note = "TASK-59: 移行時excluded 1件（zellijのerror出力→error class変換）をsrc/zellij/process.rs内test追加により条件化（backend-process.tomlへ新規起票）。TASK-74（2026-09-15）条件書更新: terminal-command-field-parsed・empty-output-parses-to-none-not-errorの2条件を追加。新期待値は未実装のためfail-first状態——（当時記録。その後の実装・test追従で解消済み・cargo test --test parser は全pass。TASK-74段階8コードレビューCR74-8補正）。verified_at/by/test_command/source_hashはTASK-74前実装に対する最終検証記録。TASK-99（2026-11-14）テスト先行条件書更新: sessions-name-marker-substrings-do-not-pollute-fieldsを追加（8→9条件。名前2語目以降のmarker部分文字列〔EXITED・(current)・[Created〕が生成metadata fieldを汚染しないanchor化後の期待値。テスト先行のためfail-first状態——現行rest.contains系判定では汚染系caseが赤〔exited=true汚染等。tmp/tasks/tm-99/test_red.log〕。TASK-99実装〔anchor化〕で緑化予定）。meta verifiedは一時falseへ（verified_at/by/test_command/source_hashは最終緑化時〔TASK-74実装〕に対する検証記録のまま。source_file〔src/zellij/parser.rs〕は本工程では不変のためsource_hashは一致）"
 
 [[condition]]
 id = "backend-parser.version-strings"
@@ -39,7 +39,7 @@ expect_return = "3行ともparseされ、dead-oneはexited=true/current=false、
 
 [[condition]]
 id = "backend-parser.created-ids-from-stdout"
-source_lines = "tests/unit/parser.rs:55"
+source_lines = "tests/unit/parser.rs:132"
 target_function = "parse_created_pane / parse_created_tab"
 source = "docs/testing/test-plan.md §2.3（new-pane stdout（terminal_7と改行）/ new-tab stdout（3と改行）のID parse） + docs/design/detailed-design.md DD-3.4（new-pane/new-tabのstdoutをparseしてID取得）"
 description = "add系verbの結果特定に必要な生成ID parse: new-paneのstdout（terminal_N）とnew-tabのstdout（整数）をIDへ変換する。不正出力はerror"
@@ -48,7 +48,7 @@ expect_return = "terminal_1はPaneKindId::Terminal(1)、1はTabId(1)。空文字
 
 [[condition]]
 id = "backend-parser.panes-json-full-fields-from-real-output"
-source_lines = "tests/unit/parser.rs:67"
+source_lines = "tests/unit/parser.rs:144"
 target_function = "parse_panes"
 source = "docs/testing/test-plan.md §2.3（list-panes -a --json実出力fixture → PaneState変換の全field） + docs/design/detailed-design.md DD-3.4（list-panes -a --jsonをserdeで直接decode） + DD-10.5（source = selectable tiled terminal pane（is_remap_source判定））"
 description = "list-panes -a --jsonの実出力形式をPaneStateへ全field変換する（id・title・selectable・floating・geometry・command・cwd・tab情報）。terminal paneはremap sourceとなりnon-selectable plugin paneはならない判定を含む（CMR-5: 1fnが§2.3全field変換とDD-10.5 source定義を検証するため1条件に統合）"
@@ -57,7 +57,7 @@ expect_return_shape = "2件のPaneState。先頭はTerminal(1)・command・geome
 
 [[condition]]
 id = "backend-parser.tabs-json-from-real-output"
-source_lines = "tests/unit/parser.rs:137"
+source_lines = "tests/unit/parser.rs:214"
 target_function = "parse_tabs"
 source = "docs/testing/test-plan.md §2.3（list-tabs -a --json fixture → TabState） + docs/design/detailed-design.md DD-3.4（list-tabs -a --jsonをserdeで直接decode） + DD-11（selectable tiled/floating countが空tab判定の入力）"
 description = "list-tabs -a --jsonの実出力形式をTabStateへ変換する（id・position・name・active・selectable tiled/floating count）。selectable paneを持つtabは空tabでない（CMR-5: parse全fieldと空tab判定の非空側を1条件に統合）"
@@ -66,7 +66,7 @@ expect_return_shape = "1件のTabState（TabId(0)・selectable_tiled_panes_count
 
 [[condition]]
 id = "backend-parser.terminal-command-field-parsed"
-source_lines = "tests/unit/parser.rs:106"
+source_lines = "tests/unit/parser.rs:183"
 target_function = "parse_panes（PaneInfo.terminal_command → PaneState.terminal_command）"
 source = "docs/design/remap-v2-matching-fix-task74.md §2.1（PaneInfo.terminal_command field追加。#[serde(default)]付きで旧fixture互換〔TR74-1〕）・§2.5・§3（TR74-4直交fixtureのparser層配置） + docs/design/detailed-design.md DD-10.1 事実5（F1: terminal_command = invoked_with()の序列化。F2: pane_command = PTY前景processでinvoked_withと無関係）"
 description = "terminal_command fieldのparse（TASK-74照合key変更のdata基盤）: list-panes JSONのterminal_commandをPaneState.terminal_commandへ変換する。null→None・文字列→Some。TR74-4直交2 paneを含むJSONで、pane_commandの値がterminal_commandのparseに影響しないこと（両fieldの直交性）を固定する。terminal_command keyを欠損した旧fixture（tests/fixtures/*.json・test内JSON）はNoneとしてparseし既存testは修正なしで継続（TR74-1）。旧実装はfieldを保持せずparse結果にterminal_commandが現れないためfail-first"
@@ -75,9 +75,18 @@ expect_return = "P-shell-procはterminal_command=None・pane_command=Some(\"vim 
 
 [[condition]]
 id = "backend-parser.empty-output-parses-to-none-not-error"
-source_lines = "tests/unit/parser.rs:126"
+source_lines = "tests/unit/parser.rs:203"
 target_function = "parse_panes_opt / parse_tabs_opt"
 source = "docs/design/remap-v2-matching-fix-task74.md §2.3（parser.rsにparse_panes_opt/parse_tabs_optを追加。list_panes_lenient/list_tabs_lenientのparse基盤）・§2.5 + docs/design/detailed-design.md DD-10.7 空応答のlenient取得（空・exit 0 → Ok(None)。非空でparse失敗・非zero exit → 従来どおりErr〔fatal〕）・DD-10.1 事実5（F8: screen繁忙時のlist-panesはstdout空・exit 0を返す）"
 description = "lenient parseの空出力扱い（TASK-74副因Cのparse基盤）: 空文字列入力（exit 0・stdout空の空応答）はOk(None)（条件未成立としてretry可能な値）へ変換しerrorにしない。非空かつ不正JSONはErr（fatal・従来どおり）。非空かつ正当JSONはOk(Some(..))。空応答をparse error扱いするとpoll中のremapが中途断するため、空と不正の区別が致命的境界になる（設計書§3表からは独立に§2.3/§2.5のparser変更分として条件化）"
 given = "空文字列・非空の不正JSON（garbage）・非空の正当JSONをparse_panes_optとparse_tabs_optへ与える"
 expect_return = "空文字列はOk(None)・garbageはErr・正当JSONはOk(Some(..))（panes/tabs両関数とも同一分岐）"
+
+[[condition]]
+id = "backend-parser.sessions-name-marker-substrings-do-not-pollute-fields"
+source_lines = "tests/unit/parser.rs:60"
+target_function = "parse_sessions"
+source = "tmp/tasks/tm-99/design_parse-field-pollution.md §3.5決定・§4（anchor化parse仕様: t=trim_end・exited=ends_with(\"(EXITED - attach to resurrect)\")・current=ends_with(\"(current)\")・created=rfind(\"[Created \")・name=先頭word不変）・§2.1（0.44.3行形式の固定性: [Created ...]節常時・name直後・suffix排他一択・Created節の後の行末）・§5 test構成（設計レビューminor-2対応の4境界fixtureを含む） + docs/design/detailed-design.md DD-3.4（list-sessions -nテキストparse）"
+description = "marker部分文字列の非汚染: 名前の2語目以降（空白含み名）にmarker部分文字列（EXITED・(current)・[Created）を含む行でも、生成metadata field（exited/current/created）が名前由来の部分文字列で汚染されない。生成節・suffixは行末側の固定順序で置かれるため、anchor系判定（ends_with/rfind・trailing space対応）により名前内容から構造的に分離できる（名前が行末に来得ないことの帰結）。名前が完全な[Created ...]字面を含む場合も最後尾出現（rfind）が真の生成節を選ぶ。fail-first: 現行rest.contains系判定は名中の部分文字列を拾うため汚染系caseが赤（TASK-99実装〔anchor化〕で緑化）"
+given = "汚染8系列+非汚染4系列のlist-sessions -n出力: 名2語目にEXITEDを含むrunning行 / (current)を含む行 / `[`を含む行 / 名前が完全な[Created 5m ago]を含む行 / 名前末尾が完全なEXITED suffix字面と一致するrunning行 / trailing space付きsuffixなし行 / 本物suffix後に空白がある行 / [Created 不在行 に加え、本物(current)行・本物EXITED suffix行の回帰2系列"
+expect_return = "全行ともname=先頭word（不変）。(i)名中EXITEDのrunning行はexited=false・created=真の生成節 (ii)名中(current)行はcurrent=false (iii)名中`[`行のcreatedは真の生成節（名前側の節でない） (iv)完全な[Created ...]含み名はcreated=最後尾出現（1m ago） (v)名末尾EXITED字面のrunning行はexited=false (vi)trailing space付きsuffixなし行はflags false・created取得済 (vii)本物suffix後空白行はexited=true（trim_end対応） (viii)[Created 不在行はcreated=None・flags false。回帰: 本物(current)行はcurrent=true・本物EXITED行はexited=true"
