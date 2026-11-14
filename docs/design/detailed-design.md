@@ -275,7 +275,7 @@ pub struct OverrideSpec {
 - `list-panes -a --json` / `list-tabs -a --json` / `current-tab-info --json` をserdeでPaneInfo/TabInfoとして直接decode（field一覧はcapabilities §2）
 - `list-sessions`はJSON不在のため `list-sessions -n` のテキストをparse（`NAME [Created X ago]`形式）。EXITED行（`NAME [...] (EXITED - attach to resurrect)`）もcreated/current/exited flag付きで返し、実行中のみへの絞り込みは呼び出し側（resolve_session・list sessions表示）が行う
 - `new-pane`/`new-tab`のstdout（`terminal_N` / 整数）をparseしてID取得
-- layout一覧: zellijに列挙APIがないため、layout_dir（`ZELLIJ_LAYOUT_DIR`環境変数 > `~/.config/zellij/layouts`）をzelperが直接読む。dir不存在時は空リスト。config.kdlの`layout_dir`読み取りはv1対象外（利用者は`ZELLIJ_LAYOUT_DIR`で一致させる。MR-4で確定）
+- layout一覧: zellijに列挙APIがないため、layout_dir（`ZELLIJ_LAYOUT_DIR`環境変数 > `~/.config/zellij/layouts`）をzelperが直接読む。dir不存在時は空リスト。config.kdlの`layout_dir`読み取りはv1対象外（利用者は`ZELLIJ_LAYOUT_DIR`で一致させる。MR-4で確定）。SIZE/MODIFIEDのstatはsymlinkをたどったlink先の実体statを用い、参照先のstat取得失敗時は名前を一覧に残して値なし（DD-4.1。TASK-82）。layout_dir自体のread_dir失敗（不存在・壊れたsymlink・循環参照等）は空一覧のまま（既存挙動）
 
 ### 3.5 capability detection
 
@@ -291,7 +291,7 @@ pub struct OverrideSpec {
   - `list sessions`: `NAME / CREATED / CURRENT / PANES`。CREATEDは `list-sessions -n` の相対表記（`1m ago`等）、CURRENTは `(current)` suffixを `*` 表示、PANESはtab毎pane数の `+` 連結（5tab目以降は `...` 省略。floating paneは `2+1f` 形式で併記。他sessionのlist-tabs失敗時は `-`）。session毎に `--session NAME action list-tabs` を発行する
   - `list tabs`: `TAB_ID / POS / ACTIVE / NAME / PANES`（tiled count、floatingがあれば `2+1f`）
   - `list panes`: `PANE_ID / TAB / TITLE / COMMAND / CWD`
-  - `list layouts`: `NAME / SIZE / MODIFIED`（bytes・`3d 5h ago` 相対表記。file stat由来）
+  - `list layouts`: `NAME / SIZE / MODIFIED`（bytes・`3d 5h ago` 相対表記。内容実体のstat由来——symlinkはlink先をfollow〔TASK-82〕。参照先のstat取得失敗時〔壊れたsymlink・列挙後削除等〕は名前を残して両値 `-`〔JSONは`null`〕。`modified_epoch`はUnix epoch秒・mtimeがepoch以前の場合は`null`〔humanは`-`〕。誤った値（link先path長・link作成時刻・負epoch相当）を出さない）
   - `--compact`（`-c`）: human出力の縮小。panesは `TAB<TAB>短縮cwd`（HOME prefixを `~` 置換・cwd不明時 `-`）のみ、sessions/tabs/layoutsは名前のみ（header無し）。`--json` 併用時はJSONを優先しcompactは無視
 - `read`複数pane: pane毎にヘッダ行 `=== terminal_3 (HB1, tab:2 agents) ===` + 内容
 - 変更系: 実行した操作の1行サマリ + 失敗があれば `FAILED` 行
