@@ -120,6 +120,7 @@ completion bash|zsh|fish
 - `send`: `-- TEXT` と `--keys` は相互排他
 - `--tab`（絞り込み）と`--all`は併合（--tab内のall）
 - `resize`: `equalize`と`grow|shrink`構文は相互排他
+- `resize equalize`: PANESPEC群と`--tab`は相互排他（clap pairwise conflicts + 既存app層の「どちらか必須」検査——`remove session`と対称の分担。TASK-100）
 - `--dry-run`と`--yes`の併用は可（--yesは無視される旨を出力）
 - `remove session`: `NAME...`（1件以上）/ `--all` / `--dead` / `--me` は4者相互排他かつちょうど1つ必須（clap pairwise conflicts + app層のexactly-one検証。TASK-84・DD-11 remove session）
 - `move pane`: action positional（direction/rotate）/ `--to-tab` / `--swap-with` は三者相互排他かつちょうど1つ必須
@@ -368,7 +369,7 @@ error.classとexit statusの対応: `Usage`=2 / `NoTarget`・`AmbiguousTarget`=3
 
 ### equalize
 
-1. 対象（--tab または PANESPEC群）のtiled pane群のgeometryを`list-panes`で取得（floating paneは対象外）
+1. 対象（--tab または PANESPEC群）のtiled pane群のgeometryを`list-panes`で取得（floating paneは対象外）。両者の併用はusage error（exit 2・DD-1.5）。PANESPEC優先での黙無視はしない
 2. 目標サイズ計算: 対象が同一直線配置（横1列→cols均等、縦1列→rows均等）の場合は算術均等。それ以外（格子状）は行毎・列毎の均等を順に適用するヒューリスティック
 3. 収束ループ: 最大20 iteration。各iterationで最大偏差のpaneに`resize`を1 step適用し`list-panes -g`で再取得。偏差が1行/列以下または進捗なし（2連続no-op）で終了
 4. 結果報告: 達成geometryをJSON/humanで返す。**完全均等を保証しない**（helpとJSONの両方に明記）

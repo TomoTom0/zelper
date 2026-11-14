@@ -152,6 +152,7 @@ class名はPascalCaseで固定。stdoutはJSON（または人間可読テキス�
 | `zelper resize pane 3 grow` | `zelper resize pane 3 grow right`（方向まで必須） |
 | `zelper remap three --inline '...'` | layout名と `--inline` は排他。どちらか一方 |
 | `zelper send --keys Enter -- y` | `--keys` とtextは排他 |
+| `zelper resize equalize 3 --tab 1` | PANESPEC群と `--tab` は排他。どちらか一方 |
 | `zelper watch 3 READY` / `zelper watch 3 -- READY --json` | PATTERNは `--` 以降のためoptionは `--` の前へ: `zelper watch 3 --json -- READY` |
 | `zelper move pane 3 left --to-tab 1` | directionと `--to-tab` は三者排他。どちらか一方 |
 | `zelper move pane 3 --swap-with 3`（自分自身）/ 同一tab内の2 pane交換 | 自身との交換はusage error。同一tab内は機構がなく `Preflight` exit 7（`remap` を使う） |
