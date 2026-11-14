@@ -203,6 +203,35 @@ if [[ "$3" == "action" ]]; then
         if [[ "$fail" == "$pane" ]]; then echo "boom" >&2; exit 1; fi
       done
       echo "ok"; exit 0;;
+    # TASK-79: FAKE_FAIL_WRITE（失敗させるpane idのspace区切りlist）に一致するpaneへの
+    # `write -p`（--enter併用時のCR書き込み write 13）は失敗させる。未設定時は
+    # rc=0 "ok"（従来のcatch-all応答と同一）
+    write)
+      wpane=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p) wpane="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      for fail in $FAKE_FAIL_WRITE; do
+        if [[ "$fail" == "$wpane" ]]; then echo "boom" >&2; exit 1; fi
+      done
+      echo "ok"; exit 0;;
+    # TASK-79: FAKE_FAIL_SEND_KEYS（失敗させるpane idのspace区切りlist）に一致するpaneへの
+    # send-keysは失敗させる。未設定時はrc=0 "ok"（従来のcatch-all応答と同一）
+    send-keys)
+      kpane=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p) kpane="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      for fail in $FAKE_FAIL_SEND_KEYS; do
+        if [[ "$fail" == "$kpane" ]]; then echo "boom" >&2; exit 1; fi
+      done
+      echo "ok"; exit 0;;
     # TASK-89: FAKE_DETACH_FAIL設定時はaction detachを非zero終了させる。
     # 未設定時は rc=0 silent no-op成功（client不在の実zellij挙動・M3 (b)と同一）
     detach)
@@ -1068,6 +1097,202 @@ fn send_multiline_text_single_write_chars() {
     );
     // pasteは未使用
     assert!(!raw.contains("paste"), "log: {raw:?}");
+}
+
+/// --enter併用時のCR書き込み（write -p 13）失敗: text送信（write-chars）は成功し、
+/// その後のCR書き込みのみが失敗したpaneは失敗扱い（単対象ならexit 5・
+/// OperationFailed）。失敗はFAKE_FAIL_WRITE（write -p失敗注入）で再現。
+/// log記録後に失敗するため、成功したwrite-chars呼び出しと失敗したwrite 13呼び出し
+/// の両方がlogに観測される
+// [covers:read-send.send-enter-cr-failure-exit5]
+#[test]
+fn send_enter_cr_failure_is_exit5() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("send-enter-cr-fail");
+    let out = cmd
+        .env("FAKE_FAIL_WRITE", "terminal_1")
+        .args(["send", "1", "--enter", "--json", "--", "hello"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let cs = calls(&log);
+    // text送信は成功し、その後のCR書き込み（write 13）が失敗する
+    assert!(
+        cs.iter()
+            .any(|c| c.contains("write-chars -p terminal_1 hello")),
+        "calls: {cs:?}"
+    );
+    assert!(
+        cs.iter().any(|c| c.contains("write -p terminal_1 13")),
+        "calls: {cs:?}"
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    let entry = &v["error"]["data"]["results"][0];
+    assert_eq!(entry["target"], "terminal_1");
+    assert_eq!(entry["ok"], false);
+    assert!(
+        entry["error"].as_str().unwrap().contains("boom"),
+        "error: {:?}",
+        entry["error"]
+    );
+}
+
+/// --keys経路のsend-keys失敗: 失敗paneは失敗扱いとなり、単対象ならexit 5
+/// （OperationFailed）。失敗はFAKE_FAIL_SEND_KEYS（send-keys失敗注入）で再現
+// [covers:read-send.send-keys-failure-exit5]
+#[test]
+fn send_keys_failure_is_exit5() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("send-keys-fail");
+    let out = cmd
+        .env("FAKE_FAIL_SEND_KEYS", "terminal_1")
+        .args(["send", "1", "--json", "--keys", "Ctrl", "a"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let cs = calls(&log);
+    assert!(
+        cs.iter()
+            .any(|c| c.contains("send-keys -p terminal_1 Ctrl a")),
+        "calls: {cs:?}"
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    let entry = &v["error"]["data"]["results"][0];
+    assert_eq!(entry["target"], "terminal_1");
+    assert_eq!(entry["ok"], false);
+    assert!(
+        entry["error"].as_str().unwrap().contains("boom"),
+        "error: {:?}",
+        entry["error"]
+    );
+}
+
+/// send部分失敗時のper-pane報告の中身: humanは成功paneの送信行（sent ->）と
+/// 失敗paneのFAILED行を混在させ、--jsonのerror.data.results[]は成功entry
+/// （ok=true）と失敗entry（ok=false・error）を混在させる（部分失敗を隠さない）
+// [covers:read-send.send-failure-per-pane-report-contents]
+#[test]
+fn send_failure_reports_per_pane_contents() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // human: 成功行とFAILED行の混在
+    let (mut cmd, _) = zelper("send-report-human");
+    let out = cmd
+        .env("FAKE_FAIL_WRITE_CHARS", "terminal_1")
+        .args(["send", "1", "2", "--", "hello"])
+        .assert()
+        .failure()
+        .code(6)
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.contains("sent -> terminal_2"), "stdout: {text:?}");
+    assert!(text.contains("FAILED -> terminal_1: "), "stdout: {text:?}");
+    assert!(text.contains("boom"), "stdout: {text:?}");
+
+    // JSON: error.data.results[]の成功/失敗entry混在
+    let (mut cmd, _) = zelper("send-report-json");
+    let out = cmd
+        .env("FAKE_FAIL_WRITE_CHARS", "terminal_1")
+        .args(["send", "1", "2", "--json", "--", "hello"])
+        .assert()
+        .failure()
+        .code(6)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "PartialFailure");
+    let results = v["error"]["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    let err_entry = &results[0];
+    assert_eq!(err_entry["target"], "terminal_1");
+    assert_eq!(err_entry["ok"], false);
+    assert!(
+        err_entry["error"].as_str().unwrap().contains("boom"),
+        "error: {:?}",
+        err_entry["error"]
+    );
+    let ok_entry = &results[1];
+    assert_eq!(ok_entry["target"], "terminal_2");
+    assert_eq!(ok_entry["ok"], true);
+    assert!(ok_entry["error"].is_null());
+}
+
+/// read失敗時のhuman表示: 失敗pane（terminal_1）の行はpane識別子とtitleを含む
+/// ヘッダ形式（実装はtab情報を省いた === pane_id (title) === 形式。失敗行形式は
+/// 出典規定なし）で現れ、FAILED表示と失敗理由（boom）が続き、成功pane
+/// （terminal_2）のヘッダと内容に混在する。検証はpane判別可能性（識別子・
+/// title・FAILED・理由）までとする（形式全文の固定はしない）
+// [covers:read-send.read-failure-human-shows-failed-pane]
+#[test]
+fn read_failure_human_shows_failed_pane() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("read-fail-human");
+    let out = cmd
+        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1")
+        .args(["read", "1", "2"])
+        .assert()
+        .failure()
+        .code(6)
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    // 失敗pane: 識別子+titleのヘッダ + FAILED表示 + 失敗理由
+    assert!(
+        text.contains("=== terminal_1 (agent-a)"),
+        "stdout: {text:?}"
+    );
+    assert!(text.contains("FAILED"), "stdout: {text:?}");
+    assert!(text.contains("boom"), "stdout: {text:?}");
+    // 成功paneのヘッダと内容に混在
+    assert!(text.contains("=== terminal_2"), "stdout: {text:?}");
+    assert!(text.contains("SCREEN[terminal_2]"), "stdout: {text:?}");
+}
+
+/// read全失敗（exit 5）時もerror.data.results[]に全pane分の失敗entry
+/// （target・ok=false・error）が同梱される（per-pane報告はexit 6/5両方に適用）
+// [covers:read-send.read-all-failure-includes-results]
+#[test]
+fn read_all_failure_includes_results() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("read-all-fail-results");
+    let out = cmd
+        .env("FAKE_FAIL_DUMP_SCREEN", "terminal_1 terminal_2")
+        .args(["read", "1", "2", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    let results = v["error"]["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    for (entry, target) in results.iter().zip(["terminal_1", "terminal_2"]) {
+        assert_eq!(entry["target"], target);
+        assert_eq!(entry["ok"], false);
+        assert!(
+            entry["error"].as_str().unwrap().contains("boom"),
+            "error: {:?}",
+            entry["error"]
+        );
+        assert!(entry["detail"].is_null());
+    }
 }
 
 /// PANES概要: 5tab超は先頭4つ+`...`で省略。floatingは連結に含めない
