@@ -169,11 +169,11 @@ expect_return = "いずれもexit 2（Usage）。error.class=Usage。messageは 
 
 [[condition]]
 id = "attach-detach.add-session-invalid-name-fail-fast-before-backend"
-source_lines = "tests/fake_backend/attach.rs:302"
+source_lines = "tests/fake_backend/attach.rs:304"
 target_function = "add::run_session（app層冒頭のNAME validation・fail-fast）"
 source = "tmp/tasks/tm-96/design_add-session-name.md §2.2（4種検査ともUsage exit 2・一覧取得より前——capability検査〔--version〕通過後の一覧取得・作成呼出（attach -b）を省くfail-fastが契約。backend呼出ゼロ〔list_sessions・create_session_detachedとも不発〕）・§2.3（contains(char::is_whitespace)はUnicode空白全般——タブ・改行等も空白検査対象。検査順 empty → '/' → whitespace → 先頭`-` により複合違反時の優先順位固定）・§2.4（検査位置: run_session冒頭）・§5条件書条件欄（境界case〔Unicode空白・複合違反の優先順位〕は本L2条件が担う）"
-description = "無効NAMEのfail-fast・backend呼出ゼロ（L2）: 4種NAMEいずれもbackend呼出（list_sessions・create_session_detached）を1回も発行せずUsage（exit 2）で拒否する。run_session直呼びのためclapを経由しない系列（先頭`-`の直値を含む）で検証し、あわせて境界case——タブ・改行等のUnicode空白も空白検査に含まれること・複合違反（a/ b は'/'優先・-a b は空白優先）での検査優先順位（empty → '/' → whitespace → 先頭`-`）の固定——を担う。L3 shim条件（add-session-invalid-name-usage-error）と対をなすL2側の検証（rename先例: invalid-new-name〔L3〕とwhitespace-name-rejected〔L2〕の同一分担）"
-given = "FakeBackend（sessions空）に対するrun_session(b, NAME, false)の各構成: (i) 空文字 (ii) a/b (iii) a b・a\\tb・a\\nb（空白3種。タブ・改行等のUnicode空白を含む） (iv) -x（先頭`-`直値） (v) 複合違反 a/ b（'/'×空白）と -a b（先頭`-`×空白）"
+description = "無効NAMEのfail-fast・backend呼出ゼロ（L2）: 4種NAMEいずれもbackend呼出（list_sessions・create_session_detached）を1回も発行せずUsage（exit 2）で拒否する。run_session直呼びのためclapを経由しない系列（先頭`-`の直値を含む）で検証し、あわせて境界case——タブ・改行・NBSP（U+00A0）・全角空白（U+3000）等のUnicode空白も空白検査に含まれること（contains(char::is_whitespace)の契約保護）・複合違反（a/ b は'/'優先・-a b は空白優先）での検査優先順位（empty → '/' → whitespace → 先頭`-`）の固定——を担う。L3 shim条件（add-session-invalid-name-usage-error）と対をなすL2側の検証（rename先例: invalid-new-name〔L3〕とwhitespace-name-rejected〔L2〕の同一分担）"
+given = "FakeBackend（newの既定初期化: running session \"fake\" 1件。Usage検査はbackend呼出より前のためsessions内容は本質でない）に対するrun_session(b, NAME, false)の各構成: (i) 空文字 (ii) a/b (iii) a b・a\\tb・a\\nb・a U+00A0 b・a U+3000 b（空白5種。タブ・改行・NBSP・全角空白等のUnicode空白を含む） (iv) -x（先頭`-`直値） (v) 複合違反 a/ b（'/'×空白）と -a b（先頭`-`×空白）"
 expect_return = "いずれもErr（class=Usage・exit 2）。messageは各caseの文面（NAME must not be empty / NAME must not contain '/' / NAME must not contain whitespace / NAME must not start with '-'）の完全一致。calls空（list-sessions・attach -bとも不発——一覧取得より前のfail-fast）"
 
 [[excluded]]
