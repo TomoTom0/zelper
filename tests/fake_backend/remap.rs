@@ -5,10 +5,10 @@
 // ・dry-run出力契約（R43〜R46・R48/R49/R50出力側）は L3（tests/cli/remap.rs）。
 // fail-first: v2実装（TASK-39）前にfailする（test-plan §5）。旧仕様v1テストは
 // 本matrixへの置換により削除済み（test-plan §2.7冒頭の経過措置）。
+mod env_util;
 mod fake;
+use env_util::with_isolated_xdg;
 use fake::FakeBackend;
-use std::path::Path;
-use std::sync::Mutex;
 use zelper::app::remap::{RemapArgs, run};
 use zelper::domain::*;
 use zelper::error::ErrorClass;
@@ -173,32 +173,8 @@ fn pipes(b: &FakeBackend) -> Vec<String> {
         .collect()
 }
 
-// ---- XDG_CACHE_HOME隔離（test-plan §2.8のL2適用） ----
-
-/// companion setupがcache配下（wasm extract・permissions.kdl）へ書き込む処理を
-/// テスト実envから分離する。static Mutexで直列化し、抜ける時に元に戻す
-static XDG_LOCK: Mutex<()> = Mutex::new(());
-
-fn with_isolated_xdg<T>(f: impl FnOnce(&Path) -> T) -> T {
-    // fail-first期のfail testがpanicでlockを毒化しても、XDG_CACHE_HOMEは入口で
-    // 毎回上書きされるため毒化回復しても後続testへ影響しない（直列化のみ維持し、
-    // 他testを巻き込まない）
-    let _guard = XDG_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let dir = std::env::temp_dir().join(format!("zelper-remap-xdg-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let prev = std::env::var("XDG_CACHE_HOME").ok();
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きし、即座に復元する
-    unsafe { std::env::set_var("XDG_CACHE_HOME", &dir) };
-    let out = f(&dir);
-    match prev {
-        Some(p) => unsafe { std::env::set_var("XDG_CACHE_HOME", p) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    out
-}
+// XDG_CACHE_HOME隔離（test-plan §2.8のL2適用）はenv_util::with_isolated_xdg
+// （TASK-83 Phase 1共通化。旧独立copyは削除）
 
 // ---- R8: floating pane ----
 

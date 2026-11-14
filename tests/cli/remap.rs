@@ -1,16 +1,11 @@
 // L3: remap CLI契約テスト（test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側。
-// DD-10 v2 / DD-12）。fake zellij shimをtest実行時に生成する（実zellijに依存しない）。
+// DD-10 v2 / DD-12）。fake zellij shim（tests/cli/shim_common.rs正本をtest実行時に
+// 生成。実zellijに依存しない。shim機構一覧・命名規則の正本はshim_common.rsのdoc comment）。
 // fail-first: v2実装（TASK-39）前にfailする（test-plan §5）。
+mod shim_common;
 use assert_cmd::Command;
-use std::os::unix::fs::PermissionsExt;
+use shim_common::{FAKE_ZELLIJ_LOCK, fixture_dir, setup_fake_zellij};
 use std::path::PathBuf;
-
-/// fake zellij shimのwrite↔exec競合（ETXTBSY）対策: binary内のfake zellij
-/// testを直列化する（CR59-5・TASK-73。src/zellij/process.rs test moduleと同一構成+契約doc comment）。
-/// test fn冒頭でのみ取得すること。wrapper・helper内では再取得しないこと
-/// （std::sync::Mutexは非reentrantのため同一thread再取得は永久blockし、
-/// failではなくtest hangとして発覚する）。
-static FAKE_ZELLIJ_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 3-slot bare layout（k=1系テスト用。inlineで渡す）
 const THREE_SLOT: &str =
@@ -19,67 +14,6 @@ const THREE_SLOT: &str =
 /// 3-slot layoutにdefault_tab_template（children + compact-bar bar leaf）を付けた
 /// layout（bar leaf出現の検証用。inlineで渡す）
 const TEMPLATE_SLOT: &str = "layout {\n    default_tab_template {\n        children\n        pane size=1 borderless=true {\n            plugin location=\"zellij:compact-bar\"\n        }\n    }\n    tab {\n        pane\n        pane\n        pane\n    }\n}\n";
-
-fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/zellij")
-}
-
-/// fake zellij実行可能fileをworkdirに生成し、(PATHに設定すべきdir, log path)を返す。
-/// FAKE_VERSION envで --version 応答を、FAKE_PANES/FAKE_TABS envでfixtureを差し替え
-fn setup_fake_zellij(tag: &str) -> (PathBuf, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("zelper-fake-remap-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let shim = dir.join("zellij");
-    let script = r#"#!/usr/bin/env bash
-echo "$*" >> "$FAKE_LOG"
-if [[ "$1" == "--version" ]]; then echo "zellij ${FAKE_VERSION:-0.44.3}"; exit 0; fi
-if [[ "$1" == "list-sessions" ]]; then echo "fake-sess [Created 1m ago]"; exit 0; fi
-if [[ "$3" == "action" ]]; then
-  shift 3
-  action="$1"; shift
-  case "$action" in
-    list-panes)
-      # TASK-81: dup spawnのemulation——FAKE_DUP_AFTER_OVERRIDE設定時、
-      # override-layout呼出後かつclose-pane呼出前のlist-panes応答のみdup pane入り
-      # fixture（panes-three-dup.json等）へ差し替える（close-pane後はdupが消えた
-      # 状態=反転で照合成立した結果を表現）
-      if [[ -n "${FAKE_DUP_AFTER_OVERRIDE:-}" ]] \
-        && grep -q "action override-layout" "$FAKE_LOG" \
-        && ! grep -q "action close-pane" "$FAKE_LOG"; then
-        cat "$FAKE_FIXTURES/${FAKE_DUP_PANES:-panes-three-dup.json}"
-      else
-        cat "$FAKE_FIXTURES/${FAKE_PANES:-panes.json}"
-      fi
-      exit 0;;
-    list-tabs) cat "$FAKE_FIXTURES/${FAKE_TABS:-tabs.json}"; exit 0;;
-    current-tab-info)
-      # anchor = tab 0（fixture最初のtab。単体object形式）
-      printf '{"position":0,"name":"Tab #1","active":true,"panes_to_hide":0,"is_fullscreen_active":false,"is_sync_panes_active":false,"are_floating_panes_visible":true,"other_focused_clients":null,"active_swap_layout_name":null,"is_swap_layout_dirty":false,"viewport_rows":60,"viewport_columns":200,"display_area_rows":60,"display_area_columns":200,"selectable_tiled_panes_count":3,"selectable_floating_panes_count":0,"tab_id":0,"has_bell_notification":null,"is_flashing_bell":false}\n'
-      exit 0;;
-    dump-screen)
-      pane=""; full=""
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          -p) pane="$2"; shift 2;;
-          -f) full="FULL"; shift;;
-          *) shift;;
-        esac
-      done
-      echo "SCREEN[$pane]$full"; exit 0;;
-    *) echo "ok"; exit 0;;
-  esac
-fi
-exit 0
-"#;
-    // 実行内容とmode確定後にのみ公開する。最終の実行pathはwrite open状態にならない
-    // （LinuxのETXTBSY回避）。
-    let staged = dir.join("zellij.staged");
-    std::fs::write(&staged, script).unwrap();
-    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::rename(staged, &shim).unwrap();
-    let log = dir.join("calls.log");
-    (dir, log)
-}
 
 /// 3-pane同一tab fixture（k=1・移動不要）。廃止flag拒否後の正常系検証に使う。
 /// 既定panes.jsonはselectable terminal paneが2つのため、M=N=3（k=1）になる

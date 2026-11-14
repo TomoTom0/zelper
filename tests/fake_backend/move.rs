@@ -4,10 +4,10 @@
 // 出力（JSON envelope・human 1行サマリ）はL3（cli系条件書）管轄。polling timeout系
 // （to-tab-poll-timeout・swap-partial-failure）は10s deadlineを実時間で消費する
 // （fake_remap r36と同一方式）
+mod env_util;
 mod fake;
+use env_util::{with_isolated_xdg, with_xdg_redirected_to};
 use fake::FakeBackend;
-use std::path::Path;
-use std::sync::Mutex;
 use zelper::app::move_::{
     PaneMoveAction, run_pane, run_pane_native, run_pane_swap, run_pane_to_tab, run_tab_swap,
 };
@@ -15,28 +15,8 @@ use zelper::domain::*;
 use zelper::error::ErrorClass;
 use zelper::zellij::ResizeDirection;
 
-// ---- XDG_CACHE_HOME隔離（companion setupのwasm extract・permissions seedを
-// test実envから分離。fake_remap.rsと同一構成） ----
-
-static XDG_LOCK: Mutex<()> = Mutex::new(());
-
-fn with_isolated_xdg<T>(f: impl FnOnce(&Path) -> T) -> T {
-    let _guard = XDG_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let dir = std::env::temp_dir().join(format!("zelper-move-xdg-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let prev = std::env::var("XDG_CACHE_HOME").ok();
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きし、即座に復元する
-    unsafe { std::env::set_var("XDG_CACHE_HOME", &dir) };
-    let out = f(&dir);
-    match prev {
-        Some(p) => unsafe { std::env::set_var("XDG_CACHE_HOME", p) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    out
-}
+// XDG_CACHE_HOME隔離（companion setupのwasm extract・permissions seedを
+// test実envから分離）はenv_util::with_isolated_xdg（TASK-83 Phase 1共通化）
 
 // ---- fixture群 ----
 
@@ -831,20 +811,9 @@ fn companion_setup_failure_is_preflight_error() {
     let (panes, tabs) = two_tabs_two_panes_each();
     let b = FakeBackend::new(panes, tabs);
     // XDG_CACHE_HOMEに通常fileを指向させ、companion cache dirの作成を失敗させる
-    let guard = XDG_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let file = std::env::temp_dir().join(format!("zelper-move-notadir-{}", std::process::id()));
     std::fs::write(&file, "x").unwrap();
-    let prev = std::env::var("XDG_CACHE_HOME").ok();
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きし、即座に復元する
-    unsafe { std::env::set_var("XDG_CACHE_HOME", &file) };
-    let err = run_pane_to_tab(&b, "1", "T1");
-    match prev {
-        Some(p) => unsafe { std::env::set_var("XDG_CACHE_HOME", p) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    drop(guard);
+    let err = with_xdg_redirected_to(&file, || run_pane_to_tab(&b, "1", "T1"));
     let err = err.unwrap_err();
     assert_eq!(*err.class(), ErrorClass::Preflight);
     assert!(pipes(&b).is_empty(), "probe・break-id不発: {:?}", b.calls());

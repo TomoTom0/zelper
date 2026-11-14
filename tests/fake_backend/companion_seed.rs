@@ -3,6 +3,8 @@
 // 形式はE6実験（tmp/e6_plugin/run3.sh。session起動前seedで自動grantを実証）に基づく:
 // node名 = plugin wasm絶対pathのquoted KDL node・権限は子のbare node。
 // fail-first: 実装（TASK-39）前にfailする（test-plan §5のseed判定を含む）。
+mod env_util;
+use env_util::{with_isolated_home_no_xdg, with_isolated_xdg};
 use zelper::companion::{REQUIRED_PERMISSIONS, ensure_permissions, seeded_content};
 use zelper::error::ErrorClass;
 
@@ -242,73 +244,8 @@ fn r28_persistent_conflict_aborts_without_writing() {
 
 // ---- C2/C4（TASK-39コードレビュー対応） ----
 
-/// XDG_CACHE_HOME隔離（companion_dir()解決の検証に使用。static Mutexで直列化）
-static XDG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// env一時変更のRAII guard（REVIEW指摘minor-1/2対応）: 生成時に元値をvar_osで
-/// 保存し（非UTF-8値も未設定と区別して保持）、Dropで復元する。closure内でpanic
-/// してもunwind経由で確実に復元される
-struct EnvGuard {
-    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
-}
-
-impl EnvGuard {
-    /// safety: XDG_LOCKで直列化した範囲内でのみ生成すること（Dropでの復元も
-    /// 同範囲のlock保持中に行われる）
-    unsafe fn save(keys: &[&'static str]) -> Self {
-        EnvGuard {
-            saved: keys.iter().map(|k| (*k, std::env::var_os(k))).collect(),
-        }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (key, prev) in &self.saved {
-            // safety: 保存した元値への復元のみを行う
-            match prev {
-                Some(p) => unsafe { std::env::set_var(key, p) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-    }
-}
-
-/// XDG_LOCK取得。poisonは無視する: envの復元はEnvGuardのDropが保証するため、
-/// poison（panic搬送）は隔離対象の状態破壊を意味せず、後続testを巻き込まない
-/// （fake_remap/fake_moveの同helperと同じ毒化回復方針）
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    XDG_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn with_isolated_xdg<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _lock = lock_env();
-    let dir = std::env::temp_dir().join(format!("zelper-seed-xdg-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    // 宣言順の逆順でdropするため、env復元（_env）はlock解放（_lock）に先行する
-    let _env = unsafe { EnvGuard::save(&["XDG_CACHE_HOME"]) };
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きする
-    unsafe { std::env::set_var("XDG_CACHE_HOME", &dir) };
-    f(&dir)
-}
-
-/// HOME隔離 + XDG_CACHE_HOME未設定（未設定時の既定path解決の検証に使用。XDG_LOCKで直列化）。
-/// 実userの~/.cacheを汚染しないようHOMEを一時dirへ向けてからXDG_CACHE_HOMEをunsetする
-fn with_isolated_home_no_xdg<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _lock = lock_env();
-    let dir = std::env::temp_dir().join(format!("zelper-seed-home-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    // 宣言順の逆順でdropするため、env復元（_env）はlock解放（_lock）に先行する
-    let _env = unsafe { EnvGuard::save(&["HOME", "XDG_CACHE_HOME"]) };
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書き/unsetする
-    unsafe { std::env::set_var("HOME", &dir) };
-    unsafe { std::env::remove_var("XDG_CACHE_HOME") };
-    f(&dir)
-}
+// XDG_CACHE_HOME/HOME隔離helper群（EnvGuard RAII復元 + lock_env直列化）は
+// env_util.rsへ共通化（TASK-83 Phase 1。TASK-71でこのfileに確立した形が正本）
 
 // [covers:companion-seed.concurrent-seeds-serialize-via-advisory-lock]
 #[test]
