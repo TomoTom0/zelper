@@ -166,8 +166,10 @@ pub fn run(
         }
         ListResource::Layouts => {
             let dir = layout_dir();
-            // (name, size_bytes, modified_epoch_secs)。stat失敗・mtime不明時は
-            // 誤った値（size 0・半世紀前等）を表示しないようNoneを保持する
+            // (name, size_bytes, modified_epoch_secs)。SIZE/MODIFIEDはsymlinkを
+            // たどった内容実体のstat（follow）由来。壊れたsymlinkなど参照先の
+            // stat取得失敗時・mtime不明時は、誤った値（size 0・半世紀前等・
+            // link先path長）を表示しないようNoneを保持する
             let mut entries: Vec<(String, Option<u64>, Option<u64>)> = Vec::new();
             if let Ok(iter) = std::fs::read_dir(&dir) {
                 for e in iter.flatten() {
@@ -175,8 +177,7 @@ pub fn run(
                     if path.extension().and_then(|s| s.to_str()) == Some("kdl")
                         && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
                     {
-                        let (size, modified) = e
-                            .metadata()
+                        let (size, modified) = std::fs::metadata(&path)
                             .map(|m| {
                                 let modified = m
                                     .modified()

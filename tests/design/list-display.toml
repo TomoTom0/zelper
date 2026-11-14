@@ -3,12 +3,12 @@
 [meta]
 feature = "list-display"
 source_file = "src/app/list.rs"
-verified = false
-verified_at = ""
-verified_by = ""
+verified = true
+verified_at = "2026-11-14"
+verified_by = "claude"
 test_command = "cargo test --test cli_list_read_send && cargo test --lib"
-source_hash = "36136fdb8593ee86b3e8730f4f1f8691272d4242"
-note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。（TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕）——TASK-82（2026-11-14）テスト先行条件書更新: layouts-symlink-follow-target-statを追加（fail-first。現行実装はlstatのためlinkedのsize==link先path長8・modified_epoch==link作成時刻now近傍・brokenに値が出ることで赤。src/app/list.rsのfs::metadata変更実装工程で緑化後、verified系fieldを最終検証記録へ更新する）。併せてexcluded「layoutsのstat失敗・mtime不明時の-表示」を2系列へ分割: stat失敗(None, None)系列は本条件（壊れたsymlinkで実体化）へ昇格して削除、mtimeのみ不明(Some(size), None)系列は実測困難性（metadata成功時にmodified()がErrになるのは機能不支持fs等に限る）の理由を付してexcludedへ残置。source_hashはsrc/app/list.rs不変のため従来値のまま（実装工程での変更時に再記録）"
+source_hash = "aabbaadf7985228c4a42e18f1288c1c013885450"
+note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。（TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕）——TASK-82（2026-11-14）テスト先行条件書更新: layouts-symlink-follow-target-statを追加（fail-first。当時の現行実装はlstatのためlinkedのsize==link先path長8・modified_epoch==link作成時刻now近傍・brokenに値が出ることで赤〔tmp/tasks/tm-82/test_red.log〕）。併せてexcluded「layoutsのstat失敗・mtime不明時の-表示」を2系列へ分割: stat失敗(None, None)系列は本条件（壊れたsymlinkで実体化）へ昇格して削除、mtimeのみ不明(Some(size), None)系列は実測困難性（metadata成功時にmodified()がErrになるのは機能不支持fs等に限る）の理由を付してexcludedへ残置。（TASK-82実装でsrc/app/list.rsのLayouts分岐をe.metadata()からstd::fs::metadata(&path)へ変更し緑化・cargo test --test cli_list_read_send list_ 14件・cargo test --lib list:: 3件 全pass〔2026-11-14〕。verified/verified_at/verified_by/source_hashはTASK-82実装に対する最終検証記録へ更新）"
 
 [[condition]]
 id = "list-display.sessions-and-tabs-basic-output"
@@ -102,7 +102,7 @@ expect_return_shape = "soloのみの1行（header無し）"
 
 [[condition]]
 id = "list-display.human-age-granularity-boundaries"
-source_lines = "src/app/list.rs:314"
+source_lines = "src/app/list.rs:315"
 target_function = "human_age"
 source = "docs/design/detailed-design.md DD-4.1（list layouts: MODIFIEDは3d 5h ago相当の相対表記。file stat由来） + human_age粒度境界の要件本体test（lib内#[cfg(test)]で検証）"
 description = "MODIFIED相対表記（human_age）の粒度境界: d/h/m/s各粒度の切替わり境界と未来時刻のsaturating扱い（負経過を表示しない）。private fnのためlib内testで検証"
@@ -111,7 +111,7 @@ expect_return = "0s ago / 1s ago / 1m 0s ago / 1h 0m ago / 1d 0h ago / 0s ago"
 
 [[condition]]
 id = "list-display.panes-summary-elision-and-floating-exclusion"
-source_lines = "src/app/list.rs:331"
+source_lines = "src/app/list.rs:332"
 target_function = "summarize_panes"
 source = "docs/design/detailed-design.md DD-4.1（PANESはtab毎pane数の+連結。5tab目以降は...省略） + floating除外と5tab超省略の純粋関数test"
 description = "session概要PANES連結（summarize_panes純粋関数）の規則: tiled数のみ連結（floating除外）・4tab以下は全件・5tab超は先頭4件+...。lib内testで直接検証"
@@ -120,7 +120,7 @@ expect_return = "7+7+6 / 2+2（floating 1が除外される） / 1+2+3+4+..."
 
 [[condition]]
 id = "list-display.home-substitution-boundaries"
-source_lines = "src/app/list.rs:359"
+source_lines = "src/app/list.rs:360"
 target_function = "short_path_with"
 source = "docs/design/detailed-design.md DD-4.1（短縮cwd: HOME prefixを~置換） + short_pathの境界case回帰test（prefix類似dir・HOME末尾/正規化）"
 description = "短縮cwd（short_path_with純粋関数）の境界: HOME配下は~置換、HOME自身は~、prefix類似dir（/home/tomox・/home/tomo2）は置換しない、HOME外・HOME未設定相当（空）はそのまま、HOME末尾/は正規化して一致。lib内testで直接検証"
