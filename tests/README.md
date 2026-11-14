@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書20file・334条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
+- `design/` — テスト設計条件書20file・335条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -19,7 +19,7 @@
   - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入・watch用のdump_frames/dump_fail_after/dump_full_frames注入・move用のmove_pane/move_tab emulation〔M1/M2/m8実測基準値: 幾何隣接則による交換相手選択・rotateは対象と前後1交換〔wrap〕・focus遷移則・edge no-op・tab移動wrap〕とmute_break_id_nth/rename_moved_pane_after_break_nth/mute_move_tab/hide_pane_in_lenient_after_break/vanish_tab_after_move_tab・TASK-70のfail_override_layout_nth/fail_companion_wasm_extract/fail_companion_permissions_seed注入〔未設定時は従来挙動不変〕。test支援資産でtag対象外）
   - `rename_add_remove.rs` — rename.tomlのうちL2 12条件（pane 3 + tab 2 + session L2 7）+ add-remove.toml（9）の21条件（tab L2 2件はTASK-66: 成功系〔TABSPEC=ID/一意名両case・呼出列list-tabs → rename-tab <id> <name> → list-tabs完全一致〕・silent no-op検出〔mute_rename_tab注入。別ID tabが既に新名を保有する構成でpostconditionのID照合（t.id == tid && t.name == name）を保護〕。add L2部分失敗2件はTASK-67: add〔pane/tab×途中失敗/初回失敗の3 case・created so far報告・作成済み残存〕・remove〔pane/tab×2番目失敗・PartialFailure exit 6・results[]・残対象続行〕。session L2はTASK-95テスト先行+TASK-97テスト先行: 状態書き換え〔exited不変〕・mute黙失敗のpostcondition検出〔VerificationFailed〕・呼出失敗〔OperationFailed〕・事後list失敗class保持〔but failed to confirm〕・空白含み新名拒否〔世界modelで復元不能のためUsage事前拒否〕・先頭`-`新名拒否〔TASK-97: 検査順固定（先頭`-`は'/'・whitespace後・同一名differ前）と旧NAME="-x"一覧存在時のbackend到達契約保護〕・postcondition両判定の独立保護〔コードレビュー指摘2〕。検査優先順位固定〔不在/EXITEDがNEW_NAME衝突に優先〕の複合違反testも本file。rename.tomlのL3 8条件（tab 1件含む）は cli/list_read_send.rs。fake.rsのrename_session〔record rename-session@{from} {to}+sessions行書き換え〕・mute_rename_session / fail_list_sessions_after_rename / rename_post_inject注入も参照）
   - `resize.rs` — resize.toml（8条件。TASK-68: equalize --tab TABSPEC指定〔TABSPEC一意名/ID両caseで対象tabのpane群を選択・exited/floating paneは除外〕）
-  - `companion_seed.rs` — companion-seed.toml（14条件。tempdir実file。lock fileは残留期待〔concurrent-seeds・stale-lock-file-tolerated-and-retained〕・r26/c4で恒久lock file許容）
+  - `companion_seed.rs` — companion-seed.toml（15条件。tempdir実file。TASK-71: XDG_CACHE_HOME未設定時の~/.cache基準cache path解決1件〔EnvGuard（RAII Drop環境復元）+lock_envで環境変数を保護〕。lock fileは残留期待〔concurrent-seeds・stale-lock-file-tolerated-and-retained〕・r26/c4で恒久lock file許容）
   - `watch.rs` — watch.toml（16条件のうちloop系6件: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。文法・出力契約・exit分類の10件はcli/list_read_send.rs。TASK-86）
   - `attach.rs` — attach-detach.toml（18条件のうちL2層5件: attach成功報告契約〔tty_ok注入〕・detach no-op成功・add session一覧取得失敗2系〔TASK-93: fail_op事前確認失敗・postcheck arm事後確認失敗〕・add session NAME検査fail-fast〔TASK-96: backend呼出ゼロ・Unicode空白・複合違反の優先順位〕。run_interactive系2件はlib src/zellij/process.rs・L3層11件はcli/list_read_send.rs。TASK-89。fake.rsのsession状態管理〔create_session_detachedでNAMEをlist_sessionsへ追加〕・mute_create_session・fail_list_sessions_after_create注入も参照）
   - `remove_session.rs` — remove-session.toml（21条件のうちL2層5件。TASK-84テスト先行: 常時gate〔単一NAMEでも--yes/--dry-run必須〕・postcondition 2系〔still listed is failure・事後list失敗のclass保持伝播〕・NAME重複除去〔指定順保持・報告1回〕・EXITED行受理〔dead経路で実行〕。L3層16件はcli/list_read_send.rs。fake.rsのsession状態管理拡張〔delete_sessionでsessionsから行削除・mute_delete_session / fail_list_sessions_after_delete注入・set_sessions fixture差し替え〕も参照）
@@ -36,8 +36,8 @@ lib内test 14件（`src/app/list.rs` 3件・src/zellij/process.rs 11件〔TASK-8
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（335テスト）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。334条件でexit 0）
+cargo test          # L1〜L3（336テスト）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。335条件でexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）

@@ -12,7 +12,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（20 file・334条件）
+## 条件書一覧（20 file・335条件）
 
 verified列はmeta検証記録（verified = true）の実績値（TASK-97テスト先行のrenameは実装工程で全条件緑化後にtrueへ再記録済み——TASK-66のtab系3条件追加時もverified=trueを維持（実装変更を伴わないため）。TASK-93の4 file〔cli-grammar・list-display・backend-process・attach-detach〕・TASK-96のattach-detach追加分は実装工程で全条件緑化後にtrueへ再記録済み）。
 
@@ -29,7 +29,7 @@ verified列はmeta検証記録（verified = true）の実績値（TASK-97テス�
 | 9 | resize | src/app/resize.rs | fake_resize（8件〔TASK-68で--tab TABSPEC系を追加〕） | 8 | true |
 | 10 | layout-planner | src/app/remap.rs | layout_planner（26件） | 26 | true |
 | 11 | layout-generator | src/layout/generator.rs | layout_generator（14件） | 14 | true |
-| 12 | companion-seed | src/companion.rs | companion_seed（14件） | 14 | true |
+| 12 | companion-seed | src/companion.rs | companion_seed（15件〔TASK-71でXDG_CACHE_HOME未設定時の既定cache path解決を追加〕） | 15 | true |
 | 13 | remap-sequence | src/app/remap.rs | fake_remap（52件〔TASK-69で--tab TABSPEC系3件・TASK-70でlayout適用phase失敗・companion setup失敗系2件を追加〕） | 52 | true |
 | 14 | remap-cli | src/app/remap.rs | cli_remap（15件） | 15 | true |
 | 15 | docs-verb | src/app/docs.rs | cli_docs（9件） | 9 | true |
