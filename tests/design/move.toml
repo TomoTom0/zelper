@@ -5,11 +5,11 @@
 feature = "move"
 source_file = "src/app/move_.rs"
 verified = true
-verified_at = "2026-09-26"
+verified_at = "2026-11-14"
 verified_by = "claude"
 test_command = "cargo test --test fake_move"
-source_hash = "8d2a6063a168ef53d6b9bed8ab90581c51dedcec"
-note = "TASK-88実装済み（2026-09-26・REVIEW-3指摘1/2/3/5対応込み）。L2 24条件はtests/fake_backend/move.rs（fake_move）・CLI parse表面・help出現はcli-grammar.tomlのmove系5条件が分担。src/zellij/process.rs（move_pane / move_tab trait実装・MovePaneOp・TabMoveDirection）とsrc/companion.rs（§2.8 remap.rsから切り出しのcompanion helper。setup_and_probe・poll・break_id_payload・POLL_*・PERMISSION_HINT）も検証対象"
+source_hash = "aa25edd42f445c995016f0200d06c44dced0b524"
+note = "TASK-88実装済み（2026-09-26・REVIEW-3指摘1/2/3/5対応込み）。L2 24条件はtests/fake_backend/move.rs（fake_move）・CLI parse表面・help出現はcli-grammar.tomlのmove系5条件が分担。src/zellij/process.rs（move_pane / move_tab trait実装・MovePaneOp・TabMoveDirection）とsrc/companion.rs（§2.8 remap.rsから切り出しのcompanion helper。setup_and_probe・poll・break_id_payload・POLL_*・PERMISSION_HINT）も検証対象。TASK-94（2026-11-14）: source_hash鮮度更新——TASK-88 REVIEW-3対応の最終調整（d078147・2026-09-26）でのmove_.rs変更が反映前の値だったため現行実測値へ更新。cargo test --test fake_move 24件全pass〔tmp/tasks/tm-94/cargo_test_mismatch_targets.log〕。verified_at/source_hashはTASK-94再検証時点へ更新"
 
 [[condition]]
 id = "move.pane-direction-argv"
