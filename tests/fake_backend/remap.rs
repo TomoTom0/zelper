@@ -2760,3 +2760,217 @@ fn reconciliation_early_return_ignores_earlier_group_closes() {
         b.calls()
     );
 }
+
+// ---- TASK-69: --tab TABSPEC絞り込み（DD-10.5/10.6/10.14・D10） ----
+
+/// --tab TABSPEC検証用fixture: tab 0（active・pane 2件）+ tab 1 build（非active・pane 3件）
+fn two_tabs_target_three() -> (Vec<PaneState>, Vec<TabState>) {
+    (
+        vec![
+            pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+            pane_at(2, "b", 0, 0, 0, 50, Some("cmd2")),
+            pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+            pane_at(4, "d", 1, 1, 0, 50, Some("cmd4")),
+            pane_at(5, "e", 1, 1, 10, 0, Some("cmd5")),
+        ],
+        vec![
+            tab_state(0, 0, "t0", true, 2),
+            tab_state(1, 1, "build", false, 3),
+        ],
+    )
+}
+
+// [covers:remap-sequence.tab-spec-scopes-source-and-anchor-to-target-tab]
+#[test]
+fn tab_spec_scopes_source_and_anchor_to_target_tab() {
+    // --tab TABSPEC（ID・一意名とも）: sourceはそのtabのpaneのみでanchorもそのtab
+    // （DD-10.5/10.6）。active tab（tab 0）側のpaneはsource外で移動もlayout適用も
+    // されず、当該tabはleftover_tabs報告。全sourceがanchor内のためbreak系pipe不使用
+    for spec in ["build", "1"] {
+        let (panes, tabs) = two_tabs_target_three();
+        let b = FakeBackend::new(panes, tabs);
+        let mut a = args(false);
+        a.tab = Some(spec);
+        let outcome = with_isolated_xdg(|_| run(&b, &a).expect("M=3=N（k=1）で成功"));
+        let calls = b.calls();
+        assert!(
+            pipes(&b).is_empty(),
+            "全sourceがtab 1（=anchor）内のためprobe・break系とも不使用: {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|c| c.starts_with("new-tab")),
+            "k=1のため新規tab不使用: {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|c| c.starts_with("rename-tab")),
+            "rename不使用: {calls:?}"
+        );
+        let go_to: Vec<&String> = calls
+            .iter()
+            .filter(|c| c.starts_with("go-to-tab"))
+            .collect();
+        assert_eq!(go_to.len(), 2, "step 6のanchor訪問+最終go-to: {calls:?}");
+        assert!(
+            go_to.iter().all(|c| c.as_str() == "go-to-tab 1"),
+            "go-to先はすべて--tab対象tab（anchor切替。active tab 0でない）: {go_to:?}"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c.starts_with("override-layout"))
+                .count(),
+            1,
+            "layout適用は対象tabへの1回のみ: {calls:?}"
+        );
+        assert_eq!(tiled_count(&b, TabId(1)), 3, "対象tabのpane数は3（N）");
+        // 他tab（active tab 0）のpaneはsource外: 移動されず元tabに生存
+        let state = b.state.borrow();
+        for id in [1u32, 2] {
+            let p = state
+                .panes
+                .iter()
+                .find(|p| p.id == PaneKindId::Terminal(id))
+                .unwrap_or_else(|| panic!("pane {id} は生存"));
+            assert_eq!(p.tab_id, TabId(0), "tab 0に留まる（source外）");
+        }
+        drop(state);
+        // source外tabはleftover_tabsとして報告（closeしない・失敗条件にしない）
+        assert_eq!(outcome.leftover_tabs.len(), 1, "raw: {outcome:?}");
+        let l = &outcome.leftover_tabs[0];
+        assert_eq!(l.id, TabId(0), "raw: {l:?}");
+        assert_eq!(l.name, "t0", "raw: {l:?}");
+        assert_eq!(l.position, 0, "raw: {l:?}");
+        assert_eq!(l.selectable_tiled, 2, "raw: {l:?}");
+    }
+}
+
+// [covers:remap-sequence.tab-spec-unresolvable-is-no-target]
+#[test]
+fn tab_spec_unresolvable_is_no_target() {
+    // --tab解決不能（不在名・不在ID）はNoTargetで状態変更前に中断（DD-10.14・
+    // DD-12 preflightの対象解決）。TABSPEC解決の汎用挙動（ID/名前/曖昧の矩阵）は
+    // selector.toml既存条件の担当のためここでは重複検証しない（TASK-66/68先例）
+    for spec in ["ghost", "99"] {
+        let (panes, tabs) = same_tab_three();
+        let b = FakeBackend::new(panes, tabs);
+        let mut a = args(false);
+        a.tab = Some(spec);
+        let err = with_isolated_xdg(|_| run(&b, &a).unwrap_err());
+        assert_eq!(*err.class(), ErrorClass::NoTarget, "spec={spec}");
+        assert!(
+            err.message().contains(spec),
+            "文面に指定TABSPECが載る: {}",
+            err.message()
+        );
+        let calls = b.calls();
+        for op in [
+            "pipe",
+            "toggle-embed",
+            "override-layout",
+            "go-to-tab",
+            "new-tab",
+            "rename-tab",
+            "close-pane",
+            "focus-pane-id",
+        ] {
+            assert!(
+                !calls.iter().any(|c| c.starts_with(op)),
+                "状態変更は一切不発生（{op}）: {calls:?}"
+            );
+        }
+    }
+}
+
+// [covers:remap-sequence.tab-spec-applies-first-template-single-tab]
+#[test]
+fn tab_spec_applies_first_template_single_tab() {
+    // --tab時のlayout適用はlayout最初のtab鋳型（鋳型0）による単tab適用（DD-10.5
+    // v2.2・D10）: T=2 layout（N_0=2・鋳型1 name=single）を指定してもS=N_0の
+    // T=1経路となり、2番目以降のtab鋳型は具体化されない
+    let mut a = multi_args(TWO_TAB_LAYOUT);
+    a.tab = Some("1");
+
+    // (i) M=2=N_0 → k=1: 鋳型1（--tabなしなら空groupのnew-tab対象）は具体化しない
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+        pane_at(4, "d", 1, 1, 0, 50, Some("cmd4")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 1),
+        tab_state(1, 1, "build", false, 2),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    let outcome = with_isolated_xdg(|_| run(&b, &a).expect("M=2=N_0でk=1"));
+    let calls = b.calls();
+    assert!(pipes(&b).is_empty(), "probe・break系とも不使用: {calls:?}");
+    assert!(
+        !calls.iter().any(|c| c.starts_with("new-tab")),
+        "鋳型1は具体化しない（T=2経路なら空group (0,1) のnew-tab --layout-stringが走る）: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("rename-tab")),
+        "鋳型1名（single）での命名不発生: {calls:?}"
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|c| c.starts_with("override-layout"))
+            .count(),
+        1,
+        "layout適用は対象tabへの1回のみ: {calls:?}"
+    );
+    assert_eq!(tiled_count(&b, TabId(1)), 2, "対象tabのpane数はN_0=2");
+    assert_eq!(
+        outcome.leftover_tabs.len(),
+        1,
+        "tab 0はleftover: {outcome:?}"
+    );
+
+    // (ii) M=3>N_0 → k=2（S=N_0刻み）: 追加tabはbase-2命名（鋳型1名singleでない）
+    let panes = vec![
+        pane_at(1, "a", 0, 0, 0, 0, Some("cmd1")),
+        pane_at(3, "c", 1, 1, 0, 0, Some("cmd3")),
+        pane_at(4, "d", 1, 1, 0, 50, Some("cmd4")),
+        pane_at(5, "e", 1, 1, 10, 0, Some("cmd5")),
+    ];
+    let tabs = vec![
+        tab_state(0, 0, "t0", true, 1),
+        tab_state(1, 1, "build", false, 3),
+    ];
+    let b = FakeBackend::new(panes, tabs);
+    let outcome = with_isolated_xdg(|_| run(&b, &a).expect("M=3>N_0でk=2"));
+    let calls = b.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("pipe break-new ") && c.contains("terminal_5")),
+        "3番目のpaneがbreak-newで追加tabへ: {calls:?}"
+    );
+    assert!(
+        calls.iter().any(|c| c == "rename-tab 2 remap-2"),
+        "追加tab命名はT=1経路のbase-2（--tabなしなら鋳型1名single）: {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.contains("single")),
+        "鋳型1名での命名・適用は不発生: {calls:?}"
+    );
+    assert_eq!(tiled_count(&b, TabId(1)), 2, "anchor tab 1はN_0=2 pane");
+    assert_eq!(
+        tiled_count(&b, TabId(2)),
+        2,
+        "追加tabもN_0=2 pane（1割当+1空slot充填）"
+    );
+    assert_eq!(
+        outcome.leftover_tabs.len(),
+        1,
+        "tab 0はleftover: {outcome:?}"
+    );
+    let state = b.state.borrow();
+    let p1 = state
+        .panes
+        .iter()
+        .find(|p| p.id == PaneKindId::Terminal(1))
+        .expect("tab 0のpaneは生存");
+    assert_eq!(p1.tab_id, TabId(0), "tab 0に留まる（source外）");
+}
