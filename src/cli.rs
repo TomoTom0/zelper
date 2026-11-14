@@ -260,7 +260,13 @@ pub enum Direction {
 
 #[derive(Subcommand, Debug)]
 pub enum AddTarget {
-    /// detached session作成: zelper add session NAME（session 0件環境でも動作）
+    /// detached session作成: zelper add session NAME [--json]（session 0件環境でも
+    /// 動作・TASK-89）。NAMEの空文字・'/'含み・空白含み・先頭'-'はwrap側がUsage
+    /// 事前検査で拒否する（TASK-96）: 空白含み名はzellij受理後もlist-sessions行から
+    /// 名前を復元できないため（parse_sessionsが先頭wordのみを名前化）、空文字・'/'
+    /// はzellijが明示拒否するが対称性・fail-fastでwrap側でも事前検査（rename
+    /// sessionのNEW_NAMEと同一規約）、先頭'-'は`--`通過系列が下流のoption解釈に
+    /// 到達するため事前拒否
     Session {
         name: String,
         #[arg(long)]

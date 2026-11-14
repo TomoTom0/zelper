@@ -145,6 +145,39 @@ pub fn run_tab(
 /// 0-session環境で動く前提のprobe backend（session解決なし）が渡される
 /// （AddTarget::Session例外dispatch。設計§2.2）
 pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Result<(), ZelperError> {
+    // app層Usage検査（TASK-96 §2.2-§2.4: 一覧取得より前にfail-fast）。空白含み名は
+    // zellijが受理する（M96-A実測）がparse_sessionsがlist-sessions行の先頭wordのみを
+    // 名前化するため世界modelで復元不能（postcondition必敗・session残留）。
+    // 空文字・'/'含みはzellijが明示拒否する（M96-B/C実測）がrename NEW_NAMEとの
+    // 対称性・fail-fastでwrap側でも事前検査。先頭'-'は`--`通過系列が`--`挿入なしの
+    // attach -b NAME組み立てへ到達するため（有効option一致値の下流挙動は未測定・
+    // zellij側option集合はzeller管理外）入力段の確定拒否が唯一のzeller側完結手段。
+    // 検査順は empty → '/' → whitespace → 先頭'-'（複合違反時の優先順位固定）。
+    // それ以外の文字種は推測で事前拒否せず、すり抜けはpostconditionが最終防衛
+    if name.is_empty() {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not be empty",
+        ));
+    }
+    if name.contains('/') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not contain '/'",
+        ));
+    }
+    if name.contains(char::is_whitespace) {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not contain whitespace",
+        ));
+    }
+    if name.starts_with('-') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not start with '-'",
+        ));
+    }
     // 事前確認: 同名running sessionの存在はPreflightでfail-fast拒否する
     // （zellijのrc=1「Session already exists」を待たない）。EXITED行はrunningと
     // みなさない（EXITED同名はzellijへ委ねる）。一覧取得の失敗は0件へ丸めず
