@@ -97,11 +97,19 @@ pub fn run_session(
     new_name: &str,
     json: bool,
 ) -> Result<(), ZelperError> {
-    // app層Usage検査（§2.2/§2.3: 無駄なbackend呼出をしない。先頭'-'はclapが
-    // 既に拒否済みのため検査しない。空白含み名はzellijが受理する（M95-C3）が
-    // parse_sessionsが先頭wordのみを名前化するためlist_sessionsで復元不能
-    // （postcondition必敗）——世界modelで表現可能な名前のみ許可する。それ以外の
-    // 文字種は推測で事前拒否せず、すり抜けはpostconditionが最終防衛）
+    // app層Usage検査（§2.2/§2.3 + TASK-97 §2.1/§2.2: 一覧取得より前にfail-fast）。
+    // 空白含み新名はzellijが受理する（M95-C3実測）がparse_sessionsがlist-sessions
+    // 行の先頭wordのみを名前化するため世界modelで復元不能（postcondition必敗）。
+    // 空文字・'/'含み新名は黙失敗・部分適用の状態破壊（M95-C1/C2実測）。先頭'-'は
+    // TASK-97追加: `--`option終端通過系列がbackendの`--`挿入なしargv組み立て
+    // （process.rs run_action_as → zellij --session <from> action rename-session
+    // <to>）へ到達するためclap依存の拒否が成立せず、未知option値はM95-C4 rc=2
+    // 実測済みだが有効option一致値の下流挙動は未測定・zellij側option集合は
+    // zeller管理外のため、入力段の確定拒否が唯一のzeller側完結手段（add session
+    // NAME検査〔TASK-96〕と対称の4種目）。検査順は empty → '/' → whitespace →
+    // 先頭'-' → 同一名differ（文字種4種の形式検査が関係検査に先行）。旧NAMEは
+    // 文字種検査対象外——世界model（一覧行）にある名前はそのままrename対象。
+    // それ以外の文字種は推測で事前拒否せず、すり抜けはpostconditionが最終防衛
     if new_name.is_empty() {
         return Err(ZelperError::new(
             ErrorClass::Usage,
@@ -118,6 +126,12 @@ pub fn run_session(
         return Err(ZelperError::new(
             ErrorClass::Usage,
             "NEW_NAME must not contain whitespace",
+        ));
+    }
+    if new_name.starts_with('-') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must not start with '-'",
         ));
     }
     if name == new_name {

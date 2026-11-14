@@ -206,13 +206,17 @@ pub enum RenameTarget {
         json: bool,
     },
     /// session名変更: zelper rename session NAME NEW_NAME [--json]
-    /// （TASK-95）。旧名・新名とも必須（不足・先頭'-'値はusage error）。
-    /// global --session flagは無視（list/add/remove sessionと同一規約——対象
-    /// session名をpositionalで明示するため解決に使わない）。既存session名への
-    /// rename・空文字・'/'含み新名はzellijがrc=0で黙って失敗し（M4 I・
-    /// M95-C1/C2実測）、空白含み新名はzellij受理後もlist-sessions行から名前を
-    /// 復元できないため、いずれもwrap側が事前検査で拒否しpostcondition検証を
-    /// 行う
+    /// （TASK-95）。旧名・新名とも必須（不足はusage error）。global --session
+    /// flagは無視（list/add/remove sessionと同一規約——対象session名をpositional
+    /// で明示するため解決に使わない）。既存session名へのrename・空文字・'/'含み
+    /// 新名はzellijがrc=0で黙って失敗し（M4 I・M95-C1/C2実測）、空白含み新名は
+    /// zellij受理後もlist-sessions行から名前を復元できないため、いずれもwrap側が
+    /// 事前検査で拒否しpostcondition検証を行う。先頭'-'はNEW_NAMEのみUsage事前
+    /// 検査で拒否する（TASK-97: `--`option終端経由でparseを通過するためclap拒否
+    /// に頼れず、add session NAME検査〔TASK-96〕と対称の4種目）。旧NAMEは文字種
+    /// 検査の対象外——世界model（list-sessions一覧）に存在する名前はそのまま
+    /// rename対象とし、不在はNoTarget+candidatesで案内する（`--`経由の旧NAME
+    /// 先頭'-'も一覧に存在すれば対象化）
     Session {
         name: String,
         new_name: String,
