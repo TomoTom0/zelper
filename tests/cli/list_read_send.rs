@@ -699,6 +699,55 @@ fn list_panes_human_includes_cwd_column() {
     );
 }
 
+/// 実fileのmtimeがUnix epoch以前の場合: modified()は成功するが
+/// duration_since(UNIX_EPOCH)がErr（負経過）になり、sizeは数値・
+/// modified_epochはnull（human MODIFIEDは-）へ落ちる系列の条件化
+/// （旧excludedのmtime不明系列のうちpre-epoch mtimeで再現可能な側を条件化。
+/// レビューminor-2: modified()自体のErr〔機能不支持fs等〕のみexcluded残置）
+// [covers:list-display.layouts-pre-epoch-mtime-modified-null]
+#[test]
+fn list_layouts_pre_epoch_mtime_modified_is_null() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("list-layouts-preepoch");
+    let dir = std::env::temp_dir().join(format!(
+        "zelper-fake-layouts-preepoch-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    // 実file（13 bytes）のmtimeをepoch以前（@-100 = 1969-12-31T23:58:20Z）へ設定
+    let old = dir.join("old.kdl");
+    std::fs::write(&old, "// pre-epoch\n").unwrap();
+    let st = std::process::Command::new("touch")
+        .args(["-d", "@-100"])
+        .arg(&old)
+        .status()
+        .expect("touch -d @-100 to pin pre-epoch mtime");
+    assert!(st.success(), "touch to pin old.kdl pre-epoch mtime failed");
+
+    // JSON: sizeはSome（数値）だが、modified_epochはu64 epoch秒へ変換不能のためnull
+    let out = cmd
+        .env("ZELLIJ_LAYOUT_DIR", &dir)
+        .args(["list", "layouts", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let entry = &v["data"]["layouts"][0];
+    assert_eq!(entry["name"], "old");
+    assert_eq!(entry["size"], 13);
+    assert_eq!(entry["modified_epoch"], serde_json::Value::Null);
+
+    // human: SIZEは数値・MODIFIEDは-（誤った値を出さないC16契約のmtime側）
+    let (mut cmd, _) = zelper("list-layouts-preepoch-human");
+    cmd.env("ZELLIJ_LAYOUT_DIR", &dir)
+        .args(["list", "layouts"])
+        .assert()
+        .success()
+        .stdout("NAME\tSIZE\tMODIFIED\nold\t13\t-\n");
+}
+
 /// 実行中sessionが複数あっても、list layoutsはsession解決を行わず動く
 /// （layout一覧はfile列挙でありzellijを呼ばない）
 // [covers:list-display.layouts-without-session-resolution]
@@ -831,11 +880,26 @@ fn list_layouts_symlink_follows_target_stat() {
     assert_eq!(real_fields[0], "real");
     assert_eq!(linked_fields[1], "1024");
     assert_eq!(real_fields[1], "1024");
-    assert_eq!(
-        linked_fields[2], real_fields[2],
-        "MODIFIEDは同一実体epoch由来の同一文字列であること"
+    // human_ageは行毎に現在時刻を取得するため、同一epochでも行間で時間境界
+    // （例: 5h59m→6h）を跨ぐと表示文字列が変わりうる（レビューminor-1）。
+    // Nd Nh ago形を時間換算へparseし、差が境界1時間分以内であることを検証する
+    // （値源がlstat由来=link作成時刻なら6年超の差になるため検出力は保たれる。
+    // 値の厳密な同一性はJSON側modified_epoch==1600000000の一致比較が担保）
+    let hours_of = |s: &str| -> u64 {
+        let toks: Vec<&str> = s.split_whitespace().collect();
+        assert_eq!(toks.len(), 3, "MODIFIEDは Nd Nh ago 形であること: {s}");
+        assert_eq!(toks[2], "ago", "MODIFIEDはago接尾であること: {s}");
+        let d: u64 = toks[0].strip_suffix('d').unwrap().parse().unwrap();
+        let h: u64 = toks[1].strip_suffix('h').unwrap().parse().unwrap();
+        d * 24 + h
+    };
+    let linked_hours = hours_of(linked_fields[2]);
+    let real_hours = hours_of(real_fields[2]);
+    assert!(
+        linked_hours.abs_diff(real_hours) <= 1,
+        "MODIFIEDは同一実体epoch由来（行間の時間境界跨ぎは+/-1hまで許容）: \
+         linked={linked_hours}h real={real_hours}h"
     );
-    assert!(linked_fields[2].ends_with(" ago"));
 }
 
 // [covers:read-send.read-single-and-multi-results]

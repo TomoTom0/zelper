@@ -31,7 +31,7 @@ expect_return = "Err（ErrorClass=Usage）"
 
 [[condition]]
 id = "add-remove.add-pane-option-argv-map"
-source_lines = "tests/cli/list_read_send.rs:3038"
+source_lines = "tests/cli/list_read_send.rs:3102"
 target_function = "add paneのbackend引数map（src/zellij/process.rs new_pane）"
 source = "docs/design/detailed-design.md DD-11 add（pane: new-paneをcount回（--cwd/--name/--tab-id/-- commandをmap）） + docs/design/first/260821/requirements.md §2.7（count > 1 should be supported・allow creation associated with a named layout where appropriate）"
 description = "add paneのoption→backend argv map: --tab TABSPECは--tab-idへ・--nameは--nameへ・--cwdは--cwd PATHへ・`--`以降のcommandは`-- CMD...`へmapされる。cli-grammar.add-parse-emits-typed-argv（TASK-65）がcount複数回発行と--tab-id map（--name無し）を検証済みため、本条件は未検証の--cwd/--name/-- CMD...を単発count=1で担う（分担）。name連番suffix（count>1）はadd-remove.add-pane-count-and-postcondition（L2）が担う。`--`以降の引数境界（独立引数列。空白連結logでは不可視）はshim new-pane handler内検査で保護（誤結合実装でtestが赤になる）"
@@ -40,7 +40,7 @@ expect_return = "exit 0・FAKE_LOGにaction new-pane --tab-id 0 --name w --cwd /
 
 [[condition]]
 id = "add-remove.add-tab-layout-source-argv-map"
-source_lines = "tests/cli/list_read_send.rs:3076"
+source_lines = "tests/cli/list_read_send.rs:3140"
 target_function = "add tabのlayout source map（src/zellij/process.rs new_tab）"
 source = "docs/design/detailed-design.md DD-11 add（tab: --layoutは-l NAMEへ、--pathは-l PATHへ、--inlineは--layout-stringへmap） + docs/design/first/260821/requirements.md §2.7"
 description = "add tabのlayout source 3形式のmap先: --layoutは-l NAME・--pathは-l PATH・--inlineは--layout-string。3source併用の排他負例はadd-remove.add-tab-layout-sources-conflictが・count>1の連番suffixと途中失敗はadd系のL2条件が担う。本条件は3形式の正例argv mapを担う（shimのnew-tab handler〔TASK-67拡張: 採番id応答+tabs状態file反映〕でpostcondition通過させる）。単一値optionの引数境界（-l/--layout-stringの値が単一argv要素。空白連結logでは不可視）はshim new-tab handler内検査で保護（値分割実装でtestが赤になる）"
