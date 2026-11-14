@@ -654,6 +654,7 @@ M>N既定errorとoverflow指定漏れerrorは廃止。残る経路とclass:
 
 - pane: `new-pane`をcount回（`--cwd`/`--name`/`--tab-id`/`--`commandをmap）。戻りIDをresultsへ
 - tab: `new-tab`をcount回。`--layout`は`-l NAME`へ、`--path`は`-l PATH`へ、`--inline`は`--layout-string`へmap
+- **tab `--layout`の受理仕様（TASK-91）**: `--layout`の値はzellij `-l`へそのまま渡り（pass-through）、名前解決の探索責任はzellij側。zellij 0.44.3の`-l`はlayout名とfile path（相対・絶対）の双方を正規受理する（top-level `-l` help原文「Name of a predefined layout inside the layout directory or the path to a layout file」・action new-tab -lへpath 5種でrc=0/tab作成を実測）ため、'/'入り（や`.kdl`拡張子付き）の値はpathとして解決され`--path`と等価に機能する。**zellerは'/'入り値を拒否しない**（value_parserもapp層検査も適用しない。設計書: `tmp/tasks/tm-91/design_add-tab-layout-restriction.md`）。規範入力はlayout名（DD-1.2 grammarの`--layout NAME`表記は維持）で、path形式は互換入力。既知制限（探索先非一致）: layout一覧・remap読込はzellerが`ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`（DD-3.1）で読む一方、addの下流（action new-tab -l）の名前探索はHOME既定dir + `--layout-dir` flagのみでaction clientの`ZELLIJ_LAYOUT_DIR` envは届かない（TASK-91実測）ため、「一覧（`zelper list layouts`）に出る名前をaddへ渡してもzellij側で見つからない」「同名fileが双方のdirにあれば一覧・remapとaddで別内容を読む」が起こりうる（DD-3.1の「利用者は`ZELLIJ_LAYOUT_DIR`で一致させる」〔MR-4〕は一覧・remap読込の前提でありaction系の下流探索には成立しない。探索先の統一はTASK-102で分離）。remap側positionalの'/'拒否（`parse_layout_name`）はzeller自身がlayout fileを解決・読込する経路のため維持され、addとは機構が異なる。保証境界: zellerが保証するのは値を拒否・書換えせず`-l`へ渡すことまでで、受理形式・探索先などの下流規則はzellij 0.44.3で確認した事実（対応版更新時の再確認事項）
 - postcondition: list-panes/list-tabsで存在確認
 - 失敗: 作成済み分は残存させ、per-target結果報告（rollbackしない）
 

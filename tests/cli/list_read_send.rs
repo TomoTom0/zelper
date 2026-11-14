@@ -2661,8 +2661,10 @@ fn add_pane_option_argv_map() {
 /// add tabのlayout source map（DD-11: --layoutは-l NAMEへ、--pathは-l PATHへ、
 /// --inlineは--layout-stringへmap）: 3形式それぞれのmap先argvがFAKE_LOGで確認
 /// でき、shimのnew-tab handler（採番id応答+tabs状態file反映）により
-/// postcondition通過でexit 0する。--name連番suffixと排他負例（3source併用）は
-/// add-removeのL2既存条件が担う
+/// postcondition通過でexit 0する。(iv)は--layoutへのpath形式入力（'/'入り）が
+/// 拒否・書換えされず-lへ透過するzellerの契約検証（TASK-91: 適用しない決定。
+/// zellij -lがpathを正規受理するため。DD-11 tab --layout受理仕様）。
+/// --name連番suffixと排他負例（3source併用）はadd-removeのL2既存条件が担う
 // [covers:add-remove.add-tab-layout-source-argv-map]
 #[test]
 fn add_tab_layout_source_argv_map() {
@@ -2676,6 +2678,7 @@ fn add_tab_layout_source_argv_map() {
             vec!["--inline", "layout {}"],
             "new-tab --layout-string layout {}",
         ),
+        (vec!["--layout", "./x.kdl"], "new-tab -l ./x.kdl"),
     ]
     .iter()
     .enumerate()

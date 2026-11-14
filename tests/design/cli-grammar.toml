@@ -165,7 +165,7 @@ expect_return = "exit 0・FAKE_LOGに--session fake-sess action new-pane --tab-i
 
 [[condition]]
 id = "cli-grammar.remove-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2709"
+source_lines = "tests/cli/list_read_send.rs:2712"
 target_function = "removeのCLI parse（close-pane argv・--empty dry-run plan）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（remove tab --empty --dry-run） + DD-11（close-pane -p・close-tab-by-id・postcondition: 消失確認）"
 description = "remove verbのCLI parse表面: pane削除はclose-pane -p <spec> argvを発行し、shim状態の行除去によりpostcondition（消失確認）を通過する。tab --empty --dry-runは空tab（selectable pane 0個のtab）のみを対象にplan出力しclose-tab argvを発行しない。--empty TABSPEC解決・gate・部分失敗はadd-remove.toml（既存L2）が担う"
@@ -174,7 +174,7 @@ expect_return = "(i) exit 0・FAKE_LOGにaction close-pane -p terminal_1・stdou
 
 [[condition]]
 id = "cli-grammar.tab-and-all-filter-merge-positive"
-source_lines = "tests/cli/list_read_send.rs:2754"
+source_lines = "tests/cli/list_read_send.rs:2757"
 target_function = "対象解決のfilter併合（--tab × --all）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--tab（絞り込み）と--allは併合（--tab内のall）） + DD-1.4（--tab SPEC: tab指定・--all: 対象sessionの全selectable terminal pane）"
 description = "DD-1.5併用系の正例: --tabと--allの併合（--tab内のall）。--all単独なら全tab対象となるところを、--tab併合でそのtab内のみへ絞り込む（filter pool = selectable terminal pane → tab絞り込み → --allならname/command/cwd一致を適用しない）"
@@ -183,7 +183,7 @@ expect_return = "exit 0・resultsがterminal_3/terminal_4のみ（--all単独な
 
 [[condition]]
 id = "cli-grammar.dry-run-with-yes-note-output"
-source_lines = "tests/cli/list_read_send.rs:2807"
+source_lines = "tests/cli/list_read_send.rs:2810"
 target_function = "removeの--dry-run×--yes併用（注意行出力・dry-run優先）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--dry-runと--yesの併用は可（--yesは無視される旨を出力）） + MR-30（注意行出力の指摘）"
 description = "--dry-run×--yes併用の正例: 併用は可で--yesは無視され、その旨の注意行（stderr）を出力する。dry-runが優先されbackendのmutating呼出（close-pane）は不発・plan出力で終わる。add-remove.remove-pane-safety-gate（L2）が実行優先を検証済みに対し、本条件はL3の注意行出力・plan出力・非実行を担う"
@@ -192,7 +192,7 @@ expect_return = "exit 0・stderrに\"zelper: note: --yes is ignored when --dry-r
 
 [[condition]]
 id = "cli-grammar.completion-shell-variants"
-source_lines = "tests/cli/list_read_send.rs:2837"
+source_lines = "tests/cli/list_read_send.rs:2840"
 target_function = "completionサブコマンド（shell種別）"
 source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（clap_completeによる動的生成・stdoutへscript出力）"
 description = "completionのshell種別: zsh/fishもbashと同様に空でない補完scriptを出力し、内容はshell種別毎に相異する。非対応shell名（tcsh）はclap ValueEnum拒否でexit 2。検証限界: clap_complete::Shellの既定によりelvish/powershellも受理されるが、DD-1.7が文書化するのはbash|zsh|fishのため本条件では検証対象外"
@@ -255,7 +255,7 @@ expect_return = "(i)(ii) ともexit 2・stderrが\"cannot be used with\"を含�
 
 [[condition]]
 id = "cli-grammar.remap-tab-spec-parse-scopes-plan"
-source_lines = "tests/cli/list_read_send.rs:4003"
+source_lines = "tests/cli/list_read_send.rs:4006"
 target_function = "remap構文（--tab TABSPEC受理・main引き渡し）"
 source = "docs/design/detailed-design.md DD-1.2（remap [--tab TABSPEC]）・DD-1.3（TABSPEC = tab ID（整数）または一意なtab名）・DD-10.5/10.6（--tab時のscope絞り込み・anchor切替） + TASK-69 body（コードレビューminor-3対応）"
 description = "remap --tab TABSPECのparse表面: clapが--tab値を受理しmainからRemapArgs.tabへ引き渡される（remap-sequence.tomlのtab-spec系3条件はRemapArgs.tabへの直接代入のためこの段が未検証だった）。dry-run --jsonのplan出力で検証する: --tab build（一意名）指定時のdata.anchorが対象tab id（active tabでない）・data.sourceが対象tabのpaneのみ（他tabのpaneは載らない）・M/kが対象tabのsourceで立つ。plan実体（絞り込み・anchor・NoTarget・鋳型0単tab適用）はremap-sequence.tomlのtab-spec系3条件が管轄（本条件はparse・引き渡しの表面）。実装変更を伴わないためfail-firstでない（既存実装に対して緑）"
