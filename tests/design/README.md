@@ -12,7 +12,7 @@ mise run verify-conditions
 - mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
-## 条件書一覧（20 file・332条件）
+## 条件書一覧（20 file・334条件）
 
 verified列はmeta検証記録（verified = true）の実績値（TASK-97テスト先行のrenameは実装工程で全条件緑化後にtrueへ再記録済み——TASK-66のtab系3条件追加時もverified=trueを維持（実装変更を伴わないため）。TASK-93の4 file〔cli-grammar・list-display・backend-process・attach-detach〕・TASK-96のattach-detach追加分は実装工程で全条件緑化後にtrueへ再記録済み）。
 
@@ -30,7 +30,7 @@ verified列はmeta検証記録（verified = true）の実績値（TASK-97テス�
 | 10 | layout-planner | src/app/remap.rs | layout_planner（26件） | 26 | true |
 | 11 | layout-generator | src/layout/generator.rs | layout_generator（14件） | 14 | true |
 | 12 | companion-seed | src/companion.rs | companion_seed（14件） | 14 | true |
-| 13 | remap-sequence | src/app/remap.rs | fake_remap（50件〔TASK-69で--tab TABSPEC系3件を追加〕） | 50 | true |
+| 13 | remap-sequence | src/app/remap.rs | fake_remap（52件〔TASK-69で--tab TABSPEC系3件・TASK-70でlayout適用phase失敗・companion setup失敗系2件を追加〕） | 52 | true |
 | 14 | remap-cli | src/app/remap.rs | cli_remap（15件） | 15 | true |
 | 15 | docs-verb | src/app/docs.rs | cli_docs（9件） | 9 | true |
 | 16 | backend-process | src/zellij/process.rs | lib src/zellij/process.rs（9件） | 9 | false（TASK-93 fail-first） |
@@ -128,7 +128,7 @@ TASK-81（DD-10 2026-09-19改訂: cwd注入・reconciliation・dup close・dry-r
 ## 範囲明示（対象外資産・特別扱い）
 
 - 付け漏れ検出対照表（`tmp/20260913_bootstrap_conditions_task54/`）: 使い捨ての移行限定資産。`--complete`（検査(f)）有効化により用途を終えている（対照表diff運用は移行中のみ。設計書§5.5）。残置のみとし削除しない
-- `tests/fake_backend/fake.rs`: test支援資産（fake backend実装）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
+- `tests/fake_backend/fake.rs`: test支援資産（fake backend実装——TASK-70追加の失敗注入fail_override_layout_nth / fail_companion_wasm_extract / fail_companion_permissions_seed〔未設定時は従来挙動不変〕を含む）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
 - `tests/fixtures/`（`tests/fixtures/zellij/*.json`等）: fixtures。scanner走査対象外
 - L4統合test harness（podman・実zellij）: repo管理外。要件・実施記録は`docs/testing/test-plan.md`のL4節へ集約（設計書§6.1）。該当要求は各条件書の`[[excluded]]`から参照行で指す
 - lib内test: `src/app/list.rs`の3件はlist-display.tomlが、`src/zellij/process.rs`の9件はbackend-process.tomlが管轄する（いずれもsrc/のままtag付けしfile移動しない。設計書§4.3）

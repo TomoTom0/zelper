@@ -4,7 +4,7 @@
 
 ## 構成（file → 条件書の索引）
 
-- `design/` — テスト設計条件書20file・332条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
+- `design/` — テスト設計条件書20file・334条件（正本）+ README.md（条件書一覧・R番号→条件id対応表・範囲明示）
 - `unit/` — L1 純粋ロジック
   - `selector.rs` — selector.toml（対象解決。10条件）
   - `parser.rs` — backend-parser.toml（zellij出力parse。8条件）
@@ -16,14 +16,14 @@
   - `remap.rs` — remap-cli.toml（15条件。dry-run multi-tab拡張・JSON n=S互換・preflight warning伝達経路〔preflight-warning-paths-stderr-and-json〕・TASK-81のdry-run floating緩和・KDL preview cwd・error.data拡張・成功data.closed_duplicatesを含む。shimはFAKE_DUP_AFTER_OVERRIDEでdup spawnのemulationも持つ）
   - `docs.rs` — docs-verb.toml（9条件。TASK-88のmove文法記載・verb set v2=12配布物記載2件を含む。`[[test]]`宣言必須: tests/直下以外の自動target化に注意）
 - `fake_backend/` — L2 決定的fake backend
-  - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入・watch用のdump_frames/dump_fail_after/dump_full_frames注入・move用のmove_pane/move_tab emulation〔M1/M2/m8実測基準値: 幾何隣接則による交換相手選択・rotateは対象と前後1交換〔wrap〕・focus遷移則・edge no-op・tab移動wrap〕とmute_break_id_nth/rename_moved_pane_after_break_nth/mute_move_tab/hide_pane_in_lenient_after_break/vanish_tab_after_move_tab注入〔未設定時は従来挙動不変〕。test支援資産でtag対象外）
+  - `fake.rs` — FakeBackend本体（状態持ち・呼び出し記録・失敗注入・move phase後のtab id入れ替え/消失注入・watch用のdump_frames/dump_fail_after/dump_full_frames注入・move用のmove_pane/move_tab emulation〔M1/M2/m8実測基準値: 幾何隣接則による交換相手選択・rotateは対象と前後1交換〔wrap〕・focus遷移則・edge no-op・tab移動wrap〕とmute_break_id_nth/rename_moved_pane_after_break_nth/mute_move_tab/hide_pane_in_lenient_after_break/vanish_tab_after_move_tab・TASK-70のfail_override_layout_nth/fail_companion_wasm_extract/fail_companion_permissions_seed注入〔未設定時は従来挙動不変〕。test支援資産でtag対象外）
   - `rename_add_remove.rs` — rename.tomlのうちL2 12条件（pane 3 + tab 2 + session L2 7）+ add-remove.toml（9）の21条件（tab L2 2件はTASK-66: 成功系〔TABSPEC=ID/一意名両case・呼出列list-tabs → rename-tab <id> <name> → list-tabs完全一致〕・silent no-op検出〔mute_rename_tab注入。別ID tabが既に新名を保有する構成でpostconditionのID照合（t.id == tid && t.name == name）を保護〕。add L2部分失敗2件はTASK-67: add〔pane/tab×途中失敗/初回失敗の3 case・created so far報告・作成済み残存〕・remove〔pane/tab×2番目失敗・PartialFailure exit 6・results[]・残対象続行〕。session L2はTASK-95テスト先行+TASK-97テスト先行: 状態書き換え〔exited不変〕・mute黙失敗のpostcondition検出〔VerificationFailed〕・呼出失敗〔OperationFailed〕・事後list失敗class保持〔but failed to confirm〕・空白含み新名拒否〔世界modelで復元不能のためUsage事前拒否〕・先頭`-`新名拒否〔TASK-97: 検査順固定（先頭`-`は'/'・whitespace後・同一名differ前）と旧NAME="-x"一覧存在時のbackend到達契約保護〕・postcondition両判定の独立保護〔コードレビュー指摘2〕。検査優先順位固定〔不在/EXITEDがNEW_NAME衝突に優先〕の複合違反testも本file。rename.tomlのL3 8条件（tab 1件含む）は cli/list_read_send.rs。fake.rsのrename_session〔record rename-session@{from} {to}+sessions行書き換え〕・mute_rename_session / fail_list_sessions_after_rename / rename_post_inject注入も参照）
   - `resize.rs` — resize.toml（8条件。TASK-68: equalize --tab TABSPEC指定〔TABSPEC一意名/ID両caseで対象tabのpane群を選択・exited/floating paneは除外〕）
   - `companion_seed.rs` — companion-seed.toml（14条件。tempdir実file。lock fileは残留期待〔concurrent-seeds・stale-lock-file-tolerated-and-retained〕・r26/c4で恒久lock file許容）
   - `watch.rs` — watch.toml（16条件のうちloop系6件: t0即時poll・any-hit tie-break・--regex opt-in・--full転送・interval sleep/試行回数・pane障害除外継続。文法・出力契約・exit分類の10件はcli/list_read_send.rs。TASK-86）
   - `attach.rs` — attach-detach.toml（18条件のうちL2層5件: attach成功報告契約〔tty_ok注入〕・detach no-op成功・add session一覧取得失敗2系〔TASK-93: fail_op事前確認失敗・postcheck arm事後確認失敗〕・add session NAME検査fail-fast〔TASK-96: backend呼出ゼロ・Unicode空白・複合違反の優先順位〕。run_interactive系2件はlib src/zellij/process.rs・L3層11件はcli/list_read_send.rs。TASK-89。fake.rsのsession状態管理〔create_session_detachedでNAMEをlist_sessionsへ追加〕・mute_create_session・fail_list_sessions_after_create注入も参照）
   - `remove_session.rs` — remove-session.toml（21条件のうちL2層5件。TASK-84テスト先行: 常時gate〔単一NAMEでも--yes/--dry-run必須〕・postcondition 2系〔still listed is failure・事後list失敗のclass保持伝播〕・NAME重複除去〔指定順保持・報告1回〕・EXITED行受理〔dead経路で実行〕。L3層16件はcli/list_read_send.rs。fake.rsのsession状態管理拡張〔delete_sessionでsessionsから行削除・mute_delete_session / fail_list_sessions_after_delete注入・set_sessions fixture差し替え〕も参照）
-  - `remap.rs` — remap-sequence.toml（50条件。TASK-69: --tab TABSPEC絞り込み3件〔source/anchorの対象tab scope・解決不能TABSPECはNoTarget・first template単tab適用〕。multi-tab移動系列・空group new-tab --layout-string・focus-pane-id・最終go-to・per-tab検証・leftover・M=0・tab id再解決〔tab-id-resolution-lenient-before-apply〕・embed-floating-exited-held-excluded-from-floating-setを含む。r41はerror.data拡張assert・r47/template-invalidはfocus-pane-id/new-tab不発生assert。TASK-81のreconciliation系13条件〔安定観測・反転・dup close・closed_duplicates報告・(e')(e'')・dry-run緩和・E2E改訂F1/F2の押し出し割り込み・held化dup回収・再E2E R1の同一cwd曖昧tie-break・R2の対象tab内source外held pane報告〕を含む。fake.rsのFakeRun side-table・invoked_with等値matcher〔find_already_running_panes模倣〕・derive互換・bare slot spawn dupのpane_cwd注入も参照）
+  - `remap.rs` — remap-sequence.toml（52条件。TASK-69: --tab TABSPEC絞り込み3件〔source/anchorの対象tab scope・解決不能TABSPECはNoTarget・first template単tab適用〕。TASK-70: layout適用phase失敗（fail_override_layout_nth注入）・companion setup失敗（fail_companion_wasm_extract / fail_companion_permissions_seed注入）の報告2件。multi-tab移動系列・空group new-tab --layout-string・focus-pane-id・最終go-to・per-tab検証・leftover・M=0・tab id再解決〔tab-id-resolution-lenient-before-apply〕・embed-floating-exited-held-excluded-from-floating-setを含む。r41はerror.data拡張assert・r47/template-invalidはfocus-pane-id/new-tab不発生assert。TASK-81のreconciliation系13条件〔安定観測・反転・dup close・closed_duplicates報告・(e')(e'')・dry-run緩和・E2E改訂F1/F2の押し出し割り込み・held化dup回収・再E2E R1の同一cwd曖昧tie-break・R2の対象tab内source外held pane報告〕を含む。fake.rsのFakeRun side-table・invoked_with等値matcher〔find_already_running_panes模倣〕・derive互換・bare slot spawn dupのpane_cwd注入も参照）
   - `move.rs` — move.toml（24条件。TASK-88+REVIEW-3: native系argv形式（M1実配置の全pane照合）〔move-pane <dir> -p / move-pane -p / move-pane-backwards -p〕・edge no-op検出・companion系実行sequence〔permissions seed→probe→break-id〕・no-op/不在/曖昧・floating/plugin pane preflight・pane交換の順序規則〔singleton判定〕・同一tab/両singleton拒否・部分失敗報告・tab交換の隣接transposition合成〔2d-1回〕・postcondition検証〔pane id不変・position交換〕・backend失敗・REVIEW-3追加（probe効果抑制と送信失敗の分離・timeout時の再取得による移動済み/未移動/確認不能の正確報告・tab交換途中消滅の部分進捗報告）。polling timeout系3条件は10s deadlineを実時間消費〔fake_remap r36と同一方式〕）
 - `fixtures/zellij/` — 実zellij 0.44.3出力fixture 11file: panes.json / tabs.json（汎用）・panes-three.json（3 pane基本remap）・panes-remap.json / tabs-remap.json（remap dry-run）・panes-hetero.json / tabs-hetero.json（M=15・T=3 dry-run検証用の合成fixture）・panes-floating.json（TASK-81: 3 tiled + selectable floating terminal）・panes-cwd.json（TASK-81: terminal_command+pane_cwd付きpane）・panes-two.json（TASK-81: M=2<N=3検証失敗系列）・panes-three-dup.json（TASK-81: dup pane入り・FAKE_DUP_AFTER_OVERRIDEと併用）
 
@@ -36,8 +36,8 @@ lib内test 14件（`src/app/list.rs` 3件・src/zellij/process.rs 11件〔TASK-8
 ## 実行
 
 ```bash
-cargo test          # L1〜L3（333テスト）
-mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。332条件でexit 0）
+cargo test          # L1〜L3（335テスト）
+mise run verify-conditions   # 条件書の機械検証（id対応・網羅・schema・付け漏れ--complete込み。334条件でexit 0）
 cargo clippy --all-targets && cargo fmt --check   # lint
 # L4はrepo管理外のharnessで実行（構成はdocs/testing/test-plan.md §1・要件は§3）
 # 注: zellij session内で実行してもテストは隔離済み（ZELLIJ_SESSION_NAMEを除去）
