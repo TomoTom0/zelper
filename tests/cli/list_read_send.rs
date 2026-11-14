@@ -2580,6 +2580,71 @@ fn resize_parse_emits_typed_argv() {
     assert!(stdout.contains("approximate"), "stdout: {stdout}");
 }
 
+/// resize equalizeの対象指定排他（DD-1.2 grammar・DD-1.5）: PANESPEC群と--tabの
+/// 併用はusage error（exit 2・clap標準文面）。対照正例（--tab単独）はtab 1の
+/// terminal_3/4へequalizeを適用（action resize呼出）してexit 0
+// [covers:cli-grammar.resize-equalize-tab-panes-conflict-is-usage-error]
+#[test]
+fn resize_equalize_tab_panes_conflict_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // tab 1所属・同一rowのterminal_3/4（cols=10/30）。--tab 1のID解決には
+    // list-tabs応答にtab_id=1の行が必要なためFAKE_TABS_JSONを併用
+    // （既定fixtureのtabs.jsonはtab 0のみ）
+    let panes = format!(
+        "[{},{}]",
+        pane_json(3, "agent-c", 0, 10, 1),
+        pane_json(4, "agent-d", 10, 30, 1)
+    );
+    let tabs = format!(
+        "[{},{}]",
+        tab_json(0, "Tab #1", 2, 0),
+        tab_json(1, "Tab #2", 2, 1)
+    );
+    // (i) positional先・(ii) option先: いずれも同一parse結果（panes=[3]・tab=1）
+    // となるため両方検出。usage errorはparse段成立だが、現行実装の黙誤動作
+    // （--tab黙無視のPANESPEC経路・terminal_3単独no-opのexit 0）と切り分ける
+    // ため同一fixtureを負例にも適用する（fail-first: 現行はexit 0で赤）
+    let cases: [&[&str]; 2] = [
+        &["resize", "equalize", "3", "--tab", "1"],
+        &["resize", "equalize", "--tab", "1", "3"],
+    ];
+    for (i, args) in cases.iter().enumerate() {
+        let (mut cmd, log) = zelper(&format!("resize-eq-tab-conflict-{i}"));
+        cmd.env("FAKE_PANES_JSON", &panes)
+            .env("FAKE_TABS_JSON", &tabs)
+            .args(args.to_vec())
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicates::str::contains("cannot be used with"));
+        assert!(
+            !calls(&log).iter().any(|c| c.contains(" action resize ")),
+            "case {i} calls: {:?}",
+            calls(&log)
+        );
+    }
+    // 対照正例: --tab単独はexit 0でtab 1のterminal_3/4へequalize適用
+    // （cols=10/30→目標20との振動・静的幾何のno-progress打切り）
+    let (mut cmd, log) = zelper("resize-eq-tab-conflict-ok");
+    cmd.env("FAKE_PANES_JSON", &panes)
+        .env("FAKE_TABS_JSON", &tabs)
+        .args(["resize", "equalize", "--tab", "1"])
+        .assert()
+        .success();
+    let resize_calls: Vec<String> = calls(&log)
+        .into_iter()
+        .filter(|c| c.contains(" action resize "))
+        .collect();
+    assert!(
+        resize_calls.iter().any(|c| c.contains("-p terminal_3")),
+        "calls: {resize_calls:?}"
+    );
+    assert!(
+        resize_calls.iter().any(|c| c.contains("-p terminal_4")),
+        "calls: {resize_calls:?}"
+    );
+}
+
 /// add pane verbのCLI parse表面: --count 2はnew-pane --tab-id 0を2回発行し、
 /// shimの採番応答（terminal_3/4）とpostcondition存在確認を通過してexit 0
 // [covers:cli-grammar.add-parse-emits-typed-argv]

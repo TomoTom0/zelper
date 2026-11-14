@@ -3,12 +3,12 @@
 [meta]
 feature = "cli-grammar"
 source_file = "src/cli.rs"
-verified = true
-verified_at = "2026-11-12"
-verified_by = "claude"
-test_command = "cargo test --test cli_list_read_send"
+verified = false
+verified_at = ""
+verified_by = ""
+test_command = ""
 source_hash = "e7707d6ceed482e9dff3fb5ead235a05dfe14661"
-note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）・Remap::layoutへvalue_parser適用（remap-positional-path条件の緑化）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象。TASK-93（2026-11-12）条件書更新: session-flag-missing-name-notargetを追加（D3: --session不在名はresolve_session の事前存在確認でNoTarget。EXITED名は存在扱いで通過）・session-multiple-and-none-running-errorへFAKE_SESSIONS_EMPTY第三構成を追加（D1 decode後は完全0件もNoTarget。shimの0件文面はstderr化済み）・session-flag-priority-and-env-resolutionへenv解決経路のlist-sessions不呼出assertを追加（D3適用範囲限定の回帰検出）。テスト先行のため新規・更新分はfail-first状態（src/cli.rs自体は不変・resolve_session〔src/app/mod.rs〕が未実装でsession-flag-missing-name-notargetとsession-multiple第三構成が赤）——（当時記録。TASK-93実装〔resolve_sessionの事前存在確認〕で全条件緑化・cargo test --test cli_list_read_send 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕。verified/verified_at/verified_by/source_hashはTASK-93実装に対する最終検証記録へ更新）"
+note = "TASK-65でexcluded 8件を条件化（14条件追加・11→25条件）・Remap::layoutへvalue_parser適用（remap-positional-path条件の緑化）。shimのFAKE_PANES_JSON系（pane状態管理・FAKE_NEW_PANE_TEMPLATE）はTASK-83（test shimのFAKE_* env機構統一）でremap.rs側FAKE_PANES（fixture file選択）とともに整理対象。TASK-93（2026-11-12）条件書更新: session-flag-missing-name-notargetを追加（D3: --session不在名はresolve_session の事前存在確認でNoTarget。EXITED名は存在扱いで通過）・session-multiple-and-none-running-errorへFAKE_SESSIONS_EMPTY第三構成を追加（D1 decode後は完全0件もNoTarget。shimの0件文面はstderr化済み）・session-flag-priority-and-env-resolutionへenv解決経路のlist-sessions不呼出assertを追加（D3適用範囲限定の回帰検出）。テスト先行のため新規・更新分はfail-first状態（src/cli.rs自体は不変・resolve_session〔src/app/mod.rs〕が未実装でsession-flag-missing-name-notargetとsession-multiple第三構成が赤）——（当時記録。TASK-93実装〔resolve_sessionの事前存在確認〕で全条件緑化・cargo test --test cli_list_read_send 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕。verified/verified_at/verified_by/source_hashはTASK-93実装に対する最終検証記録へ更新）。TASK-100（2026-11-14）テスト先行: resize-equalize-tab-panes-conflict-is-usage-errorを追加（26条件。--tab×PANESPEC排他のD3構成。src/cli.rsのEqualizeへのclap conflicts_with属性付与〔実装工程〕まで(i)(ii)は現行実装の--tab黙無視PANESPEC経路exit 0により赤・対照正例〔--tab単独〕は現行でも緑。verifiedはTASK-100実装完了後に再記録。src/cli.rs変更時にsource_hash再記録必要）"
 
 [[condition]]
 id = "cli-grammar.session-auto-resolve-single-live-with-exited"
@@ -156,7 +156,7 @@ expect_return = "(i) exit 0・FAKE_LOGにaction resize -p terminal_1 increase le
 
 [[condition]]
 id = "cli-grammar.add-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2585"
+source_lines = "tests/cli/list_read_send.rs:2650"
 target_function = "add paneのCLI parse（clap → backend argv・postcondition通過）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（add pane --count 2 --tab 4） + DD-11（new-pane --tab-id・postcondition: 作成IDの存在確認）"
 description = "add pane verbのCLI parse表面: --count Nはnew-pane argvをN回発行し（--tab TABSPECは--tab-idへ写像・--name無し）、shimの採番応答（terminal_N）とpostcondition（作成ID存在確認）を通過してexit 0する。検証限界: --cwd/--name連番suffix/-- CMDのoption mapと部分失敗はadd-remove.toml（L2側）が担う"
@@ -165,7 +165,7 @@ expect_return = "exit 0・FAKE_LOGに--session fake-sess action new-pane --tab-i
 
 [[condition]]
 id = "cli-grammar.remove-parse-emits-typed-argv"
-source_lines = "tests/cli/list_read_send.rs:2706"
+source_lines = "tests/cli/list_read_send.rs:2771"
 target_function = "removeのCLI parse（close-pane argv・--empty dry-run plan）"
 source = "docs/testing/test-plan.md §2.1 + docs/design/detailed-design.md DD-1.6（remove tab --empty --dry-run） + DD-11（close-pane -p・close-tab-by-id・postcondition: 消失確認）"
 description = "remove verbのCLI parse表面: pane削除はclose-pane -p <spec> argvを発行し、shim状態の行除去によりpostcondition（消失確認）を通過する。tab --empty --dry-runは空tab（selectable pane 0個のtab）のみを対象にplan出力しclose-tab argvを発行しない。--empty TABSPEC解決・gate・部分失敗はadd-remove.toml（既存L2）が担う"
@@ -174,7 +174,7 @@ expect_return = "(i) exit 0・FAKE_LOGにaction close-pane -p terminal_1・stdou
 
 [[condition]]
 id = "cli-grammar.tab-and-all-filter-merge-positive"
-source_lines = "tests/cli/list_read_send.rs:2751"
+source_lines = "tests/cli/list_read_send.rs:2816"
 target_function = "対象解決のfilter併合（--tab × --all）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--tab（絞り込み）と--allは併合（--tab内のall）） + DD-1.4（--tab SPEC: tab指定・--all: 対象sessionの全selectable terminal pane）"
 description = "DD-1.5併用系の正例: --tabと--allの併合（--tab内のall）。--all単独なら全tab対象となるところを、--tab併合でそのtab内のみへ絞り込む（filter pool = selectable terminal pane → tab絞り込み → --allならname/command/cwd一致を適用しない）"
@@ -183,7 +183,7 @@ expect_return = "exit 0・resultsがterminal_3/terminal_4のみ（--all単独な
 
 [[condition]]
 id = "cli-grammar.dry-run-with-yes-note-output"
-source_lines = "tests/cli/list_read_send.rs:2804"
+source_lines = "tests/cli/list_read_send.rs:2869"
 target_function = "removeの--dry-run×--yes併用（注意行出力・dry-run優先）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: 併用系の正例） + docs/design/detailed-design.md DD-1.5（--dry-runと--yesの併用は可（--yesは無視される旨を出力）） + MR-30（注意行出力の指摘）"
 description = "--dry-run×--yes併用の正例: 併用は可で--yesは無視され、その旨の注意行（stderr）を出力する。dry-runが優先されbackendのmutating呼出（close-pane）は不発・plan出力で終わる。add-remove.remove-pane-safety-gate（L2）が実行優先を検証済みに対し、本条件はL3の注意行出力・plan出力・非実行を担う"
@@ -192,7 +192,7 @@ expect_return = "exit 0・stderrに\"zelper: note: --yes is ignored when --dry-r
 
 [[condition]]
 id = "cli-grammar.completion-shell-variants"
-source_lines = "tests/cli/list_read_send.rs:2834"
+source_lines = "tests/cli/list_read_send.rs:2899"
 target_function = "completionサブコマンド（shell種別）"
 source = "docs/testing/test-plan.md §2.1（completion bash|zsh|fishが空でない補完scriptを出力） + docs/design/detailed-design.md DD-1.7（clap_completeによる動的生成・stdoutへscript出力）"
 description = "completionのshell種別: zsh/fishもbashと同様に空でない補完scriptを出力し、内容はshell種別毎に相異する。非対応shell名（tcsh）はclap ValueEnum拒否でexit 2。検証限界: clap_complete::Shellの既定によりelvish/powershellも受理されるが、DD-1.7が文書化するのはbash|zsh|fishのため本条件では検証対象外"
@@ -243,4 +243,13 @@ source = "tmp/tasks/tm-87/design_verb-extension.md §1.1（verb set v2 = 12: 既
 description = "helpのCommands一覧への新verb出現: TASK-86/87/88で追加されたwatch・attach・detach・moveが`zelper --help`のCommands一覧に現れる（TASK-86/89はverb表への追記のみでhelp出現条件が未条件化だったためTASK-88が継承して条件化）"
 given = "zelper --help の実行"
 expect_return_shape = "exit 0かつstdoutがmove・attach・detach・watchの4語をすべて含む"
+
+[[condition]]
+id = "cli-grammar.resize-equalize-tab-panes-conflict-is-usage-error"
+source_lines = "tests/cli/list_read_send.rs:2586"
+target_function = "resize排他規則（equalize: PANESPEC群 × --tab）"
+source = "docs/design/detailed-design.md DD-1.2（grammar: [--tab TABSPEC | PANESPEC...]の|は排他）+ DD-1.5（排他規則。TASK-100 D4で追加行）+ tmp/tasks/tm-68/codex_review_impl.log major-3（起票経緯。設計: tmp/tasks/tm-100/design_equalize-exclusive.md D1/D2/D3）"
+description = "equalizeの対象指定（PANESPEC群 / --tab）の相互排他の負荷側: 併用はclap属性（conflicts_with）によるparse段拒否でusage error（exit 2・clap標準文面。--json指定時もclap形式のまま）。現行実装は排他指定がなくPANESPEC群を優先して--tabを黙無視する（意図しないpane操作の黙誤動作）ためfail-first条件。PANESPEC 0個+--tab（TASK-68・resize.toml L2が担当）とPANESPEC群+--tabなし（cli-grammar.resize-parse-emits-typed-argvが担当）の各正常系は不変"
+given = "FAKE_PANES_JSON（tab 1所属・同一row・cols=10/30のterminal_3/4）+ FAKE_TABS_JSON（tab 0/1の2行。--tab 1のID解決に必要）で (i) zelper resize equalize 3 --tab 1（positional先） (ii) zelper resize equalize --tab 1 3（option先） (iii) 対照正例 zelper resize equalize --tab 1（--tab単独）の各実行"
+expect_return = "(i)(ii) ともexit 2・stderrが\"cannot be used with\"を含む・action resize argvは不発（parse段拒否・backend呼出ゼロ）。(iii) exit 0（.success()）かつFAKE_LOGにtab 1のterminal_3/terminal_4へのaction resize呼出（equalize適用）。fail-first: (i)(ii)は現行実装（排他なし・--tab黙無視のPANESPEC経路）ではterminal_3単独no-opのequalize成功でexit 0となるため赤（exit 2期待に対しexit 0）"
 
