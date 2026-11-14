@@ -21,29 +21,52 @@ pub fn parse_version(out: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
+/// zellij 0.44.3 `print_sessions`（`-n`形式）の行末suffix。排他一択で
+/// `[Created ...]`節の後の行末に置かれる。文言・構造の変更は形式変化であり
+/// DD-3.5 compatibility policy（実証済みは0.44.3のみ）の再実証対象
+const CURRENT_SUFFIX: &str = "(current)";
+const EXITED_SUFFIX: &str = "(EXITED - attach to resurrect)";
+/// 生成節の開始marker。0.44.3では無条件で常に存在しname直後に置かれる
+const CREATED_MARKER: &str = "[Created ";
+
 /// `list-sessions -n`テキスト（例: `zelper-p1-basic [Created 10s ago]`）→ SessionRef列
 /// 実行形式は `NAME [Created X ago]` + suffix（なし / `(current)` /
 /// `(EXITED - attach to resurrect)`）。EXITED行もparseして返す（resurrection待ちの
 /// dead session）。実行中のみへの絞り込みは呼び出し側の責務
+///
+/// 生成metadata（exited/current/created）の抽出は行末anchor（TASK-99）:
+/// 0.44.3の`print_sessions`は`[Created ...]`節を無条件でname直後に置き、
+/// suffixをその後の行末へ置くため、名前が行区切り（改行）を含まない限り
+/// 名前内容は行末に来得ない。ends_with/rfind系判定により、名前の2語目以降に
+/// marker部分文字列（EXITED・`(current)`・`[Created`）を含む行でもfieldは汚染
+/// されない（trim_endはsuffixなし行の行末空白対応）
 pub fn parse_sessions(out: &str) -> Vec<SessionRef> {
     out.lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| {
-            let mut words = l.split_whitespace();
+            let t = l.trim_end();
+            let mut words = t.split_whitespace();
             let name = words.next()?;
-            let rest = words.collect::<Vec<_>>().join(" ");
-            // `[Created 1m 45s ago]` → `1m 45s ago`（"Created " prefixを除去）
-            let created = rest.find('[').and_then(|start| {
-                rest[start + 1..]
+            // `[Created 1m 45s ago]` → `1m 45s ago`（"Created " prefixを除去）。
+            // 生成節はname直後に常に存在するため最後尾出現（rfind）が真の生成節
+            // （名前が`[Created ...]`字面を含む場合の名前側の出現でない）。
+            // marker不在行はNone（find('[') heuristicへは戻さない——名前側'['の誤抽出）
+            let created = t.rfind(CREATED_MARKER).and_then(|start| {
+                t[start + 1..]
                     .split(']')
                     .next()
-                    .map(|inner| inner.strip_prefix("Created ").unwrap_or(inner).to_string())
+                    .map(|inner| {
+                        inner
+                            .strip_prefix("Created ")
+                            .unwrap_or(inner)
+                            .to_string()
+                    })
             });
             Some(SessionRef {
                 name: name.to_string(),
                 created,
-                current: rest.contains("(current)"),
-                exited: rest.contains("EXITED"),
+                current: t.ends_with(CURRENT_SUFFIX),
+                exited: t.ends_with(EXITED_SUFFIX),
             })
         })
         .collect()
