@@ -3,13 +3,14 @@
 検証条件の正本は`tests/design/`の各条件書（`<stem>.toml`）である（test-structure skill準拠）。
 要件定義・設計から条件を執筆し、testを`// [covers:<id>]`tagで条件に紐付ける。
 
-機械検証（id対応・網羅・schema・source_lines自動同期・excluded構造）の実行方法:
+機械検証（id対応・網羅・schema・source_lines自動同期・excluded構造・meta.source_hash突合）の実行方法:
 
 ```
 mise run verify-conditions
 ```
 
-- mise taskは`--strict-source --complete`付き（検査(f)付け漏れを含む全検査。設計書§5.1/§9.6）
+- mise taskは`--strict-source --complete`付き（検査(g)付け漏れを含む全検査。設計書§5.1/§9.6）
+- source_hash突合（検査(f)）: `meta.source_hash`（非空）と`git hash-object --no-filters`実測値の不一致はverified値に依らずfail。hash空欄はverified値と連動（false=warn・true=fail）
 - 実行は`uv run --no-project scripts/design/verify-conditions.py`（直接python実行しない）
 
 ## 条件書一覧（20 file・350条件）
@@ -127,7 +128,7 @@ TASK-81（DD-10 2026-09-19改訂: cwd注入・reconciliation・dup close・dry-r
 
 ## 範囲明示（対象外資産・特別扱い）
 
-- 付け漏れ検出対照表（`tmp/20260913_bootstrap_conditions_task54/`）: 使い捨ての移行限定資産。`--complete`（検査(f)）有効化により用途を終えている（対照表diff運用は移行中のみ。設計書§5.5）。残置のみとし削除しない
+- 付け漏れ検出対照表（`tmp/20260913_bootstrap_conditions_task54/`）: 使い捨ての移行限定資産。`--complete`（検査(g)）有効化により用途を終えている（対照表diff運用は移行中のみ。設計書§5.5）。残置のみとし削除しない
 - `tests/fake_backend/fake.rs`: test支援資産（fake backend実装——TASK-70追加の失敗注入fail_override_layout_nth / fail_companion_wasm_extract / fail_companion_permissions_seed〔未設定時は従来挙動不変〕を含む）でtest fnなし。tag対象外・scanner走査には含まれるがtag検査の対象にならない
 - `tests/fixtures/`（`tests/fixtures/zellij/*.json`等）: fixtures。scanner走査対象外
 - L4統合test harness（podman・実zellij）: repo管理外。要件・実施記録は`docs/testing/test-plan.md`のL4節へ集約（設計書§6.1）。該当要求は各条件書の`[[excluded]]`から参照行で指す

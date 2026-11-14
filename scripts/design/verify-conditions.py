@@ -14,7 +14,12 @@ tests/design/の条件書（*.toml）とcovers tag（`// [covers:<id>]`）の機
       in-memoryでparse検証し、pass時のみ書込み（meta等の他fieldには触れない）
   (e) [[excluded]]構造: item/source/reason非空・decided_atのYYYY-MM-DD形式・
       decided_byの値域（claude/human/codex）。空配列は許容
-  (f) --complete時のみ: #[test]を持つ全fn（tests/・src/・plugin/src/）への
+  (f) meta.source_hash突合: 作業treeのsource_file生bytesのgit blob hash
+      （git hash-object --no-filters相当）と記録値の突合。source_file空欄は
+      沈黙skip・disk不在はskip+warn・読み取り不能は理由付きfail。
+      hash空欄はverified値と連動（false=warn・true=fail）・非空の不一致は
+      verifiedに依らずfail（warnはexit codeに影響しない）
+  (g) --complete時のみ: #[test]を持つ全fn（tests/・src/・plugin/src/）への
       tag付け漏れ検出
 
 起動: uv run --no-project scripts/design/verify-conditions.py [options]
@@ -27,6 +32,7 @@ tmp/使い捨ての対照表生成にのみ使用するため実害なし（設�
 """
 
 import argparse
+import hashlib
 import os
 import re
 import sys
@@ -77,6 +83,7 @@ CHECK_ORDER = (
     "dangling-tag",
     "coverage",
     "schema",
+    "source-hash",
     "excluded",
     "source-lines",
     "untagged",
@@ -266,15 +273,74 @@ def check_excluded(add, tname, ex):
         add("excluded", tname, "-", f"decided_by '{db}' はclaude/human/codexのいずれかでない")
 
 
+def check_source_hash(add, warn, tname, meta):
+    """[meta].source_hashと作業tree実測値の突合（skill §4(f)）。
+
+    実測値はsource_fileの生bytesに対するgit blob hash
+    （sha1(b"blob <size>\\0" + bytes)）。git hash-object --no-filtersと
+    同一計算のためsubprocessは使わない。
+    """
+    src = meta.get("source_file")
+    if not isinstance(src, str) or not src.strip():
+        return  # source_file空欄は沈黙skip
+    path = REPO_ROOT / src
+    if not path.exists():
+        warn(
+            "source-hash",
+            tname,
+            "-",
+            f"source_file '{src}' が作業treeに存在しない（突合skip）",
+        )
+        return
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        add("source-hash", tname, "-", f"source_file読み取り不能: {e}")
+        return
+    actual = hashlib.sha1(b"blob %d\x00" % len(data) + data).hexdigest()
+    recorded = meta.get("source_hash")
+    if not isinstance(recorded, str) or not recorded.strip():
+        if meta.get("verified") is True:
+            add(
+                "source-hash",
+                tname,
+                "-",
+                "source_hash空欄（verified=trueのためfail。git hash-object "
+                "--no-filters実測値を記録して再検証する）",
+            )
+        else:
+            warn(
+                "source-hash",
+                tname,
+                "-",
+                "source_hash空欄（verified=falseのためwarn。緑化確認後に"
+                "実測値を記録する）",
+            )
+        return
+    if recorded != actual:
+        add(
+            "source-hash",
+            tname,
+            "-",
+            f"meta.source_hash mismatch: recorded={recorded} actual={actual}"
+            "（verified値に依らずfail）",
+        )
+
+
 def check_design(args, refs):
     """tests/design/*.tomlを検査する。
 
-    returns: (fails, toml_files, texts, parsed_ok, n_conditions, n_excluded)
+    returns: (fails, warns, toml_files, texts, parsed_ok, n_conditions,
+    n_excluded)
     """
     fails = []
+    warns = []
 
     def add(check, target, ident, detail):
         fails.append((check, target, ident, detail))
+
+    def warn(check, target, ident, detail):
+        warns.append((check, target, ident, detail))
 
     toml_files = sorted(DESIGN_DIR.glob("*.toml"))
     texts = {}
@@ -315,6 +381,7 @@ def check_design(args, refs):
                 )
             if "verified" in meta and not isinstance(meta["verified"], bool):
                 add("schema", tname, "-", "[meta].verifiedはbool（true/false）")
+            check_source_hash(add, warn, tname, meta)
 
         for cond in as_list(data.get("condition")):
             n_conditions += 1
@@ -344,7 +411,7 @@ def check_design(args, refs):
         if cid not in refs:
             add("coverage", tname, cid, "tagでcoverされていない条件")
 
-    return fails, toml_files, texts, parsed_ok, n_conditions, n_excluded
+    return fails, warns, toml_files, texts, parsed_ok, n_conditions, n_excluded
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +510,12 @@ def report_fails(fails):
         print(f"FAIL {check} {target}: {ident}: {detail}")
 
 
+def report_warns(warns):
+    """warnはexit codeに影響しない（skill §4(f)）。failと同じ形式で出力する。"""
+    for check, target, ident, detail in warns:
+        print(f"WARN {check} {target}: {ident}: {detail}")
+
+
 def run_verify(args):
     _, entries, scan_errors = scan_repo()
     refs = build_tag_refs(entries)
@@ -451,9 +524,15 @@ def run_verify(args):
         for e in untagged_test_fns(entries):
             print(f"UNTAGGED {e['file']}:{e['test_attr_line']}: {e['fn']}")
 
-    fails, toml_files, texts, parsed_ok, n_conditions, n_excluded = check_design(
-        args, refs
-    )
+    (
+        fails,
+        warns,
+        toml_files,
+        texts,
+        parsed_ok,
+        n_conditions,
+        n_excluded,
+    ) = check_design(args, refs)
 
     # (f) tag付け漏れ（--complete時のみ有効）
     if args.complete:
@@ -471,6 +550,7 @@ def run_verify(args):
         for rel, detail in scan_errors:
             print(f"FAIL scan {rel}: -: {detail}")
         report_fails(fails)
+        report_warns(warns)
         sys.exit(1)
 
     # (d) source_lines同期: 検査pass時にのみ書込む。置換後text全体をin-memory
@@ -502,6 +582,7 @@ def run_verify(args):
         synced += 1
 
     n_tags = sum(len(v) for v in refs.values())
+    report_warns(warns)
     print(
         f"OK: {len(toml_files)} files, {n_conditions} conditions, "
         f"{n_tags} tags, {n_excluded} excluded ({synced} files synced)"
@@ -614,7 +695,7 @@ def main():
     p.add_argument(
         "--complete",
         action="store_true",
-        help="検査(f)を有効化: #[test]を持つ全fnのtag付け漏れをfailにする",
+        help="検査(g)を有効化: #[test]を持つ全fnのtag付け漏れをfailにする",
     )
     p.add_argument(
         "--list-untagged",
