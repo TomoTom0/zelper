@@ -189,6 +189,85 @@ fn add_tab_layout_conflict_rejected() {
     assert_eq!(*err.class(), ErrorClass::Usage);
 }
 
+// ---------------------------------------------------------------------------
+// TASK-67: add部分失敗系（add-remove.tomlのL2層。DD-11 add失敗: 作成済み分は
+// 残存させ、per-target結果報告（rollbackしない）。excluded 2件目の条件化のうち
+// add側）。CLI表面（exit code実出力・文面・JSON envelope）はL3層
+// tests/cli/list_read_send.rs
+
+/// add部分失敗: count>1の途中（2回目）new-pane/new-tab呼出失敗は作成済み分を
+/// stateへ残存させ（rollbackしない）error messageへ作成済みIDを載せる
+/// （add_partialの「created so far: [...] (kept; no rollback)」）。失敗注入は
+/// fail_opのprefix照合でname連番（w-2/t-2）を持つ2回目呼出のみに当てる。
+/// (c) 初回失敗（created空）は「created so far」を付与しない素のerrorである
+/// ことも固定（add_partialの空分岐の保護）
+// [covers:add-remove.add-partial-failure-keeps-created-no-rollback]
+#[test]
+fn add_partial_failure_keeps_created_and_reports_ids() {
+    // (a) add pane count=2: 2回目（w-2）だけ失敗 → 1回目作成分（terminal_2・w-1）残存
+    let b = FakeBackend::new(vec![pane(1, "a", 0, 0, 0)], vec![tab(0, 1)]);
+    b.inject_failure("new-pane tab=None name=Some(\"w-2\") cmd=[]");
+    let err = zelper::app::add::run_pane(&b, None, 2, Some("w"), None, &[], false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "case (a) message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 5, "case (a) message: {}", err.message());
+    let msg = err.message();
+    assert!(
+        msg.contains("created so far: [\"terminal_2\"]"),
+        "case (a) message: {msg}"
+    );
+    assert!(
+        msg.contains("(kept; no rollback)"),
+        "case (a) message: {msg}"
+    );
+    {
+        let s = b.state.borrow();
+        let titles: Vec<&str> = s.panes.iter().map(|p| p.title.as_str()).collect();
+        assert!(titles.contains(&"w-1"), "case (a) titles: {titles:?}");
+        assert_eq!(s.panes.len(), 2, "case (a) panes: {titles:?}");
+    }
+
+    // (b) add tab count=2: 2回目（t-2）だけ失敗 → 1回目作成分（tab 1・t-1）残存
+    let b = FakeBackend::new(vec![], vec![tab(0, 1)]);
+    b.inject_failure("new-tab name=Some(\"t-2\") layout=None");
+    let err = zelper::app::add::run_tab(&b, 2, Some("t"), None, None, &[], false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::OperationFailed,
+        "case (b) message: {}",
+        err.message()
+    );
+    let msg = err.message();
+    assert!(
+        msg.contains("created so far: [\"1\"]"),
+        "case (b) message: {msg}"
+    );
+    assert!(
+        msg.contains("(kept; no rollback)"),
+        "case (b) message: {msg}"
+    );
+    {
+        let s = b.state.borrow();
+        assert_eq!(s.tabs.len(), 2, "case (b) tabs: {:?}", s.tabs);
+        assert_eq!(s.tabs[1].name, "t-1", "case (b) tabs: {:?}", s.tabs);
+    }
+
+    // (c) 初回失敗（created空）: 「created so far」を付与しない素のerror
+    let b = FakeBackend::new(vec![pane(1, "a", 0, 0, 0)], vec![tab(0, 1)]);
+    b.inject_failure("new-pane");
+    let err = zelper::app::add::run_pane(&b, None, 2, Some("w"), None, &[], false).unwrap_err();
+    assert_eq!(
+        err.message(),
+        "injected failure at 'new-pane tab=None name=Some(\"w-1\") cmd=[]'",
+        "case (c) message: {}",
+        err.message()
+    );
+}
+
 // [covers:add-remove.remove-pane-safety-gate]
 #[test]
 fn remove_single_pane_no_gate_multi_requires_yes() {
@@ -277,6 +356,135 @@ fn remove_missing_pane_is_no_target() {
     let err =
         zelper::app::remove::run_pane(&b, &["42".to_string()], true, false, false).unwrap_err();
     assert_eq!(*err.class(), ErrorClass::NoTarget);
+}
+
+/// remove部分失敗（DD-11 remove失敗: 順次実行・部分失敗報告（残対象も実行））:
+/// 3対象の順次実行で2番目のcloseが失敗しても残対象（3番目）も実行され、
+/// per-target結果（error dataのresults[]。失敗対象のみok=false）をPartialFailure
+/// （exit 6）で報告する。失敗対象はstateに残存し成功対象は消失する
+/// （rollback・中断なし）。失敗注入はfail_opのprefix照合で2番目のclose呼出のみに
+/// 当てる。session系の部分失敗はremove-session.tomlが担うためpane/tab nounに限る
+// [covers:add-remove.remove-partial-failure-continues-remaining-targets]
+#[test]
+fn remove_partial_failure_runs_remaining_targets_and_reports() {
+    // (a) remove pane: 3対象の2番目（terminal_2）だけclose失敗
+    let b = FakeBackend::new(
+        vec![
+            pane(1, "a", 0, 0, 0),
+            pane(2, "b", 0, 0, 100),
+            pane(3, "c", 0, 10, 0),
+        ],
+        vec![tab(0, 3)],
+    );
+    b.inject_failure("close-pane terminal_2");
+    let err = zelper::app::remove::run_pane(
+        &b,
+        &["1".to_string(), "2".to_string(), "3".to_string()],
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::PartialFailure,
+        "case (a) message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 6, "case (a) message: {}", err.message());
+    let results = err
+        .data()
+        .expect("case (a): partial failure carries data.results")["results"]
+        .as_array()
+        .expect("case (a): results is an array")
+        .to_vec();
+    let flags: Vec<(&str, bool)> = results
+        .iter()
+        .map(|r| {
+            (
+                r["target"].as_str().unwrap_or("?"),
+                r["ok"].as_bool().unwrap_or(true),
+            )
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        vec![
+            ("terminal_1", true),
+            ("terminal_2", false),
+            ("terminal_3", true),
+        ],
+        "case (a) results: {results:?}"
+    );
+    {
+        // 失敗対象のみ残存（1・3は実行済みで消失）
+        let s = b.state.borrow();
+        let ids: Vec<String> = s.panes.iter().map(|p| p.id.as_spec()).collect();
+        assert_eq!(
+            ids,
+            vec!["terminal_2".to_string()],
+            "case (a) remaining: {ids:?}"
+        );
+    }
+
+    // (b) remove tab: 3対象の2番目（tab 1）だけclose失敗
+    let b = FakeBackend::new(
+        vec![
+            pane(1, "a", 0, 0, 0),
+            pane(2, "b", 1, 0, 0),
+            pane(3, "c", 2, 0, 0),
+        ],
+        vec![tab(0, 1), tab(1, 1), tab(2, 1)],
+    );
+    b.inject_failure("close-tab 1");
+    let err = zelper::app::remove::run_tab(
+        &b,
+        &["0".to_string(), "1".to_string(), "2".to_string()],
+        false,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::PartialFailure,
+        "case (b) message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 6, "case (b) message: {}", err.message());
+    let results = err
+        .data()
+        .expect("case (b): partial failure carries data.results")["results"]
+        .as_array()
+        .expect("case (b): results is an array")
+        .to_vec();
+    let flags: Vec<(&str, bool)> = results
+        .iter()
+        .map(|r| {
+            (
+                r["target"].as_str().unwrap_or("?"),
+                r["ok"].as_bool().unwrap_or(true),
+            )
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        vec![("0", true), ("1", false), ("2", true)],
+        "case (b) results: {results:?}"
+    );
+    {
+        // 失敗対象（tab 1・そのpane）のみ残存
+        let s = b.state.borrow();
+        let tab_ids: Vec<u32> = s.tabs.iter().map(|t| t.id.0).collect();
+        assert_eq!(tab_ids, vec![1], "case (b) remaining tabs: {tab_ids:?}");
+        let pane_ids: Vec<String> = s.panes.iter().map(|p| p.id.as_spec()).collect();
+        assert_eq!(
+            pane_ids,
+            vec!["terminal_2".to_string()],
+            "case (b) panes: {pane_ids:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

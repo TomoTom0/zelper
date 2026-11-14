@@ -13,7 +13,7 @@ note = "src/cli.rs（Verb::Watch定義・--分離/last=true受付）も検証対
 
 [[condition]]
 id = "watch.pattern-count-usage"
-source_lines = "tests/cli/list_read_send.rs:1172"
+source_lines = "tests/cli/list_read_send.rs:1199"
 target_function = "watch::run（引数検証: pattern数）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（PATTERNは--以降。v1はPATTERN数==1厳格〔usage error〕。--分離必須はPANESPEC positionalとの衝突回避） + §2.6 step1（pattern.len()==1検証。違反はUsage exit 2） + §4.1（引数違反〔pattern数〕 = Usage 2）"
 description = "watchのpattern数検証: v1はPATTERN数==1を厳格に要求する。0件（--の省略時はPATTERNがPANESPECとして解釈されるため結果的にpattern 0件）と2件以上はUsage exit 2で拒否する。--分離必須の文法要求がこの検証として現れる（将来のPATTERN複数指定拡張時に本条件は置換対象）"
@@ -22,7 +22,7 @@ expect_return = "いずれもUsage error（exit 2）"
 
 [[condition]]
 id = "watch.empty-pattern-usage"
-source_lines = "tests/cli/list_read_send.rs:1195"
+source_lines = "tests/cli/list_read_send.rs:1222"
 target_function = "watch::run（引数検証: 空pattern）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step1（pattern[0]が空でない（空文字列はcontains(空文字列)常真・空regexも全行matchのため即時偽hitになる → Usage exit 2）） + §5.1 watch.toml条件計画（レビュー修正の空pattern条件: 空PATTERN（substring・--regex両方） → Usage exit 2〔即時偽hit防止〕）"
 description = "空文字列PATTERNの拒否: substring・--regex両形式とも空patternは全行matchの即時偽hitになるため、polling開始前にUsage exit 2で拒否する（即時偽hit防止が目的）。pattern数は正しくとも内容が空な場合の検証でありpattern-count-usageと独立"
@@ -31,7 +31,7 @@ expect_return = "いずれもUsage error（exit 2）"
 
 [[condition]]
 id = "watch.interval-lower-bound-usage"
-source_lines = "tests/cli/list_read_send.rs:1216"
+source_lines = "tests/cli/list_read_send.rs:1243"
 target_function = "watch::run（引数検証: interval）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--interval SECS: f64・default 1.0・1.0未満はusage error exit 2〔user確定〕。NaN/infも拒否） + §2.6 step1（interval >= 1.0 かつ有限） + §4.1（引数違反〔interval<1〕 = Usage 2） + REVIEW-1〔codexレビュー〕: Durationへ変換不能な巨大有限値（例: 1e30）はsleep時の変換panic要因のため引数検証（Duration::try_from_secs_f64）で拒否"
 description = "intervalの下限と有限性と上限変換可能性の検証: 1.0未満・NaN・無限大・巨大有限値（1e30）のいずれもUsage exit 2。無限大はinterval >= 1.0の比較を通過するため有限性検査が、巨大有限値は下限・有限性の両検査を通過するためDuration変換検査が、それぞれ独立した分岐であり、4値を1条件で検証する"
@@ -40,7 +40,7 @@ expect_return = "いずれもUsage error（exit 2）"
 
 [[condition]]
 id = "watch.max-lower-bound-usage"
-source_lines = "tests/cli/list_read_send.rs:1235"
+source_lines = "tests/cli/list_read_send.rs:1262"
 target_function = "watch::run（引数検証: max）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--max N: u32・default 30・1以上〔0はusage error〕。「最大試行回数」の意味をhelpに明記） + §2.6 step1（max >= 1） + §4.1（引数違反〔max<1〕 = Usage 2）"
 description = "maxの下限検証: 最大試行回数0はUsage exit 2（1以上の正整数のみ受理）。0の受理は常にno-hit即打ち切りの無意味操作になるため引数段階で拒否する"
@@ -49,7 +49,7 @@ expect_return = "Usage error（exit 2）"
 
 [[condition]]
 id = "watch.regex-compile-usage"
-source_lines = "tests/cli/list_read_send.rs:1248"
+source_lines = "tests/cli/list_read_send.rs:1275"
 target_function = "watch::run（引数検証: --regex compile）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.4（--regex: opt-in。compile errorはusage error exit 2） + §2.6 step1（--regex時 regex::Regex::new。違反はUsage exit 2。regex compile error文を含める） + §4.1（引数違反〔regex compile〕 = Usage 2）"
 description = "--regex指定時のcompile検証: 正規表現として不正なpatternはwatch開始（対象解決・polling）前にUsage exit 2で失敗し、error文にregex compile errorの内容を含む。polling開始後の失敗でなく事前検証であることを担保する"
@@ -58,7 +58,7 @@ expect_return_shape = "Usage error（exit 2）かつerror文にregex compile err
 
 [[condition]]
 id = "watch.no-target-exit3"
-source_lines = "tests/cli/list_read_send.rs:1262"
+source_lines = "tests/cli/list_read_send.rs:1289"
 target_function = "watch::run（対象解決）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step2（対象解決（1回のみ）: list_panes → build_spec → selector::resolve → TargetSet（0件はNoTarget exit 3）） + §4.1（対象0件 = NoTarget 3）"
 description = "watchの対象解決の負荷側: 存在しないpane ID指定（対象0件）はpolling開始前にNoTarget（exit 3）で失敗する。設計§5.1の条件計画に掲載がないが§4.1の要求行であり、readのread-nonexistent-pane-is-no-target-exit3と対になるため計画外追加"
@@ -121,7 +121,7 @@ expect_return_shape = "exit 0（pane 2のhit）かつpane 1の失敗以降の同
 
 [[condition]]
 id = "watch.hit-exit0-output"
-source_lines = "tests/cli/list_read_send.rs:1276"
+source_lines = "tests/cli/list_read_send.rs:1303"
 target_function = "watch::run（hit報告出力）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.2（watch hitの成功data: target・pattern・regex・attempts_used・elapsed_secs・matched_lines・pane_errors。envelopeはDD-4.2共通） + §4.3（watch hit: readと同型のpane header（=== pane_id (title, tab:POS NAME) ===）+ match行すべて） + §5.1（hit-exit0-output: exit 0・human/JSON形状〔matched_lines含む〕）"
 description = "hit時の出力契約: exit 0で、JSONはdataに7 field（target/pattern/regex/attempts_used/elapsed_secs/matched_lines/pane_errors）を持ち、humanはread同型のpane識別ヘッダー行+match行すべてを出力する。matched_linesはhit pane内のmatch行すべてを含む（2行matchで検証）。envelope全体（schema_version/ok）はjson-contract条件書の共通契約のため本条件はdata内部とhuman形式を対象とする"
@@ -130,7 +130,7 @@ expect_return_shape = "両形式ともexit 0。--jsonはdataに上記field群を
 
 [[condition]]
 id = "watch.exhaust-operationfailed"
-source_lines = "tests/cli/list_read_send.rs:1321"
+source_lines = "tests/cli/list_read_send.rs:1348"
 target_function = "watch::run（回数切れ: pane障害なし）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step4（打ち切り（no hit）: pane_errors空 → OperationFailed exit 5） + §4.1（回数切れ（pane障害なし） = OperationFailed 5） + §4.2（error envelope: error.dataにattempts_used・elapsed_secs・pattern。message例: pattern not found within 30 attempts (~30s)） + §5.1（exhaust-operationfailed）"
 description = "回数切れ（pane障害なし）の失敗契約: max到達no hitはOperationFailed（exit 5）で、error.dataにattempts_used・elapsed_secs・patternを報告する（PartialFailure〔exit 6〕との排他の基準側）。test実行時間抑制のためmaxは小値で検証する（設計§5.3）"
@@ -139,7 +139,7 @@ expect_return_shape = "exit 5（OperationFailed）かつerror.class = OperationF
 
 [[condition]]
 id = "watch.exhaust-partial-failure"
-source_lines = "tests/cli/list_read_send.rs:1360"
+source_lines = "tests/cli/list_read_send.rs:1387"
 target_function = "watch::run（回数切れ: 一部pane障害）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step4（一部pane error → PartialFailure exit 6） + §4.1（回数切れ + 一部pane障害 = PartialFailure 6） + §4.2（PartialFailure時はerror.data.results[]（TargetedResult・失敗paneのみ）） + §5.1（exhaust-partial-failure）"
 description = "回数切れ+一部pane障害の排他契約: 一部paneのdump失敗を伴う回数切れはexit 5でなくPartialFailure（exit 6）に分類され、失敗paneのみのresults[]（TargetedResult）をerror.dataへ報告する（readのread-partial-failure-exit6と対になる。pane障害時の除外・継続挙動自体はpane-vanish-continueが担保する）"
@@ -148,7 +148,7 @@ expect_return_shape = "exit 6（PartialFailure）かつerror.data.results[]は�
 
 [[condition]]
 id = "watch.exhaust-all-pane-failure-exit5"
-source_lines = "tests/cli/list_read_send.rs:1401"
+source_lines = "tests/cli/list_read_send.rs:1428"
 target_function = "watch::run（回数切れ: 全pane障害）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.6 step4（全pane error → OperationFailed exit 5） + §4.1（全pane障害 = OperationFailed 5）"
 description = "全pane障害の分類: 対象全paneのdump_screenが失敗する系列はPartialFailure（exit 6）でなくOperationFailed（exit 5）。一部=6・全て=5の失敗範囲集計判定が独立した分岐であるためexhaust-partial-failureと別条件で検証する（readのread-all-failure-exit5と対になる。設計§5.1の条件計画に個別掲載がないが§4.1の要求行のため計画外追加）"

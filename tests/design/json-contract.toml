@@ -48,7 +48,7 @@ expect_return_shape = "JSON化してtarget/ok/errorが存在し、detail field�
 
 [[condition]]
 id = "json-contract.list-panes-json-success-envelope"
-source_lines = "tests/cli/list_read_send.rs:425"
+source_lines = "tests/cli/list_read_send.rs:452"
 target_function = "list panes --json のCLI出力経路"
 source = "docs/testing/test-plan.md §2.10 + docs/design/detailed-design.md DD-4.2（成功時envelope・dataにコマンド固有object）"
 description = "list panes --jsonのCLI level契約: 成功時stdoutが単一のJSON envelope（schema_version=1・ok=true）で、data.panes配列のpane_idがterminal_N形式。L3実行経路でのenvelope履行"
@@ -57,7 +57,7 @@ expect_return_shape = "stdoutがschema_version=1・ok=true・data.panes 3件・p
 
 [[condition]]
 id = "json-contract.cli-error-envelope-on-failure"
-source_lines = "tests/cli/list_read_send.rs:695"
+source_lines = "tests/cli/list_read_send.rs:722"
 target_function = "--json指定時のerror出力経路（main）"
 source = "docs/testing/test-plan.md §2.10 + docs/design/detailed-design.md DD-4.2（失敗時はerror envelope） + --json指定時の失敗にもerror envelopeが出ることの回帰（部分失敗のresultsもerror envelopeのdataへ同梱）"
 description = "--json指定時の失敗はstdoutへerror envelopeを出す（exit codeはerror class対応のまま）。MR-17回帰: --json利用者がstdoutだけで失敗を構造的に把握できる契約"

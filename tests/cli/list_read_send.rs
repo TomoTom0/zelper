@@ -286,6 +286,33 @@ if [[ "$3" == "action" ]]; then
         exit 0
       fi
       echo "ok"; exit 0;;
+    # TASK-67: new-tab。FAKE_TABS_JSON設定時はtabs状態fileが不在ならlazy initして
+    # から作用（list-tabs分岐と同一の初期化）。id採番は既存tabのtab_id最大値+1。
+    # 採番した id をstdoutへechoし（parse_created_tabはstdout全体をu32としてparse）、
+    # FAKE_NEW_TAB_TEMPLATE（@ID@=採番id数値・@POS@=append時の行番号=position
+    # placeholderの1 tab object JSON）の行をappend（add tab postconditionの
+    # list-tabs存在確認への反映。new-pane handlerと同一構成）
+    new-tab)
+      state="${FAKE_LOG}.tabs"
+      if [[ -n "$FAKE_TABS_JSON" ]]; then
+        if [[ ! -f "$state" ]]; then
+          printf '%s' "$FAKE_TABS_JSON" | tr -d '\n' \
+            | sed -e 's/^\[ *//' -e 's/ *\]$//' -e 's/}, *{/}\n{/g' \
+            | awk '{ print }' > "$state"
+        fi
+        next_id=$(awk '
+          match($0, /"tab_id": *[0-9]+/) {
+            v = substr($0, RSTART + 9, RLENGTH - 9) + 0
+            if (v > m) m = v
+          }
+          END { print m + 1 }' "$state")
+        next_pos=$(wc -l < "$state")
+        line="${FAKE_NEW_TAB_TEMPLATE//@ID@/$next_id}"
+        printf '%s\n' "${line//@POS@/$next_pos}" >> "$state"
+        echo "$next_id"
+        exit 0
+      fi
+      echo "ok"; exit 0;;
     # TASK-65: rename-tab-by-id <id> <name>。FAKE_TABS_JSONのtabs状態fileの
     # id一致行のnameを書換（rename tabのpostcondition反映）
     rename-tab-by-id)
@@ -2131,6 +2158,12 @@ fn tab_json(pos: u32, name: &str, tiled: u32, tab_id: u32) -> String {
 /// fieldのみでよいがpane_jsonと同一形式で与える）
 const FAKE_NEW_PANE_TEMPLATE: &str = r#"{"id": @ID@, "is_plugin": false, "is_focused": false, "is_fullscreen": false, "is_floating": false, "is_suppressed": false, "title": "new-pane", "exited": false, "exit_status": null, "is_held": false, "pane_x": 150, "pane_content_x": 151, "pane_y": 1, "pane_content_y": 1, "pane_rows": 58, "pane_content_rows": 56, "pane_columns": 50, "pane_content_columns": 50, "cursor_coordinates_in_pane": null, "terminal_command": null, "plugin_url": null, "is_selectable": true, "index_in_pane_group": null, "tab_id": 0, "tab_position": 0, "tab_name": "Tab #1", "pane_command": null, "pane_cwd": null}"#;
 
+/// shimのnew-tab handlerが状態fileへappendする1 tab object JSON
+/// （@ID@ = 採番されたtab id数値・@POS@ = append時の行番号=position placeholder。
+/// TASK-67: add tab layout source map条件のpostcondition通過に使用。
+/// tab_jsonと同一field形式）
+const FAKE_NEW_TAB_TEMPLATE: &str = r#"{"position": @POS@, "name": "new-tab", "active": false, "are_floating_panes_visible": false, "selectable_tiled_panes_count": 0, "selectable_floating_panes_count": 0, "tab_id": @ID@}"#;
+
 /// zellij不在実path: PATHにzellij（shim含む）が無ければ操作系verbは
 /// ZellijUnavailable（exit 4）。assert_cmdはcargo_binの絶対pathでzelper自身を
 /// 起動するため、PATHを空dirへ差し替えてもzelperの起動には影響しない
@@ -2547,6 +2580,95 @@ fn add_parse_emits_typed_argv() {
         .filter(|c| c.ends_with("action new-pane --tab-id 0"))
         .collect();
     assert_eq!(new_panes.len(), 2, "calls: {:?}", calls(&log));
+}
+
+// ---------------------------------------------------------------------------
+// TASK-67: addのoption map系（add-remove.tomlのL3層2条件。DD-11 addのbackend
+// 引数map。excluded 1件目の条件化）。cli-grammar.add-parse-emits-typed-argv
+// （TASK-65）はcount複数回発行と--tab-id map（--name無し）を検証済みのため、
+// 本groupは未検証のoption map（pane: --cwd/--name/-- CMD...・tab: layout source
+// 3形式のmap先）に絞る（分担は各条件descriptionへ記載）
+
+/// add paneのbackend引数map（DD-11: --cwd/--name/--tab-id/-- commandをmap）:
+/// --tab/--name/--cwd/-- CMD...がnew-pane argvの--tab-id/--name/--cwd/--へ
+/// mapされpostcondition通過でexit 0する。argv順はprocess.rs new_tabの組立順
+/// （--tab-id → --name → --cwd → --）
+// [covers:add-remove.add-pane-option-argv-map]
+#[test]
+fn add_pane_option_argv_map() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("add-pane-options");
+    cmd.env(
+        "FAKE_TABS_JSON",
+        format!("[{}]", tab_json(0, "Tab #1", 2, 0)),
+    )
+    .env(
+        "FAKE_PANES_JSON",
+        format!("[{}]", pane_json(1, "agent-a", 0, 50, 0)),
+    )
+    .env("FAKE_NEW_PANE_TEMPLATE", FAKE_NEW_PANE_TEMPLATE)
+    .args([
+        "add", "pane", "--tab", "0", "--name", "w", "--cwd", "/work", "--", "codex", "exec",
+    ])
+    .assert()
+    .success()
+    .stdout("created pane terminal_2\n");
+    let argv: Vec<String> = calls(&log)
+        .into_iter()
+        .filter(|c| c.contains(" action new-pane "))
+        .map(|c| c.rsplit("action ").next().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        argv,
+        vec!["new-pane --tab-id 0 --name w --cwd /work -- codex exec"],
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
+/// add tabのlayout source map（DD-11: --layoutは-l NAMEへ、--pathは-l PATHへ、
+/// --inlineは--layout-stringへmap）: 3形式それぞれのmap先argvがFAKE_LOGで確認
+/// でき、shimのnew-tab handler（採番id応答+tabs状態file反映）により
+/// postcondition通過でexit 0する。--name連番suffixと排他負例（3source併用）は
+/// add-removeのL2既存条件が担う
+// [covers:add-remove.add-tab-layout-source-argv-map]
+#[test]
+fn add_tab_layout_source_argv_map() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (layout source 3形式の引数列, 期待new-tab argv断片)。layout名はlayout_dir
+    // 解決のためshimでは存在確認されない（mapが本条件の対象）
+    for (i, (source, expect)) in [
+        (vec!["--layout", "mylayout"], "new-tab -l mylayout"),
+        (vec!["--path", "./x.kdl"], "new-tab -l ./x.kdl"),
+        (
+            vec!["--inline", "layout {}"],
+            "new-tab --layout-string layout {}",
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let (mut cmd, log) = zelper(&format!("add-tab-layout-{i}"));
+        let mut args: Vec<&str> = vec!["add", "tab"];
+        args.extend(source.iter().copied());
+        cmd.env("FAKE_TABS_JSON", format!("[{}]", tab_json(0, "work", 2, 0)))
+            .env("FAKE_NEW_TAB_TEMPLATE", FAKE_NEW_TAB_TEMPLATE)
+            .args(&args)
+            .assert()
+            .success()
+            .stdout("created tab 1\n");
+        let argv: Vec<String> = calls(&log)
+            .into_iter()
+            .filter(|c| c.contains(" action new-tab "))
+            .map(|c| c.rsplit("action ").next().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            argv,
+            vec![expect.to_string()],
+            "case {i} calls: {:?}",
+            calls(&log)
+        );
+    }
 }
 
 /// remove verbのCLI parse表面: pane削除はclose-pane -p argvを発行し行除去で
