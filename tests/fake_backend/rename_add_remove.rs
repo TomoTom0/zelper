@@ -105,26 +105,53 @@ fn rename_tab_updates_name_and_verifies() {
 
 /// rc=0黙失敗のpostcondition検出: rename_tab呼出がOkでもnameが書き換わらない
 /// 系列（mute_rename_tab注入——pane側と異なりtab側は黙失敗系列がfakeで再現
-/// 可能〔C5〕）はVerificationFailed（exit 7）として報告する
+/// 可能〔C5〕）はVerificationFailed（exit 7）として報告する。
+/// (a) 変更先名を持つtabが存在しない構成に加え (b) 別IDのtabが既に新名を保有する
+/// 構成でも検証——postconditionは t.id == tid && t.name == name の両照合
+/// （DD-8「対象のname反映」）であり、name照合のみへ弱めた実装（ID照合欠落）は
+/// (b)で tab1 が "new" を持つため誤Okとなり本caseが赤になることで検出される
 // [covers:rename.tab-silent-noop-detected-by-postcondition]
 #[test]
 fn rename_tab_silent_noop_detected_by_postcondition() {
+    // (a) 変更先名（new）を持つtabが存在しない構成
     let b = FakeBackend::new(vec![], vec![tab(0, 1)]);
     b.mute_rename_tab();
     let err = zelper::app::rename::run_tab(&b, "0", "new", false).unwrap_err();
     assert_eq!(
         *err.class(),
         ErrorClass::VerificationFailed,
-        "message: {}",
+        "case (a) message: {}",
         err.message()
     );
-    assert_eq!(err.exit_code(), 7, "message: {}", err.message());
+    assert_eq!(err.exit_code(), 7, "case (a) message: {}", err.message());
     assert_eq!(err.message(), "rename of tab 0 did not take effect");
     // 呼出自体はrc=0成功扱いで発行済み（list-tabs → rename-tab → list-tabs）
     assert_eq!(
         b.calls(),
         vec!["list-tabs", "rename-tab 0 new", "list-tabs"],
-        "calls: {:?}",
+        "case (a) calls: {:?}",
+        b.calls()
+    );
+
+    // (b) 別IDのtab（tab1）が既に新名を保有する構成。対象tab0へのrenameはmute
+    // される（name不変）——id照合を欠く実装ではtab1の "new" がpostconditionを
+    // 誤成立させるため本caseで検出
+    let b = FakeBackend::new(vec![], vec![tab(0, 1), tab(1, 0)]);
+    b.state.borrow_mut().tabs[1].name = "new".into();
+    b.mute_rename_tab();
+    let err = zelper::app::rename::run_tab(&b, "0", "new", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::VerificationFailed,
+        "case (b) message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 7, "case (b) message: {}", err.message());
+    assert_eq!(err.message(), "rename of tab 0 did not take effect");
+    assert_eq!(
+        b.calls(),
+        vec!["list-tabs", "rename-tab 0 new", "list-tabs"],
+        "case (b) calls: {:?}",
         b.calls()
     );
 }
