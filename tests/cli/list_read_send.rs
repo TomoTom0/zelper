@@ -3728,6 +3728,48 @@ fn remove_session_whitespace_name_full_name_targeting() {
         vec!["a"],
         "a b削除の反映が非対象 a 行まで消した: {names:?}"
     );
+
+    // (iv) marker含有名共存（実装レビューmajor）: a と a [Created 5m ago]
+    // （true name "a [Created 5m ago]"）が並存する環境で a を削除しても
+    // marker含有行は巻き込まれない（shim削除反映の完全名一致——接頭一致だと
+    // `a [Created `接頭が両行に一致し後者も消える）
+    let (dir, log) = setup_fake_zellij("remove-ws-marker-coexist");
+    let coexist_marker = "a [Created 1m ago]\na [Created 5m ago] [Created 2m ago]";
+    command_on(&dir, &log)
+        .env("FAKE_SESSIONS", coexist_marker)
+        .args(["remove", "session", "a", "--yes"])
+        .assert()
+        .success();
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session a -f".to_string()],
+        "calls: {cs:?}"
+    );
+    let out = command_on(&dir, &log)
+        .env("FAKE_SESSIONS", coexist_marker)
+        .args(["list", "sessions", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let names: Vec<&str> = v["data"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["a [Created 5m ago]"],
+        "a削除がmarker含有名行まで消した: {names:?}"
+    );
 }
 
 /// TASK-98 §2.2: --allのself除外は完全名一致。ZELLIJ_SESSION_NAME="a b"（空白含み
@@ -3760,11 +3802,16 @@ fn remove_session_all_excludes_self_with_whitespace_name() {
         vec![&"delete-session other -f".to_string()],
         "calls: {cs:?}"
     );
-    // 除外warning行は完全名 a bで通知される
+    // 除外warning行は完全名 a bで通知される。実装レビューminor: warning行を
+    // 抽出して件数（ちょうど1行）と内容（行内一致）で検証する——stderr全体の
+    // contains組合せではwarning重複・別行分割で通るため
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let warnings: Vec<&str> = stderr.lines().filter(|l| l.contains("warning")).collect();
+    assert_eq!(warnings.len(), 1, "warning行はちょうど1行: {stderr}");
     assert!(
-        stderr.contains("warning") && stderr.contains("current session") && stderr.contains("a b"),
-        "stderr: {stderr}"
+        warnings[0].contains("current session") && warnings[0].contains("'a b'"),
+        "warning行: {}",
+        warnings[0]
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -4032,6 +4079,46 @@ fn rename_session_whitespace_name_as_source() {
     assert!(
         !cs.iter().any(|c| c.starts_with("rename-session")),
         "calls: {cs:?}"
+    );
+
+    // marker含有名共存（実装レビューmajor）: x と x [Created 5m ago]
+    // （true name "x [Created 5m ago]"）が並存する環境で x を改名しても
+    // marker含有行は書き換わらない（shim改名反映の完全名一致——接頭一致だと
+    // 先頭field比較が両行に一致し後者も書き換わる）
+    let (dir, log) = setup_fake_zellij("rename-sess-marker-coexist");
+    let sessions = "x [Created 1m ago]\nx [Created 5m ago] [Created 2m ago]";
+    command_on(&dir, &log)
+        .env("FAKE_SESSIONS", sessions)
+        .args(["rename", "session", "x", "new", "--json"])
+        .assert()
+        .success();
+    let cs = calls(&log);
+    assert_eq!(
+        cs.iter()
+            .filter(|c| **c == "--session x action rename-session new")
+            .count(),
+        1,
+        "calls: {cs:?}"
+    );
+    let out = command_on(&dir, &log)
+        .env("FAKE_SESSIONS", sessions)
+        .args(["list", "sessions", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let names: Vec<&str> = v["data"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["new", "x [Created 5m ago]"],
+        "x改名がmarker含有名行まで書き換えた: {names:?}"
     );
 }
 

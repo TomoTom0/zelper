@@ -264,7 +264,7 @@ expect_return = "(i)(ii) ともexit 2・stderrが\"cannot be used with\"を含�
 
 [[condition]]
 id = "cli-grammar.remap-tab-spec-parse-scopes-plan"
-source_lines = "tests/cli/list_read_send.rs:4353"
+source_lines = "tests/cli/list_read_send.rs:4440"
 target_function = "remap構文（--tab TABSPEC受理・main引き渡し）"
 source = "docs/design/detailed-design.md DD-1.2（remap [--tab TABSPEC]）・DD-1.3（TABSPEC = tab ID（整数）または一意なtab名）・DD-10.5/10.6（--tab時のscope絞り込み・anchor切替） + TASK-69 body（コードレビューminor-3対応）"
 description = "remap --tab TABSPECのparse表面: clapが--tab値を受理しmainからRemapArgs.tabへ引き渡される（remap-sequence.tomlのtab-spec系3条件はRemapArgs.tabへの直接代入のためこの段が未検証だった）。dry-run --jsonのplan出力で検証する: --tab build（一意名）指定時のdata.anchorが対象tab id（active tabでない）・data.sourceが対象tabのpaneのみ（他tabのpaneは載らない）・M/kが対象tabのsourceで立つ。plan実体（絞り込み・anchor・NoTarget・鋳型0単tab適用）はremap-sequence.tomlのtab-spec系3条件が管轄（本条件はparse・引き渡しの表面）。実装変更を伴わないためfail-firstでない（既存実装に対して緑）"
