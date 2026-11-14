@@ -75,9 +75,9 @@ expect_return = "Err（ErrorClass=Preflight）"
 
 [[condition]]
 id = "resize.equalize-tab-spec-selects-target-tab-panes"
-source_lines = "tests/fake_backend/resize.rs:158"
+source_lines = "tests/fake_backend/resize.rs:165"
 target_function = "resize::run_equalize（--tab TABSPEC対象選択）"
 source = "docs/design/detailed-design.md DD-1.2（resize equalize [--tab TABSPEC | PANESPEC...]） + DD-1.3（TABSPEC = tab ID（整数）または一意なtab名） + DD-9 equalize（1. 対象（--tab または PANESPEC群）のtiled pane群のgeometryをlist-panesで取得） + TASK-68 body（excludedからの条件化転換）"
-description = "equalizeの--tab TABSPEC指定: TABSPEC（ID・一意名とも）はresolve_tabで対象tabへ解決し、そのtabのtiled pane（is_remap_source）のみを選択する。他tabのpane・同tabの非source pane（exited等）は黙除外対象でerrorにしない（PANESPEC群指定の明示検証〔不在ID=NoTarget・floating=Preflight〕と対になる--tab固有の黙選択契約）。選択されたpane群へequalize algorithmのresize呼出列が適用されOkで完了。検証限界: 報告文面（equalized行・approximate注記）は未assert。TABSPEC不在/曖昧系はselector.toml既存条件（selector.tab-resolution-by-id-or-unique-name）の担当で本条件では重複検証しない（TASK-66先例と同じ判断）。algorithm結果の均等化検証はequalize-same-row-converges（PANESPEC系）と共通のため、ここではtab解決・対象選択・呼出列の系列に絞る"
-given = "tab 0（cols=10/30の2 pane）とtab 1 build（cols=10/30の2 pane+exited 1 pane）が混在するFakeBackendに対するrun_equalize(b, [], tab=Some(\"build\"))（一意名）とrun_equalize(b, [], tab=Some(\"1\"))（ID）"
-expect_return_shape = "両者ともOk。resize呼出はtab 1の2 paneのみ（terminal_3 increase right・terminal_4 decrease rightの各1回。他tab〔terminal_1/2〕・exited〔terminal_5〕への呼出なし）で、対象2 paneのcolsは20/20へ均等化・非対象paneのcolsは不変"
+description = "equalizeの--tab TABSPEC指定: TABSPEC（ID・一意名とも）はresolve_tabで対象tabへ解決し、そのtabのtiled pane（is_remap_source）のみを選択する。他tabのpane・同tabの非source pane（exited・floating）は黙除外対象でerrorにしない（PANESPEC群指定の明示検証〔不在ID=NoTarget〕と対になる--tab固有の黙選択契約。--tab経路のfloating黙除外はequalize-rejects-floating〔PANESPEC明示指定時のPreflightエラー〕とは別契約であることに注意）。exited・floating paneは対象paneと同一行に配置し、is_remap_source誤選択時に呼出列・幾何が変化して検出できる検証としている。選択されたpane群へequalize algorithmのresize呼出列が適用されOkで完了。検証限界: 報告文面（equalized行・approximate注記）は未assert。TABSPEC不在/曖昧系はselector.toml既存条件（selector.tab-resolution-by-id-or-unique-name）の担当で本条件では重複検証しない（TASK-66先例と同じ判断）。algorithm結果の均等化検証はequalize-same-row-converges（PANESPEC系）と共通のため、ここではtab解決・対象選択・呼出列の系列に絞る"
+given = "tab 0（cols=10/30の2 pane）とtab 1 build（cols=10/30の2 pane+同一行のexited pane・floating pane各1件）が混在するFakeBackendに対するrun_equalize(b, [], tab=Some(\"build\"))（一意名）とrun_equalize(b, [], tab=Some(\"1\"))（ID）"
+expect_return_shape = "両者ともOk。resize呼出はtab 1の2 paneのみ（terminal_3 increase right・terminal_4 decrease rightの各1回。他tab〔terminal_1/2〕・exited〔terminal_5〕・floating〔terminal_6〕への呼出なし）で、対象2 paneのcolsは20/20へ均等化・非対象pane（terminal_1/2/5/6）のcolsは不変（幾何assertは両case共通）"
