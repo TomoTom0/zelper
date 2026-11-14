@@ -2,17 +2,17 @@
 # 出典: TASK-87設計書 tmp/tasks/tm-87/design_verb-extension.md（§1.3 grammar・§2.2 dispatch・§2.3 trait/run_interactive・§2.5 attach.rs・§2.7 add session・§4 error/exit/JSON契約・§5.1-5.3 test計画）
 #       + 実測M3/M4/M5（tmp/tasks/tm-89/m3_result.log・m3_result_run2.log・m4_result.log・m4_result_run2.log・m5_result.log・m5_result_run2.log・m5_result_run3.log）+ TASK-89/TASK-85 body（実測確定事実の正本）
 #       + TASK-93設計書 tmp/tasks/tm-93/design_session-zero-missing.md（D2/D3/D5: 0個正常系化・--session不在名の事前存在確認・add session一覧取得失敗のclass保持伝播）
-# 対応test（TASK-89手順5実施済み+REVIEW-2指摘5/6反映+TASK-93テスト先行更新。1条件=1 test fnの1:1対応）: fake_attach（L2・4件。TASK-93のadd session一覧取得失敗2系を含む）・tests/cli L3 shim拡張（10件。FAKE_DETACH_FAIL / FAKE_SESSIONS_CREATE / FAKE_SESSIONS_EMPTY〔0-session環境・0件文面はstderr出力〕・不在session名rc=1応答。TASK-93の非TTY attach解決先行1件を含む）・src/zellij/process.rs内test（run_interactive系2件。REVIEW-2指摘2/3の退避FD漏れ検証・SIGINT disposition往復を含む）
+# 対応test（TASK-89手順5実施済み+REVIEW-2指摘5/6反映+TASK-93テスト先行更新+TASK-96テスト先行。1条件=1 test fnの1:1対応）: fake_attach（L2・5件。TASK-93のadd session一覧取得失敗2系とTASK-96のNAME検査fail-fast〔backend呼出ゼロ・境界case〕を含む）・tests/cli L3 shim拡張（11件。FAKE_DETACH_FAIL / FAKE_SESSIONS_CREATE / FAKE_SESSIONS_EMPTY〔0-session環境・0件文面はstderr出力〕・不在session名rc=1応答。TASK-93の非TTY attach解決先行1件とTASK-96のNAME検査Usage文面を含む）・src/zellij/process.rs内test（run_interactive系2件。REVIEW-2指摘2/3の退避FD漏れ検証・SIGINT disposition往復を含む）
 # 層帰属（設計§5.2/§5.3・低-9修正）: attachのTTY検査はL3実binary（非TTY exit 7 envelope）+ L2 tty_ok注入。run_interactive経路はsrc内#[cfg(test)]のみ（L3実binaryはTTY検査が先に立ち到達しない。TASK-93後は解決がTTY検査より先——attach-non-tty-resolution-precedes-tty-check）。detach/add sessionはL2 fake backend + L3 shim
 [meta]
 feature = "attach-detach"
 source_file = "src/app/attach.rs"
-verified = true
-verified_at = "2026-11-12"
-verified_by = "claude"
-test_command = "cargo test"
-source_hash = "bd4df5408619a3a4c01244a4e740d1daf0bf579e"
-note = "TASK-89手順5作成（実装前test-first）→手順2〜6実装・test追従完了（2026-09-25）→REVIEW-2（codex）指摘8件対応で13条件へ拡張（指摘5の新規条件1件。指摘1/2/3/4〔capture一時file排他作成0600+unlink・退避FDのF_DUPFD_CLOEXEC・SIGINT SIG_IGNと契約明確化・restoreのEINTR再試行と失敗報告〕は実装修正、指摘6〔attach-successの実出力検証〕はL2 test強化、指摘7〔docs全切断案内削除〕はdocs修正、指摘8〔shim状態file初期化〕はshim setup修正）。src/app/add.rs run_session・src/zellij/process.rs run_interactive（trait定義はsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象。設計§5.1計画8条件+レビュー/実測確定による追加分4条件+REVIEW-2追加分1条件。stderr契約（DD-3.1/DD-14と同一）: attach実行中の子fd 2はcapture file（fd 0/1は元targetを継承）・stderrは子終了後に一括転写・v1で即時転送なし。実行中はSIGINTを親側で一時SIG_IGN（子がSIGINT処理して終了→wait復帰→転写→報告。execでのSIG_IGN継承を避けるためinstallはspawn後）。run_interactiveのstderrは実装上、親fd 2を一時的capture fileへ差し替えた上で継承し（親子で同一fd targetを保持 = inherit×3の維持）、子終了後に本来のstderrへ転写・非zero終了時のerror messageへ埋め込む（attach-zellij-fail条件のstderr埋込みとattach-run-interactive条件のfd同一性を両立する実装）。TASK-93実装で全条件緑化（2026-11-12）→コードレビュー指摘1/3対応: precheck/postcheck両条件へZellijUnavailable（exit 4）注入caseを追加（fake.rsへinject_failure_as機構。class保持が本質であることの検証強化）・precheck条件のfail-first説明を旧実装の実際の挙動（inject_failureは一度で消費されるため握り潰し後は作成・事後確認とも成功してOkになり、unwrap_err()が失敗する）へ修正"
+verified = false
+verified_at = ""
+verified_by = ""
+test_command = ""
+source_hash = ""
+note = "TASK-89手順5作成（実装前test-first）→手順2〜6実装・test追従完了（2026-09-25）→REVIEW-2（codex）指摘8件対応で13条件へ拡張（指摘5の新規条件1件。指摘1/2/3/4〔capture一時file排他作成0600+unlink・退避FDのF_DUPFD_CLOEXEC・SIGINT SIG_IGNと契約明確化・restoreのEINTR再試行と失敗報告〕は実装修正、指摘6〔attach-successの実出力検証〕はL2 test強化、指摘7〔docs全切断案内削除〕はdocs修正、指摘8〔shim状態file初期化〕はshim setup修正）。src/app/add.rs run_session・src/zellij/process.rs run_interactive（trait定義はsrc/zellij/mod.rs）・src/main.rs AddTarget::Session例外dispatchも検証対象。設計§5.1計画8条件+レビュー/実測確定による追加分4条件+REVIEW-2追加分1条件。stderr契約（DD-3.1/DD-14と同一）: attach実行中の子fd 2はcapture file（fd 0/1は元targetを継承）・stderrは子終了後に一括転写・v1で即時転送なし。実行中はSIGINTを親側で一時SIG_IGN（子がSIGINT処理して終了→wait復帰→転写→報告。execでのSIG_IGN継承を避けるためinstallはspawn後）。run_interactiveのstderrは実装上、親fd 2を一時的capture fileへ差し替えた上で継承し（親子で同一fd targetを保持 = inherit×3の維持）、子終了後に本来のstderrへ転写・非zero終了時のerror messageへ埋め込む（attach-zellij-fail条件のstderr埋込みとattach-run-interactive条件のfd同一性を両立する実装）。TASK-93実装で全条件緑化（2026-11-12）→コードレビュー指摘1/3対応: precheck/postcheck両条件へZellijUnavailable（exit 4）注入caseを追加（fake.rsへinject_failure_as機構。class保持が本質であることの検証強化）・precheck条件のfail-first説明を旧実装の実際の挙動（inject_failureは一度で消費されるため握り潰し後は作成・事後確認とも成功してOkになり、unwrap_err()が失敗する）へ修正。TASK-96テスト先行（実装前fail-first）: add session NAME検査（空文字・'/'含み・空白含み・先頭`-`の4種・Usage exit 2・一覧取得より前）のL3/L2条件2件を追加（設計: tmp/tasks/tm-96/design_add-session-name.md §2.2-§2.4・§5）。実装前のため追加2条件は赤（fail-first確認: tmp/tasks/tm-96/test_red_l3.log・test_red_l2.log・`--`なし先頭`-`の現行clap拒否観測: tmp/tasks/tm-96/obs_no_ddash_clap.log）。meta.verified・検証記録はTASK-96実装工程で全条件緑化後に再設定する"
 
 [[condition]]
 id = "attach-detach.attach-non-tty-preflight"
@@ -133,7 +133,7 @@ expect_return = "exit 7（VerificationFailed）。attach -b NAMEの呼出はFAKE
 
 [[condition]]
 id = "attach-detach.attach-non-tty-resolution-precedes-tty-check"
-source_lines = "tests/cli/list_read_send.rs:1762"
+source_lines = "tests/cli/list_read_send.rs:1819"
 target_function = "main.rs run（Attach dispatch: mk_backend_named→resolve_session）→ attach::run_attach（TTY検査）"
 source = "tmp/tasks/tm-93/design_session-zero-missing.md D2/D3（TASK-93設計書: attachはmk_backend_named（解決）がTTY検査より先のため、0個・不在名時はNoTargetがTTY Preflight（exit 7）より先に立つ。順序変化の明記） + D5（0 running・不在名のmessage確定表）"
 description = "非TTY attachの解決先行: 不在名（--session明示）・完全0件（flag/envなし自動解決）はNoTarget（exit 3）で失敗しzellij attach呼出は不発——TTY検査（Preflight exit 7）より解決が先に立つことの検出（従来は不在名・0件ともexit 5/exit 7に到達していた）。有効名でTTY検査に到達する側は既存attach-non-tty-preflight条件が代表する（結果不変）。fail-first: 現行実装は(i)がTTY検査先行のexit 7・(ii)がlist-sessions失敗のexit 5になるため赤"
@@ -157,6 +157,24 @@ source = "tmp/tasks/tm-93/design_session-zero-missing.md D5（TASK-93設計書: 
 description = "add sessionの事後一覧取得失敗の報告: 作成呼出（attach -b）は成功済みのため、確認失敗は元class/exitを保持したままmessageへ文脈（created session 'NAME' but failed to confirm）を付与する（VerificationFailedへの丸めでもOperationFailedへの素通しでもない第3の報告形式。OperationFailed exit 5・ZellijUnavailable exit 4の両注入でclass/exit保持と文脈付与を検証——class保持が本質）。L2 FakeBackendのpostcheck arm（create_session_detached呼出観測後のlist_sessions失敗注入・inject_failure_asによるclass差し替え）で検証。fail-first: 現行実装はunwrap_or_defaultで失敗を0件に丸めVerificationFailedに化けるため赤"
 given = "FakeBackendへfail_list_sessions_after_create()（attach -b呼出を1回観測した後のlist_sessions呼出のみ失敗注入。classは既定のOperationFailedとinject_failure_asによるZellijUnavailableの2種。事前確認は成功）した状態でのrun_session(backend, \"work\", json=true)の実行"
 expect_return = "Err。classは注入と同一の保持（OperationFailedならexit 5・ZellijUnavailableならexit 4）。messageはcreated session 'work' but failed to confirmとinjected failureを含む。callsにattach -b workあり（作成呼出は成功済み）"
+
+[[condition]]
+id = "attach-detach.add-session-invalid-name-usage-error"
+source_lines = "tests/cli/list_read_send.rs:1768"
+target_function = "add::run_session（app層冒頭のNAME validation）"
+source = "tmp/tasks/tm-96/design_add-session-name.md §2.2（NAME検査は (a) 空文字 (b) '/'含み (c) 空白含み (d) 先頭`-` の4種。いずれもUsage exit 2・一覧取得より前。空白含みはzellijが受理しても〔M96-A実測〕parse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能——postcondition必敗・session残留となるため事前検査必須。空文字〔M96-B〕・'/'含み〔M96-C〕はzellijが明示拒否するがrename NEW_NAMEとの対称性・fail-fastでwrap側でも事前検査。先頭`-`は`add session -- -x`の`--`通過系列がCLI解析を通過しbackendのattach -b NAME組み立て（`--`挿入なし。src/zellij/process.rs）へ到達するためzeller側clap依存の拒否が成立せず、有効option一致値〔-c等〕の下流挙動は未測定・zellij側option集合はzeller管理外のためzellij委ねでは契約保証不能——入力段の確定拒否が唯一のzeller側完結手段〕・§2.3（文面: NAME must not be empty / NAME must not contain '/' / NAME must not contain whitespace / NAME must not start with '-'。rename NEW_NAME版の変数名置換。contains(char::is_whitespace)でUnicode空白全般）・§2.4（検査位置: run_session冒頭・backend.list_sessions()より前。検査順 empty → '/' → whitespace → 先頭`-`）・§5条件書条件欄"
+description = "add session NAME validationのUsage事前拒否（L3）: 4種の無効NAME（空文字・'/'含み・空白含み・先頭`-`〔`--`経由〕）はUsage（exit 2）で一覧取得より前に拒否する。空文字はcli shimで到達可能な形式（positional引数の空文字列）、先頭`-`は`--`（option終端）経由でCLI解析を通過させた系列——`--`なしの先頭`-`はzeller側clapがexit 2で拒否するが文面がclap形式（envelope不整合）のため本契約（app層Usage文面）の対象外（現行挙動の観測記録はtm-96のobs log）。観測された受理・黙失敗・世界model復元不能系のみを検査し、それ以外の文字種の推測拒否はしない"
+given = "fake zellij shim（FAKE_SESSIONS=old稼働）に対する zelper add session --json の各構成: (i) 空文字列NAME (ii) a/b（'/'含み） (iii) a b（空白含み） (iv) -- -x（option終端経由の先頭`-`）"
+expect_return = "いずれもexit 2（Usage）。error.class=Usage。messageは NAME must not be empty / NAME must not contain '/' / NAME must not contain whitespace / NAME must not start with '-' の完全一致。FAKE_LOGにlist-sessions呼出・attach -b呼出ともになし（一覧取得より前のfail-fast。capability検査用の--version呼出はdispatch契約上残るためログ全体の空は要求しない——argv単位の不在検証とする）"
+
+[[condition]]
+id = "attach-detach.add-session-invalid-name-fail-fast-before-backend"
+source_lines = "tests/fake_backend/attach.rs:302"
+target_function = "add::run_session（app層冒頭のNAME validation・fail-fast）"
+source = "tmp/tasks/tm-96/design_add-session-name.md §2.2（4種検査ともUsage exit 2・一覧取得より前——capability検査〔--version〕通過後の一覧取得・作成呼出（attach -b）を省くfail-fastが契約。backend呼出ゼロ〔list_sessions・create_session_detachedとも不発〕）・§2.3（contains(char::is_whitespace)はUnicode空白全般——タブ・改行等も空白検査対象。検査順 empty → '/' → whitespace → 先頭`-` により複合違反時の優先順位固定）・§2.4（検査位置: run_session冒頭）・§5条件書条件欄（境界case〔Unicode空白・複合違反の優先順位〕は本L2条件が担う）"
+description = "無効NAMEのfail-fast・backend呼出ゼロ（L2）: 4種NAMEいずれもbackend呼出（list_sessions・create_session_detached）を1回も発行せずUsage（exit 2）で拒否する。run_session直呼びのためclapを経由しない系列（先頭`-`の直値を含む）で検証し、あわせて境界case——タブ・改行等のUnicode空白も空白検査に含まれること・複合違反（a/ b は'/'優先・-a b は空白優先）での検査優先順位（empty → '/' → whitespace → 先頭`-`）の固定——を担う。L3 shim条件（add-session-invalid-name-usage-error）と対をなすL2側の検証（rename先例: invalid-new-name〔L3〕とwhitespace-name-rejected〔L2〕の同一分担）"
+given = "FakeBackend（sessions空）に対するrun_session(b, NAME, false)の各構成: (i) 空文字 (ii) a/b (iii) a b・a\\tb・a\\nb（空白3種。タブ・改行等のUnicode空白を含む） (iv) -x（先頭`-`直値） (v) 複合違反 a/ b（'/'×空白）と -a b（先頭`-`×空白）"
+expect_return = "いずれもErr（class=Usage・exit 2）。messageは各caseの文面（NAME must not be empty / NAME must not contain '/' / NAME must not contain whitespace / NAME must not start with '-'）の完全一致。calls空（list-sessions・attach -bとも不発——一覧取得より前のfail-fast）"
 
 [[excluded]]
 item = "実TTYでのattach対話UI継続（zellij UIの描画・キー操作・対話中の挙動）"

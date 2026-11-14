@@ -1755,6 +1755,63 @@ fn add_session_postcondition_empty_list_is_verification_failed() {
     );
 }
 
+/// add session NAME validation（TASK-96 §2.2/§2.3）: 空文字・'/'含み・空白含み・
+/// 先頭`-`（`--`経由）の4種NAMEはUsage（exit 2）で一覧取得より前に拒否する
+/// （空白含みはzellij受理後もparse_sessionsがlist-sessions行の先頭wordのみを
+/// 名前化するため世界modelで復元不能〔postcondition必敗・session残留〕。空文字・
+/// '/'含みはzellijが明示拒否〔M96-B/C実測〕するがrename NEW_NAMEとの対称性・
+/// fail-fastでwrap側でも事前検査。先頭`-`は`--`通過系列が`--`挿入なしの
+/// attach -b NAME組み立てへ到達するため入力段の確定拒否が唯一のzeller側完結手段）。
+/// 先頭`-`は`--`（option終端）経由でCLI解析を通過させる——`--`なしはzeller側clapが
+/// exit 2で拒否するが文面がclap形式（envelope不整合）のため本契約（app層Usage文面）
+/// の対象外
+// [covers:attach-detach.add-session-invalid-name-usage-error]
+#[test]
+fn add_session_invalid_name_is_usage_error() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (NAMEに相当するargs末尾, 期待文面)。空文字はpositional引数として到達可能な形式
+    let cases: [(&[&str], &str); 4] = [
+        (&[""], "NAME must not be empty"),
+        (&["a/b"], "NAME must not contain '/'"),
+        (&["a b"], "NAME must not contain whitespace"),
+        (&["--", "-x"], "NAME must not start with '-'"),
+    ];
+    for (i, (name_args, expect_msg)) in cases.iter().enumerate() {
+        let (mut cmd, log) = zelper(&format!("add-session-invalid-{i}"));
+        let mut args: Vec<&str> = vec!["add", "session", "--json"];
+        args.extend_from_slice(name_args);
+        let out = cmd
+            .env("FAKE_SESSIONS", "old [Created 1m ago] (current)")
+            .args(&args)
+            .assert()
+            .failure()
+            .code(2)
+            .get_output()
+            .stdout
+            .clone();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(
+            v["error"]["class"], "Usage",
+            "case {i} (args={name_args:?})"
+        );
+        // 文面は完全一致で検証（§2.3）
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert_eq!(msg, *expect_msg, "case {i} (args={name_args:?})");
+        // 一覧取得より前のfail-fast（list-sessions・attach -bとも不発。
+        // capability検査の--version呼び出しはdispatch契約上残るため
+        // ログ全体の空は要求しない——argv単位の不在検証とする）
+        let cs = calls(&log);
+        assert!(
+            !cs.iter().any(|c| c == "list-sessions -n"),
+            "case {i} calls: {cs:?}"
+        );
+        assert!(
+            !cs.iter().any(|c| c.starts_with("attach -b")),
+            "case {i} calls: {cs:?}"
+        );
+    }
+}
+
 /// TASK-93 D2/D3: 非TTY attachでも解決（--session不在名の事前存在確認・0件自動
 /// 解決）がTTY検査より先に立つ: 不在名・完全0件（FAKE_SESSIONS_EMPTY）はNoTarget
 /// （exit 3）で失敗しzellij attach呼出は不発。有効名側は従来どおりTTY検査による

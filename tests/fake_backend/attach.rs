@@ -289,3 +289,47 @@ fn add_session_postcheck_list_failure_keeps_class_with_context() {
         b.calls()
     );
 }
+
+/// add session NAME validation（TASK-96 §2.2/§2.3）: 空文字・'/'含み・空白含み・
+/// 先頭`-`の4種NAMEはUsage（exit 2）で一覧取得より前に拒否する（空白含みはzellij
+/// 受理後もparse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界model
+/// で復元不能〔postcondition必敗・session残留〕。空文字・'/'含みはzellijが明示拒否
+/// 〔M96-B/C実測〕するがrename NEW_NAMEとの対称性・fail-fastでwrap側でも事前検査。
+/// 先頭`-`は`--`通過系列が`--`挿入なしのattach -b NAME組み立てへ到達するため入力段
+/// の確定拒否が唯一のzeller側完結手段）。直呼びのためclapを経由しない系列
+/// （先頭`-`の直値を含む）でbackend呼出ゼロを検証し、あわせて境界case（タブ・改行等
+/// のUnicode空白・複合違反の検査優先順位: empty → '/' → whitespace → 先頭`-`）を担う
+// [covers:attach-detach.add-session-invalid-name-fail-fast-before-backend]
+#[test]
+fn add_session_invalid_name_fail_fast_before_backend() {
+    let cases = [
+        ("", "NAME must not be empty"),
+        ("a/b", "NAME must not contain '/'"),
+        ("a b", "NAME must not contain whitespace"),
+        ("a\tb", "NAME must not contain whitespace"),
+        ("a\nb", "NAME must not contain whitespace"),
+        ("-x", "NAME must not start with '-'"),
+        // 複合違反（§2.3検査順 empty → '/' → whitespace → 先頭`-` の優先順位固定。
+        // 空文字は他の違反と複合不能のため単独caseが最優先を示す）
+        ("a/ b", "NAME must not contain '/'"),
+        ("-a b", "NAME must not contain whitespace"),
+    ];
+    for (i, (name, expect_msg)) in cases.iter().enumerate() {
+        let b = FakeBackend::new(vec![pane(1, "a")], vec![]);
+        let err = run_session(&b, name, false).unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::Usage,
+            "case {i} ({name:?}) message: {}",
+            err.message()
+        );
+        assert_eq!(err.exit_code(), 2, "case {i} ({name:?})");
+        assert_eq!(err.message(), *expect_msg, "case {i} ({name:?})");
+        // 一覧取得より前のfail-fast: list-sessions・create（attach -b）とも不発
+        assert!(
+            b.calls().is_empty(),
+            "case {i} ({name:?}) calls: {:?}",
+            b.calls()
+        );
+    }
+}
