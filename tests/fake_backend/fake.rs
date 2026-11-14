@@ -9,7 +9,7 @@
 // により既存条件の期待値を維持したままreconciliation系条件を支える。
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use zelper::domain::*;
 use zelper::error::{ErrorClass, ZelperError};
 use zelper::zellij::*;
@@ -86,6 +86,11 @@ pub struct FakeBackend {
     pub override_count: Cell<usize>,
     /// この回数を超えたoverride後の最初のgo-to-tabを1回失敗させる（focus復帰失敗模擬）
     pub fail_go_to_after: Cell<Option<usize>>,
+    /// 指定番目（1開始）のoverride-layout呼出のみ失敗させる（TASK-70: layout適用
+    /// phase失敗〔DD-10.12 worked example #7のinstance 2 = 2番目のoverride失敗〕の
+    /// 再現用。fail_opの先頭一致は最初の呼出に消費されるため専用arm。失敗時は
+    /// 状態を変更せずErr。未設定Noneは従来挙動不変）
+    pub fail_override_layout_nth: Cell<Option<usize>>,
     /// 最初のpipe呼出より後の最初のlist_panes_lenientをこの時間だけ遅延させる
     /// （polling deadline超過後の条件成立模擬。C3）
     pub slow_list_panes_after_pipe: Cell<Option<std::time::Duration>>,
@@ -281,6 +286,7 @@ impl FakeBackend {
             spawn_on_override: RefCell::new(Vec::new()),
             override_count: Cell::new(0),
             fail_go_to_after: Cell::new(None),
+            fail_override_layout_nth: Cell::new(None),
             slow_list_panes_after_pipe: Cell::new(None),
             mute_rename_tab: Cell::new(false),
             empty_panes_after_pipe: Cell::new(0),
@@ -386,6 +392,35 @@ impl FakeBackend {
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
     pub fn fail_go_to_tab_after_overrides(&self, after: usize) {
         self.fail_go_to_after.set(Some(after));
+    }
+
+    /// 指定番目（1開始）のoverride-layout呼出を失敗させる（TASK-70。移動phase完了
+    /// 後の特定instance適用失敗 = worked example #7の系列注入。one-shot）
+    #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
+    pub fn fail_override_layout_nth(&self, nth: usize) {
+        self.fail_override_layout_nth.set(Some(nth));
+    }
+
+    /// companion setup失敗注入（TASK-70）: remap::run経由のcompanion setupをwasm
+    /// extract失敗で中断させる。companion setup（wasm extract・permissions seed）は
+    /// backend呼出でなくcompanion.rsのfilesystem処理のため、隔離XDG_CACHE_HOME配下
+    /// の`zelper`を通常fileとして塞ぎcache dir作成を失敗させる（事前配置形式。
+    /// 未設定時は従来挙動不変）
+    #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
+    pub fn fail_companion_wasm_extract(&self, xdg_root: &Path) {
+        std::fs::write(xdg_root.join("zelper"), b"")
+            .expect("arm: $XDG_CACHE_HOME/zelperを通常fileで塞ぐ");
+    }
+
+    /// companion setup失敗注入（TASK-70）: remap::run経由のcompanion setupを
+    /// permissions seed失敗で中断させる。zellij/permissions.kdlに不正KDLを事前配置
+    /// してparse失敗（Preflight）させる（事前配置形式。未設定時は従来挙動不変）
+    #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
+    pub fn fail_companion_permissions_seed(&self, xdg_root: &Path) {
+        let dir = xdg_root.join("zellij");
+        std::fs::create_dir_all(&dir).expect("arm: zellij cache dir作成");
+        std::fs::write(dir.join("permissions.kdl"), "broken {\n")
+            .expect("arm: 不正KDLのpermissions.kdl事前配置");
     }
 
     #[allow(dead_code)] // 一部のtest binaryから未使用になりうる
@@ -1520,6 +1555,19 @@ impl ZellijBackend for FakeBackend {
             spec.apply_only_to_active_tab, spec.retain_terminal, spec.retain_plugin
         ))?;
         self.override_count.set(self.override_count.get() + 1);
+        // TASK-70: 指定番目のoverride-layout呼出のみ失敗させる注入（状態変更前に
+        // Errを返すためpane構成・形状は不変 = 形状のみ未適用の系列）
+        if self
+            .fail_override_layout_nth
+            .get()
+            .is_some_and(|nth| nth == self.override_count.get())
+        {
+            self.fail_override_layout_nth.set(None);
+            return Err(ZelperError::new(
+                ErrorClass::OperationFailed,
+                "injected override-layout failure",
+            ));
+        }
         let mut s = self.state.borrow_mut();
         // layout適用で掃除されるpaneのemulate（検証失敗test用）
         let mut dropped = self.drop_on_override.borrow_mut();

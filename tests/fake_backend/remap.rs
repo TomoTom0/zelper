@@ -3029,3 +3029,167 @@ fn tab_spec_applies_first_template_single_tab() {
         .expect("tab 0のpaneは生存");
     assert_eq!(p1.tab_id, TabId(0), "tab 0に留まる（source外）");
 }
+
+// ---- TASK-70: 途中失敗の報告（DD-10.11・DD-10.12 worked example #7・companion setup失敗） ----
+
+// [covers:remap-sequence.override-layout-failure-reports-survival-and-partial-state]
+#[test]
+fn override_layout_failure_reports_survival_and_partial_state() {
+    // layout適用phase失敗（DD-10.12 worked example #7: 移動完了後・instance 2の
+    // override-layout失敗）: pane全生存・所属tab正しい・形状のみ未適用の報告・
+    // rollbackなし（DD-10.11）。注入はone-shotのため再実行で全体が完成する
+    let (panes, tabs) = one_tab_four();
+    let b = FakeBackend::new(panes, tabs);
+    b.fail_override_layout_nth(2); // 2番目のoverride = group 1（instance 2）の適用
+    let err = with_isolated_xdg(|_| run(&b, &args(false))).unwrap_err();
+    // 報告: 失敗stepのclass保持（DD-10.14: override失敗はOperationFailed）+
+    // 実行済み/失敗/未実行の区分 + 形状のみ未適用・rollbackなしの文面（DD-10.11）
+    assert_eq!(*err.class(), ErrorClass::OperationFailed);
+    let m = err.message();
+    assert!(m.contains("applying layout"), "失敗stepの区分: {m}");
+    assert!(
+        m.contains("applied") && m.contains("group 1") && m.contains("not executed"),
+        "実行済み/失敗/未実行の区分: {m}"
+    );
+    assert!(m.contains("no rollback"), "rollbackなし: {m}");
+    assert!(
+        m.contains("panes survive on their assigned tabs")
+            && m.contains("only the layout shape is unapplied"),
+        "pane全生存・所属tab正しい・形状のみ未適用の旨の報告: {m}"
+    );
+    // (a) pane全生存: kill/close不発生・4 paneとも生存
+    let calls = b.calls();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("close-pane")),
+        "{calls:?}"
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|c| c.starts_with("override-layout"))
+            .count(),
+        2
+    );
+    {
+        let s = b.state.borrow();
+        for id in 1..=4 {
+            assert!(
+                s.panes.iter().any(|p| p.id == PaneKindId::Terminal(id)),
+                "pane {id} 生存"
+            );
+        }
+        // (b) 所属tab正しい（rollbackされず移動済み状態を保持）: group (0,0)は
+        // anchor・group (1,0)のpane 4は割当新規tab
+        for id in 1..=3 {
+            assert_eq!(
+                s.panes
+                    .iter()
+                    .find(|p| p.id == PaneKindId::Terminal(id))
+                    .unwrap()
+                    .tab_id,
+                ANCHOR,
+                "pane {id} はanchor所属"
+            );
+        }
+        let p4 = s
+            .panes
+            .iter()
+            .find(|p| p.id == PaneKindId::Terminal(4))
+            .unwrap();
+        assert_ne!(
+            p4.tab_id, ANCHOR,
+            "pane 4は割当tabへ移動済みのまま: {:?}",
+            p4
+        );
+    }
+    // (d) rollbackなし・再実行で完成: 失敗注入はone-shotのため同一backendへの
+    // 再実行は残りのgroup適用まで完了する（DD-10.11の冪等性。再実行時のanchorは
+    // 再実行開始時のactive tab〔run 1のgroup 1 go-to先〕であるためtab idは
+    // pane所在基準で確認する）
+    with_isolated_xdg(|_| {
+        run(&b, &args(false)).expect("中断からの再実行で全体が完成する");
+    });
+    let (group0_tab, moved_tab) = {
+        let s = b.state.borrow();
+        (
+            s.panes
+                .iter()
+                .find(|p| p.id == PaneKindId::Terminal(1))
+                .unwrap()
+                .tab_id,
+            s.panes
+                .iter()
+                .find(|p| p.id == PaneKindId::Terminal(4))
+                .unwrap()
+                .tab_id,
+        )
+    };
+    assert_ne!(group0_tab, moved_tab, "2 blockは別tab");
+    assert_eq!(tiled_count(&b, group0_tab), 3, "group 0 tabはN=3 pane");
+    assert_eq!(tiled_count(&b, moved_tab), 3, "group 1 tabもN=3 paneで完成");
+}
+
+// [covers:remap-sequence.companion-setup-failure-aborts-before-state-change]
+#[test]
+fn companion_setup_failure_aborts_before_state_change() {
+    // companion setup失敗（wasm extract・permissions seed。DD-10.7 step 3/DD-10.11/
+    // DD-12）は状態変更前に即中断する。probe pipeも不発（setupはprobe送信前に
+    // 失敗する）。component単位の失敗系列はcompanion-seed.tomlが検証済みであり
+    // 本条件はremap::run実行sequence経由の即中断を検証する
+    for (case, frag) in [
+        ("wasm-extract", "companion cache dir"),
+        ("permissions-seed", "permissions.kdl"),
+    ] {
+        let (panes, tabs) = four_panes_two_tabs(); // k=2 = break系pipe必要
+        let b = FakeBackend::new(panes, tabs);
+        let err = with_isolated_xdg(|xdg| {
+            match case {
+                "wasm-extract" => b.fail_companion_wasm_extract(xdg),
+                _ => b.fail_companion_permissions_seed(xdg),
+            }
+            run(&b, &args(false))
+        })
+        .unwrap_err();
+        assert_eq!(
+            *err.class(),
+            ErrorClass::Preflight,
+            "{case}: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains(frag),
+            "{case}: 失敗源の特定できる報告: {}",
+            err.message()
+        );
+        // 状態変更前の即中断: probe pipe含む全mutating操作が不発生
+        let calls = b.calls();
+        assert!(
+            !calls.iter().any(|c| c.starts_with("pipe ")),
+            "{case}: probe/break pipe不発: {calls:?}"
+        );
+        for op in [
+            "toggle-embed",
+            "override-layout",
+            "go-to-tab",
+            "new-tab",
+            "rename-tab",
+            "close-pane",
+            "focus-pane-id",
+        ] {
+            assert!(
+                !calls.iter().any(|c| c.contains(op)),
+                "{case}: {op} 不発生: {calls:?}"
+            );
+        }
+        // 全paneが元tabのまま生存（状態変更なし）
+        let s = b.state.borrow();
+        for (id, tab) in [(1, 0u32), (2, 0), (3, 0), (4, 1)] {
+            let p = s
+                .panes
+                .iter()
+                .find(|p| p.id == PaneKindId::Terminal(id))
+                .unwrap_or_else(|| panic!("{case}: pane {id} 生存"));
+            assert_eq!(p.tab_id, TabId(tab), "{case}: pane {id} は元tabのまま");
+        }
+    }
+}
