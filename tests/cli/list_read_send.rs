@@ -746,6 +746,98 @@ fn list_layouts_works_without_session_resolution() {
     assert!(text.contains("two\t15\t"));
 }
 
+/// symlinkなlayout fileのSIZE/MODIFIEDはlink先実体のstat（follow。TASK-82）。
+/// SIZE/MODIFIED双方の値源を独立検証する構成: 実体を1024 bytes・mtimeを固定過去
+/// epochへ固定し、lstat残置の誤実装ならSIZE=link先path長8（"real.kdl"）・
+/// MODIFIED=link作成時刻（now近傍）でそれぞれ赤になる
+// [covers:list-display.layouts-symlink-follow-target-stat]
+#[test]
+fn list_layouts_symlink_follows_target_stat() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("list-layouts-symlink");
+    let dir = std::env::temp_dir().join(format!("zelper-fake-layouts-sym-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // (i) 実体: 内容を固定1024 bytesへ整え、mtimeを固定過去epoch 1_600_000_000
+    // （2020-09-13T09:46:40Z）へ設定。手段はtouch -d @epoch（GNU coreutils。
+    // symlink作成にstd::os::unixを使う時点でlinux前提と同一のため追加依存不要）
+    let real = dir.join("real.kdl");
+    std::fs::write(&real, vec![b'#'; 1024]).unwrap();
+    let st = std::process::Command::new("touch")
+        .args(["-d", "@1600000000"])
+        .arg(&real)
+        .status()
+        .expect("touch -d @1600000000 to pin mtime");
+    assert!(st.success(), "touch to pin real.kdl mtime failed");
+    // (ii) real.kdlへの相対symlink（link先path "real.kdl" = 8 bytes ≠ 実体 1024 bytes）
+    std::os::unix::fs::symlink("real.kdl", dir.join("linked.kdl")).unwrap();
+    // (iii) 壊れたsymlink（不在target指し。lstatなら値が出るがfollowならErr→None）
+    std::os::unix::fs::symlink("no-such-target", dir.join("broken.kdl")).unwrap();
+
+    // JSON: 名前は3件sort済み。linkedのsize/modified_epochは実体由来の固定値
+    // （1 assertに束ねることで、lstat残置時に双方の実測値がfail messageへ出る）
+    let out = cmd
+        .env("ZELLIJ_LAYOUT_DIR", &dir)
+        .args(["list", "layouts", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let layouts = v["data"]["layouts"].as_array().unwrap();
+    let names: Vec<&str> = layouts
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["broken", "linked", "real"]);
+    let linked = &layouts[1];
+    assert_eq!(
+        (linked["size"].as_u64(), linked["modified_epoch"].as_u64()),
+        (Some(1024), Some(1_600_000_000)),
+        "linked.kdlはlink先実体real.kdlのstat（follow）由来であること"
+    );
+    let real_entry = &layouts[2];
+    assert_eq!(
+        (
+            real_entry["size"].as_u64(),
+            real_entry["modified_epoch"].as_u64()
+        ),
+        (Some(1024), Some(1_600_000_000))
+    );
+    // broken: 名前は一覧へ残し、両値はnull（参照先stat失敗のNone経路）
+    assert_eq!(layouts[0]["size"], serde_json::Value::Null);
+    assert_eq!(layouts[0]["modified_epoch"], serde_json::Value::Null);
+
+    // human: real/linked行のSIZEはともに1024。MODIFIEDは同一epoch由来のため
+    // 同一の相対表記文字列（固定過去epochなら実行時刻依存の値は一致比較で検証）。
+    // broken行は名前を残して両値-
+    let (mut cmd, _) = zelper("list-layouts-symlink-human");
+    let out = cmd
+        .env("ZELLIJ_LAYOUT_DIR", &dir)
+        .args(["list", "layouts"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 4, "header + 3行: {text}");
+    assert_eq!(lines[0], "NAME\tSIZE\tMODIFIED");
+    assert_eq!(lines[1], "broken\t-\t-");
+    let linked_fields: Vec<&str> = lines[2].split('\t').collect();
+    let real_fields: Vec<&str> = lines[3].split('\t').collect();
+    assert_eq!(linked_fields[0], "linked");
+    assert_eq!(real_fields[0], "real");
+    assert_eq!(linked_fields[1], "1024");
+    assert_eq!(real_fields[1], "1024");
+    assert_eq!(
+        linked_fields[2], real_fields[2],
+        "MODIFIEDは同一実体epoch由来の同一文字列であること"
+    );
+    assert!(linked_fields[2].ends_with(" ago"));
+}
+
 // [covers:read-send.read-single-and-multi-results]
 #[test]
 fn read_single_and_multi_with_tail() {

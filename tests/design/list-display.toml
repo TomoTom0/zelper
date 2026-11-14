@@ -3,12 +3,12 @@
 [meta]
 feature = "list-display"
 source_file = "src/app/list.rs"
-verified = true
-verified_at = "2026-11-12"
-verified_by = "claude"
+verified = false
+verified_at = ""
+verified_by = ""
 test_command = "cargo test --test cli_list_read_send && cargo test --lib"
 source_hash = "36136fdb8593ee86b3e8730f4f1f8691272d4242"
-note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。テスト先行のため新条件はfail-first状態（現行実装はlist sessions 0個がexit 5のため赤。既存条件は影響なしで緑）——（当時記録。TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕。verified/verified_at/verified_by/source_hashはTASK-93実装に対する最終検証記録へ更新）"
+note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。（TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕）——TASK-82（2026-11-14）テスト先行条件書更新: layouts-symlink-follow-target-statを追加（fail-first。現行実装はlstatのためlinkedのsize==link先path長8・modified_epoch==link作成時刻now近傍・brokenに値が出ることで赤。src/app/list.rsのfs::metadata変更実装工程で緑化後、verified系fieldを最終検証記録へ更新する）。併せてexcluded「layoutsのstat失敗・mtime不明時の-表示」を2系列へ分割: stat失敗(None, None)系列は本条件（壊れたsymlinkで実体化）へ昇格して削除、mtimeのみ不明(Some(size), None)系列は実測困難性（metadata成功時にmodified()がErrになるのは機能不支持fs等に限る）の理由を付してexcludedへ残置。source_hashはsrc/app/list.rs不変のため従来値のまま（実装工程での変更時に再記録）"
 
 [[condition]]
 id = "list-display.sessions-and-tabs-basic-output"
@@ -57,7 +57,7 @@ expect_return_shape = "JSONはdata.layouts 2件（threeはsize=15・modified_epo
 
 [[condition]]
 id = "list-display.sessions-summary-elides-beyond-four-tabs"
-source_lines = "tests/cli/list_read_send.rs:1331"
+source_lines = "tests/cli/list_read_send.rs:1423"
 target_function = "list::run（Sessions PANES概要） + pane_count_label"
 source = "docs/design/detailed-design.md DD-4.1（PANESはtab毎pane数の+連結（5tab目以降は...省略）。list tabsのPANESはfloatingがあれば2+1f形式） + 5tab超省略形式とfloating併記の要件本体test・session概要のPANES連結からfloatingを除外しlist tabsのPANES列に限定"
 description = "PANES概要の形式: session概要はtab毎tiled pane数の+連結で5tab目以降...省略（floatingは除外）、list tabsのPANES列は2+1f形式でfloatingを併記。C15修正後の役割分担の固定（CMR-5: session概要省略とtabs floating併記を1条件に統合）"
@@ -66,7 +66,7 @@ expect_return_shape = "sessions行のPANESは7+7+6+2+...（floating混入なし�
 
 [[condition]]
 id = "list-display.sessions-tabs-fetch-failure-fallback"
-source_lines = "tests/cli/list_read_send.rs:1381"
+source_lines = "tests/cli/list_read_send.rs:1473"
 target_function = "list::run（Sessions: list_tabs_for失敗fallback）"
 source = "docs/design/detailed-design.md DD-5（sessionsはlist-sessions -n 1回 + 実行中session毎に--session NAME action list-tabsを発行。他sessionのlist-tabs失敗は該当行を-に落とし一覧は維持） + list-tabs失敗fallback・JSON current:falseの要件本体test"
 description = "PANES概要取得（list-tabs）失敗時のfallback: 該当session行のPANESを-（JSONはnull）へ落とし一覧自体は失敗させない。session実行中に消えた等の一時失敗で一覧が全滅しない契約。suffixなしsessionのJSON current:falseも同時検証（CMR-5: human/JSON両fallbackとcurrent:falseを1条件に統合）"
@@ -75,7 +75,7 @@ expect_return_shape = "humanはPANES列が-の行。JSONはcurrent=false・panes
 
 [[condition]]
 id = "list-display.panes-compact-shows-tab-and-short-cwd"
-source_lines = "tests/cli/list_read_send.rs:1409"
+source_lines = "tests/cli/list_read_send.rs:1501"
 target_function = "list::run（Panes compact）"
 source = "docs/design/detailed-design.md DD-4.1（--compact（-c）: panesはTAB<tab>短縮cwd（HOME prefixを~置換・cwd不明時-）のみ） + compact時は非selectable plugin paneを除外（full human・JSONは従来どおり全pane表示）"
 description = "list panes --compactの形式: tab名と短縮cwd（HOME prefixを~へ置換）のみの行。header無し。非selectable plugin pane（tab bar等）は識別子を持たない行を避けるため除外（TASK-47）"
@@ -84,7 +84,7 @@ expect_return_shape = "Tab #1 TAB ~/work/app の2行のみ（plugin行の出現�
 
 [[condition]]
 id = "list-display.compact-names-and-json-precedence"
-source_lines = "tests/cli/list_read_send.rs:1431"
+source_lines = "tests/cli/list_read_send.rs:1523"
 target_function = "list::run（compact: tabs/sessions + JSON優先）"
 source = "docs/design/detailed-design.md DD-4.1（--compact: sessions/tabs/layoutsは名前のみ（header無し）。--json併用時はJSONを優先しcompactは無視）"
 description = "compact表示の名前のみ縮小（tabs/sessions）と--json併用時のJSON優先（compact無視）。machine可読と人間可読の切り替え規則（CMR-5: 名前のみ縮小とJSON優先を1条件に統合）"
@@ -93,7 +93,7 @@ expect_return_shape = "tabs compactはTab #1のみの行（header無し）。ses
 
 [[condition]]
 id = "list-display.layouts-compact-names-only"
-source_lines = "tests/cli/list_read_send.rs:1462"
+source_lines = "tests/cli/list_read_send.rs:1554"
 target_function = "list::run（Layouts compact）"
 source = "docs/design/detailed-design.md DD-4.1（--compact: sessions/tabs/layoutsは名前のみ） + list layouts --compact分岐（名前のみ）のtest固定"
 description = "list layouts --compactは名前のみの行（header無し）。compact分岐の4resourceのうちlayoutsの固定（C24）"
@@ -149,10 +149,10 @@ decided_at = "2026-09-13"
 decided_by = "claude"
 
 [[excluded]]
-item = "layoutsのstat失敗・mtime不明時の-表示（JSONはnull）"
-source = "docs/design/detailed-design.md DD-4.1（list layouts: NAME / SIZE / MODIFIED） + entriesをOption<u64>化しsize/modified取得失敗時は-（JSONはnull）表示"
-reason = "未test。既存133 testにstat失敗系列を検証するtest fnが存在しないため本移行では条件化できない（layouts-without-session-resolution条件はstat成功時のみassert）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
+item = "layoutsのmetadata成功後にmtimeのみ取得・epoch変換失敗時の-表示（JSONはnull。Some(size), None系列）"
+source = "docs/design/detailed-design.md DD-4.1（list layouts: NAME / SIZE / MODIFIED） + entriesをOption<u64>化しsize/modified取得失敗時は-（JSONはnull）表示（src/app/list.rs modified().ok()〜duration_since(UNIX_EPOCH).ok()経路） + tmp/tasks/tm-82/design_symlink-stat.md §6.2 excluded分割"
+reason = "未test（実測困難）。旧excluded「layoutsのstat失敗・mtime不明時の-表示」（2026-09-13）は2系列を含み、stat失敗(None, None)系列はTASK-82のlayouts-symlink-follow-target-stat条件（壊れたsymlinkで実体化）へ昇格して解消・削除済み。残る本系列（Some(size), None）はmetadata成功時にmodified()がErrになるのが機能不支持のfilesystem等に限られ、test環境の通常local filesystemでは人工的に発生させられないため条件化できない。将来発生条件が特定できた時点で条件化する"
+decided_at = "2026-11-14"
 decided_by = "claude"
 
 [[condition]]
@@ -163,3 +163,12 @@ source = "tmp/tasks/tm-93/design_session-zero-missing.md D2/D5（TASK-93設計�
 description = "0-session環境のlist sessions出力: 空一覧の正常系としてexit 0。humanはheader行のみ（行0行）+ stderrへnote 1行（zelper: note: no running zellij sessions; create one with 'zelper add session NAME'）——stdout契約（表構造・header行数）は不変でscriptは行数で0件を検出できる。JSONはdata.sessions:[]（envelope契約・field構成不変）でstderr空。compactはstdout・stderrとも無出力（machine向け名前列挙契約不変）。--json -c併用はJSON優先でcompact無視（compact-names-and-json-precedenceと同型の0-session版）。fail-first: 現行実装はlist-sessions rc=1がOperationFailed exit 5になるため赤"
 given = "fake zellij shimのFAKE_SESSIONS_EMPTY=1（list-sessionsがrc=1 + stderr「No active zellij sessions found.」+ stdout空で応答。0件文面のstderr化済み）での (i) zelper list sessions (ii) zelper list sessions --json (iii) zelper list sessions -c (iv) zelper list sessions --json -c の各実行"
 expect_return = "いずれもexit 0。(i) stdoutはheader行のみ（NAME/CREATED/CURRENT/PANES）・stderrは作成案内note 1行を含む (ii) stdoutはenvelope 1通でdata.sessions == []・stderr空 (iii) stdout・stderrとも空 (iv) JSON優先（envelope 1通・data.sessions == []）・stderr空"
+
+[[condition]]
+id = "list-display.layouts-symlink-follow-target-stat"
+source_lines = "tests/cli/list_read_send.rs:753"
+target_function = "list::run（Layouts: symlinkのSIZE/MODIFIED値源）"
+source = "tmp/tasks/tm-82/design_symlink-stat.md §5決定・§6.2 test構成（TASK-82設計書: follow採用——SIZE/MODIFIEDはsymlinkをたどった内容実体のstat。壊れたsymlinkは名前を一覧へ残したうえで両値-〔JSON null〕。参照先stat取得失敗全般へ一貫適用） + docs/design/detailed-design.md DD-4.1（list layouts: NAME / SIZE / MODIFIED。file stat由来）"
+description = "symlinkなlayout fileのSIZE/MODIFIED値源はlink先実体のstat（follow）: 実体1024 bytes・mtime固定過去epochの構成でSIZE/MODIFIED双方の値源を独立検証（SIZE: 実体1024 vs lstat残置ならlink先path長8。MODIFIED: 実体の固定epoch 1600000000 vs lstat残置ならlink作成時刻=now近傍）。壊れたsymlinkは名前を残して両値-〔JSON null〕——旧excluded「layoutsのstat失敗・mtime不明時の-表示」のstat失敗(None, None)系列を壊れたsymlinkで実体化して条件へ昇格（mtimeのみ不明系列はexcludedへ分割残置）。fail-first: 現行実装はlstatのためlinked.size==8・modified_epochがnow近傍・brokenに値が出るため赤（TASK-82実装〔e.metadata() → fs::metadata〕で緑化）"
+given = "ZELLIJ_LAYOUT_DIRへ (i) 実体real.kdl（内容を固定1024 bytesへ生成し、mtimeをtouch -d @1600000000で固定過去epoch 1_600_000_000〔2020-09-13T09:46:40Z〕へ設定） (ii) real.kdlへの相対symlink linked.kdl（link先path長8 bytes） (iii) 壊れたsymlink broken.kdl（不在target「no-such-target」指し）を置いた環境での zelper list layouts --json と zelper list layouts（human）の各実行"
+expect_return = "JSON: nameはbroken/linked/realの3件sort済み。linked.size==1024・linked.modified_epoch==1600000000（実体由来。real.size==1024・real.modified_epoch==1600000000と同値）。brokenはsize/modified_epochともnull。human: header行 + 3行で、real/linked行ともSIZE==1024・MODIFIED列は同一epoch由来の同一相対表記文字列（ago接尾）。broken行はbroken TAB - TAB -"

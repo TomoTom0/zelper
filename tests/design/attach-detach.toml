@@ -16,7 +16,7 @@ note = "TASK-89手順5作成（実装前test-first）→手順2〜6実装・test
 
 [[condition]]
 id = "attach-detach.attach-non-tty-preflight"
-source_lines = "tests/cli/list_read_send.rs:1752"
+source_lines = "tests/cli/list_read_send.rs:1844"
 target_function = "attach::run_attach（TTY検査）→ run_attach_inner(backend, json, tty_ok)"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.3（attach: TTY必須。非TTYはPreflight exit 7）・§2.5（TTY検証はstd::io::IsTerminalでstdin・stdout両方を検査。非TTYはPreflight「attach requires a TTY; for non-interactive session creation use zelper add session」。検証・本体はrun_attach_inner(backend, json, tty_ok)へ分離）・§4.1（attach: 非TTY Preflight 7）・§5.2/§5.3（低-9: L3実binaryは非TTY exit 7 envelope検証・TTY検査はtty_ok引数で注入） + 実測M4: tmp/tasks/tm-89/m4_result.log・m4_result_run2.log（全fd非TTYの素attachはzellijがpanic exit 101・stdout汚染84B。stdin=TTY/stdout=fileではzellijがUIを出さずtimeoutまでblock=rc 124。zellij実要件はstdin or /dev/ttyだが両検査維持が妥当と確定） + TASK-89 body（M4確定事実）"
 description = "attachのTTY検査fail-fast: stdin・stdoutの両方がTTYでなければzellij attachを起動する前にPreflight（exit 7）で拒否する。M4実測により非TTY素attachはzellij側panic（exit 101・stdout汚染）とUI出力先不在でのblockという失敗形が確定しており、それらに到達させる前に止めることが本条件の目的。stdout片側のみ非TTY（pipe）の構成もblock防止のため拒否する（両検査）。誘導文で非対話作成（add session）への迂回を案内する"
@@ -52,7 +52,7 @@ expect_return = "Err。class=OperationFailed（exit 5相当）。messageはexit 
 
 [[condition]]
 id = "attach-detach.detach-argv"
-source_lines = "tests/cli/list_read_send.rs:1781"
+source_lines = "tests/cli/list_read_send.rs:1873"
 target_function = "ZellijCliBackend::detach_session → attach::run_detach"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.3（detach: action detach wrap（現行run_actionの枠））・§2.3（detach_session() = run_action([\"detach\"])）・§5.1計画条件detach-argv・§5.3（L3 cli shim: 既存FAKE_LOG（全argv記録）でdetachのargv列は担保） + src/zellij/process.rs run_action（argv = --session <NAME> action <args>）"
 description = "detachのbackend argv契約: session解決済みのsession名で `zellij --session <NAME> action detach` を実行する（既存run_actionの枠のwrapであり新機構を持ち込まない）。argv列とexit 0をFAKE_LOGで検証する"
@@ -70,7 +70,7 @@ expect_return_shape = "いずれもOk（exit 0）。humanは `detached clients f
 
 [[condition]]
 id = "attach-detach.detach-fail"
-source_lines = "tests/cli/list_read_send.rs:1821"
+source_lines = "tests/cli/list_read_send.rs:1913"
 target_function = "app::resolve_session（事前存在確認） → attach::run_detach（非zero終了）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.1（detach: zellij非zero OperationFailed 5）・§5.1計画条件detach-fail・§5.3（FAKE_DETACH_FAIL: 該当action非zero exit） + 実測M3: tmp/tasks/tm-89/m3_result.log (b2)（不在session名へのaction detach: rc=1・stderr `Session 'm3ghost' not found. The following sessions are active:` + 稼働session候補行） + TASK-89 body（不在session名はrc=1 Session not found） + tmp/tasks/tm-93/design_session-zero-missing.md D3/D5（TASK-93: --session不在名はresolve_sessionの事前存在確認でNoTarget exit 3・zelper統一文面 + candidates。zellij文面は届かない）"
 description = "detachの失敗mapping: (a) 汎用のaction detach非zero終了（FAKE_DETACH_FAIL）はOperationFailed（exit 5）へ変換しmessageへstderr本文を埋め込む。(b) 不在session名はTASK-93 D3の事前存在確認でNoTarget（exit 3）+ candidates（running名一覧）となり、action detach argvは不発・zellij側のrc=1 Session not found応答（M3 (b2)実測文面）には届かない（従来はexit 5・zellij文面埋込みで文面不統一だったものをzelper側統一文面で解消）"
@@ -79,7 +79,7 @@ expect_return = "(a) exit 5（OperationFailed）・messageはstderr本文（boom
 
 [[condition]]
 id = "attach-detach.add-session-argv-postcondition"
-source_lines = "tests/cli/list_read_send.rs:1878"
+source_lines = "tests/cli/list_read_send.rs:1970"
 target_function = "add::run_session"
 source = "tmp/tasks/tm-87/design_verb-extension.md §1.3（add session NAME: detached session作成。v1は素の作成のみ）・§2.3（create_session_detached(name) = run([\"attach\", \"-b\", name])。session解決に依存しないtop-level argv）・§2.7（create_session_detached(name) → postcondition: list_sessionsにNAMEがrunning出現（DD-11 addの存在確認規則に準拠）→ 報告）・§4.2（add session成功data: { \"session\": \"work\", \"created\": true }）・§4.3（`created session 'work' (detached)`）・§5.3（FAKE_SESSIONS_CREATE: attach -b応答制御） + 実測M5: tmp/tasks/tm-89/m5_result.log 形式A（positional `zellij attach -b m5s` は非TTYで成立: one-shot 56ms・rc=0・silent・list-sessionsにRUNNING出現。global --session形式は別名〔random名〕を作るため使用禁止——m5_result_run2.log §2） + TASK-85/TASK-89 body（成立判断の正本）"
 description = "add session成功経路: 事前確認（同名runningなし）→ positional形式 `attach -b NAME`（top-level argv。--session接頭なし）→ postcondition（作成後のlist_sessionsにNAMEがrunning出現）→ 報告。argv形式のpositional必須はM5実測確定（global --session形式はrandom別名sessionを作る）。検証限界: 成功系のL3にはshimがFAKE_SESSIONS_CREATE=ok時に作成NAMEをlist-sessions応答へ反映する状態管理が必要（statelessだとpostconditionが常に不成立になる）"
@@ -88,7 +88,7 @@ expect_return_shape = "いずれもOk（exit 0）。backendのargvは `attach -b
 
 [[condition]]
 id = "attach-detach.add-session-already-exists"
-source_lines = "tests/cli/list_read_send.rs:1920"
+source_lines = "tests/cli/list_read_send.rs:2012"
 target_function = "add::run_session（事前確認）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.7（事前確認: list_sessionsで同名running session存在 → Preflight error「session already exists」）・§4.1（add session: 同名running session既存 Preflight 7） + 実測M5: tmp/tasks/tm-89/m5_result.log (e1)（既存running名へのattach -bはzellij素の実行ではrc=1・stderr `Session already exists`——zellerはこのzellij失敗を待たず事前確認でPreflightにする設計） + TASK-89 body（既存名rc=1 Session already exists）"
 description = "add sessionの同名事前確認: list_sessionsに同名のrunning sessionが存在する場合は作成を試みずPreflight（exit 7）で拒否する（zellij側rc=1を待たないfail-fast）。EXITED行はrunningとみなさない（backend-parserのexited flagで除外して判定。EXITED同名はzellij委ね——excluded参照）"
@@ -97,7 +97,7 @@ expect_return = "Err。class=Preflight（exit 7相当）。messageはsession alr
 
 [[condition]]
 id = "attach-detach.add-session-no-session-env"
-source_lines = "tests/cli/list_read_send.rs:1956"
+source_lines = "tests/cli/list_read_send.rs:2048"
 target_function = "main.rs run（AddTarget::Session例外dispatch）+ add::run_session"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.2（AddTarget::Sessionのみ例外dispatch: sessionが1つも存在しない環境で動く必要があるためmk_backend（session解決）を経ず、ListResource::Sessionsと同一のprobe backend（ZellijCliBackend::new(\"zelper-probe-unused\") + check_capability）を直接構築）・§2.7・§5.1計画条件add-session-no-session-env + src/app/mod.rs resolve_session（--session無指定・running 0件はNoTargetになる共通経路。例外dispatchはこの失敗を回避する目的） + 実測M5: tmp/tasks/tm-89/m5_result.log (0) baseline（session 0件環境はlist-sessions自体が `No active zellij sessions found.` でrc=1になる実環境）"
 description = "add sessionの0-session環境動作: 対象session解決（mk_backend）を経ない例外dispatchにより、zellij sessionが1つも存在しない環境（add sessionの主要ユースケース）でも作成が成立する。共通経路のまま実装するとresolve_sessionがNoTargetで失敗する回帰の検出。成功にはpostcondition（list_sessionsへのNAME出現）の通過を含む。TASK-93 D1後、0-session環境のlist-sessions rc=1（marker一致）はbackend decodeでOk(0件)になる（従来のrc=1一律0件扱い〔unwrap_or_default〕ではなく、真の失敗はadd-session-precheck-list-failure-propagates条件のとおり伝播する）"
@@ -106,7 +106,7 @@ expect_return = "exit 0。FAKE_LOGに `attach -b NAME` が記録され、JSONの
 
 [[condition]]
 id = "attach-detach.add-session-create-fail-operation-failed"
-source_lines = "tests/cli/list_read_send.rs:1985"
+source_lines = "tests/cli/list_read_send.rs:2077"
 target_function = "add::run_session（create_session_detached失敗）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.1（add session: 作成失敗 OperationFailed 5）・§5.3（FAKE_SESSIONS_CREATE: attach -b応答制御（作成ok / already exists / EXITED重複）） + 実測M5: tmp/tasks/tm-89/m5_result.log (e1)（attach -bの既存名衝突はrc=1・stderr `Session already exists`） + TASK-89 body（既存名rc=1 Session already exists→OperationFailed系mapping）"
 description = "add sessionの作成失敗mapping: 事前確認を通過した（list_sessions上に同名runningなし）後のattach -b非zero終了（EXITED同名衝突・race等）はOperationFailed（exit 5）へ変換しmessageへstderr本文（Session already exists）を埋め込む。EXITED同名の実際の挙動はzellijへ委ねて結果を報告する設計（§2.7）の報告側の契約"
@@ -115,7 +115,7 @@ expect_return = "exit 5（OperationFailed）。messageはSession already exists�
 
 [[condition]]
 id = "attach-detach.add-session-postcondition-missing-verification-failed"
-source_lines = "tests/cli/list_read_send.rs:2015"
+source_lines = "tests/cli/list_read_send.rs:2107"
 target_function = "add::run_session（postcondition検証）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.7（postcondition: list_sessionsにNAMEがrunning出現（DD-11 addの存在確認規則に準拠））・§4.1（add session: postcondition不在 VerificationFailed 7） + error分岐は列挙漏れなく条件化する規律（backend-process.toml TR59-3対応と同旨）"
 description = "add sessionのpostcondition検証: attach -bがrc=0でも作成後のlist_sessionsにNAMEがrunning出現しない場合はVerificationFailed（exit 7）で失敗報告する（作成成否をexit codeのみで信用しない。DD-11 addの存在確認規則に準拠）。§4.1が作成失敗（OperationFailed）と区別して規定する別classの分岐のため独立条件とする"
@@ -124,7 +124,7 @@ expect_return = "Err。class=VerificationFailed（exit 7相当）"
 
 [[condition]]
 id = "attach-detach.add-session-postcondition-empty-list-verification-failed"
-source_lines = "tests/cli/list_read_send.rs:2045"
+source_lines = "tests/cli/list_read_send.rs:2137"
 target_function = "add::run_session（postcondition検証・0件一覧）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §2.7（postcondition: list_sessionsにNAMEがrunning出現〔DD-11準拠の存在確認〕）・§4.1（add session: postcondition不在 VerificationFailed 7） + 実測M5: tmp/tasks/tm-89/m5_result.log (0)（session 0件環境のlist-sessionsはrc=1・No active zellij sessions found.） + TASK-89 REVIEW-2指摘5（作成rc=0後の一覧0件rc=1がOperationFailed 5として伝播しpostcondition不在の分類にならない欠落の修正）"
 description = "add sessionのpostcondition検索の0件分類: 作成呼出（attach -b）がrc=0でも作成後のlist-sessionsが0件rc=1（No active zellij sessions found.・marker一致）の応答でもbackend decode（TASK-93 D1）により「0件」として扱い、NAME不在はVerificationFailed（exit 7）へ分類する（作成成否をexit codeのみで信用しない規則を0件系列にも適用。従来の「rc=1は一律0件扱い」から、decode不成立の真の失敗はclass保持で伝播する〔add-session-postcheck-list-failure-keeps-class条件〕——0件成功と真の失敗の区別がつくようになった）"
@@ -133,7 +133,7 @@ expect_return = "exit 7（VerificationFailed）。attach -b NAMEの呼出はFAKE
 
 [[condition]]
 id = "attach-detach.attach-non-tty-resolution-precedes-tty-check"
-source_lines = "tests/cli/list_read_send.rs:2131"
+source_lines = "tests/cli/list_read_send.rs:2223"
 target_function = "main.rs run（Attach dispatch: mk_backend_named→resolve_session）→ attach::run_attach（TTY検査）"
 source = "tmp/tasks/tm-93/design_session-zero-missing.md D2/D3（TASK-93設計書: attachはmk_backend_named（解決）がTTY検査より先のため、0個・不在名時はNoTargetがTTY Preflight（exit 7）より先に立つ。順序変化の明記） + D5（0 running・不在名のmessage確定表）"
 description = "非TTY attachの解決先行: 不在名（--session明示）・完全0件（flag/envなし自動解決）はNoTarget（exit 3）で失敗しzellij attach呼出は不発——TTY検査（Preflight exit 7）より解決が先に立つことの検出（従来は不在名・0件ともexit 5/exit 7に到達していた）。有効名でTTY検査に到達する側は既存attach-non-tty-preflight条件が代表する（結果不変）。fail-first: 現行実装は(i)がTTY検査先行のexit 7・(ii)がlist-sessions失敗のexit 5になるため赤"
@@ -160,7 +160,7 @@ expect_return = "Err。classは注入と同一の保持（OperationFailedならe
 
 [[condition]]
 id = "attach-detach.add-session-invalid-name-usage-error"
-source_lines = "tests/cli/list_read_send.rs:2080"
+source_lines = "tests/cli/list_read_send.rs:2172"
 target_function = "add::run_session（app層冒頭のNAME validation）"
 source = "tmp/tasks/tm-96/design_add-session-name.md §2.2（NAME検査は (a) 空文字 (b) '/'含み (c) 空白含み (d) 先頭`-` の4種。いずれもUsage exit 2・一覧取得より前。空白含みはzellijが受理しても〔M96-A実測〕parse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能——postcondition必敗・session残留となるため事前検査必須。空文字〔M96-B〕・'/'含み〔M96-C〕はzellijが明示拒否するがrename NEW_NAMEとの対称性・fail-fastでwrap側でも事前検査。先頭`-`は`add session -- -x`の`--`通過系列がCLI解析を通過しbackendのattach -b NAME組み立て（`--`挿入なし。src/zellij/process.rs）へ到達するためzeller側clap依存の拒否が成立せず、有効option一致値〔-c等〕の下流挙動は未測定・zellij側option集合はzeller管理外のためzellij委ねでは契約保証不能——入力段の確定拒否が唯一のzeller側完結手段〕・§2.3（文面: NAME must not be empty / NAME must not contain '/' / NAME must not contain whitespace / NAME must not start with '-'。rename NEW_NAME版の変数名置換。contains(char::is_whitespace)でUnicode空白全般）・§2.4（検査位置: run_session冒頭・backend.list_sessions()より前。検査順 empty → '/' → whitespace → 先頭`-`）・§5条件書条件欄"
 description = "add session NAME validationのUsage事前拒否（L3）: 4種の無効NAME（空文字・'/'含み・空白含み・先頭`-`〔`--`経由〕）はUsage（exit 2）で一覧取得より前に拒否する。空文字はcli shimで到達可能な形式（positional引数の空文字列）、先頭`-`は`--`（option終端）経由でCLI解析を通過させた系列——`--`なしの先頭`-`はzeller側clapがexit 2で拒否するが文面がclap形式（envelope不整合）のため本契約（app層Usage文面）の対象外（現行挙動の観測記録はtm-96のobs log）。観測された受理・黙失敗・世界model復元不能系のみを検査し、それ以外の文字種の推測拒否はしない"
