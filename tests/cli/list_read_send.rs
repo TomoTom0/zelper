@@ -3792,3 +3792,52 @@ fn rename_session_dispatches_via_probe_backend() {
         "calls: {cs:?}"
     );
 }
+
+/// rename tab成功経路のTABSPEC解決とargv・報告（DD-8/DD-1.3。TASK-66: excluded
+/// 転換で条件化）: TABSPEC一意名はresolve_tabでTabIdへ解決され（全verb共通解決の
+/// verb経由確認）、実行は `--session fake-sess action rename-tab-by-id <id> <name>`
+/// 1回。postcondition（list-tabs再取得のname反映）通過後にhuman 1行 / JSON
+/// envelope（renamed_tab=id・name=新名）。cli-grammar.rename-parse-emits-typed-argv
+/// （ID指定・human報告・argv形式）と分担: 本条件は一意名解決込み系列とJSON
+/// envelopeを担う
+// [covers:rename.tab-success-argv-and-report]
+#[test]
+fn rename_tab_success_argv_and_report() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tabs = format!("[{}]", tab_json(0, "mytab", 2, 0));
+    // human: TABSPEC一意名 mytab → tab_id 0へ解決。報告1行
+    let (mut cmd, log) = zelper("rename-tab-report-human");
+    let out = cmd
+        .env("FAKE_TABS_JSON", &tabs)
+        .args(["rename", "tab", "mytab", "newtab"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(out).unwrap();
+    assert_eq!(stdout, "renamed tab 0 -> newtab\n", "stdout: {stdout:?}");
+    let cs = calls(&log);
+    assert_eq!(
+        cs.iter()
+            .filter(|c| **c == "--session fake-sess action rename-tab-by-id 0 newtab")
+            .count(),
+        1,
+        "calls: {cs:?}"
+    );
+
+    // JSON: data.renamed_tab=id（数値）・data.name=新名
+    let (mut cmd, _) = zelper("rename-tab-report-json");
+    let out = cmd
+        .env("FAKE_TABS_JSON", &tabs)
+        .args(["rename", "tab", "mytab", "newtab", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["renamed_tab"], 0);
+    assert_eq!(v["data"]["name"], "newtab");
+}

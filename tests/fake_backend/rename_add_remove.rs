@@ -75,6 +75,60 @@ fn rename_pane_silent_noop_detected_by_postcondition() {
     assert_eq!(b.state.borrow().panes.len(), 1);
 }
 
+// ---------------------------------------------------------------------------
+// rename tab（TASK-66・rename.tomlのL2層2条件。DD-8: rename-tab-by-id呼出と
+// postconditionのname反映確認。excluded 4件目の条件化。TABSPEC不在/曖昧系と
+// backend呼出失敗系はselector.toml・pane側既存条件が担う〔rename.toml excluded〕）。
+// CLI表面（exit code実出力・文面・FAKE_LOG argv列・JSON envelope）はL3層
+// tests/cli/list_read_send.rs
+
+/// rename tab基本経路: TABSPEC（ID・一意名ともresolve_tabで同一TabIdへ解決）→
+/// rename_tab呼出 → 事後list_tabs postcondition（t.id == tid && t.name == name）。
+/// 呼出列はlist-tabs → rename-tab <id> <name> → list-tabsの3呼用・完全一致
+// [covers:rename.tab-rename-call-and-postcondition]
+#[test]
+fn rename_tab_updates_name_and_verifies() {
+    for spec in ["0", "tab0"] {
+        let b = FakeBackend::new(vec![], vec![tab(0, 1)]);
+        zelper::app::rename::run_tab(&b, spec, "new", false).unwrap();
+        assert_eq!(
+            b.calls(),
+            vec!["list-tabs", "rename-tab 0 new", "list-tabs"],
+            "spec {spec:?} calls: {:?}",
+            b.calls()
+        );
+        let s = b.state.borrow();
+        assert_eq!(s.tabs[0].id, TabId(0), "spec {spec:?}");
+        assert_eq!(s.tabs[0].name, "new", "spec {spec:?}");
+    }
+}
+
+/// rc=0黙失敗のpostcondition検出: rename_tab呼出がOkでもnameが書き換わらない
+/// 系列（mute_rename_tab注入——pane側と異なりtab側は黙失敗系列がfakeで再現
+/// 可能〔C5〕）はVerificationFailed（exit 7）として報告する
+// [covers:rename.tab-silent-noop-detected-by-postcondition]
+#[test]
+fn rename_tab_silent_noop_detected_by_postcondition() {
+    let b = FakeBackend::new(vec![], vec![tab(0, 1)]);
+    b.mute_rename_tab();
+    let err = zelper::app::rename::run_tab(&b, "0", "new", false).unwrap_err();
+    assert_eq!(
+        *err.class(),
+        ErrorClass::VerificationFailed,
+        "message: {}",
+        err.message()
+    );
+    assert_eq!(err.exit_code(), 7, "message: {}", err.message());
+    assert_eq!(err.message(), "rename of tab 0 did not take effect");
+    // 呼出自体はrc=0成功扱いで発行済み（list-tabs → rename-tab → list-tabs）
+    assert_eq!(
+        b.calls(),
+        vec!["list-tabs", "rename-tab 0 new", "list-tabs"],
+        "calls: {:?}",
+        b.calls()
+    );
+}
+
 // [covers:add-remove.add-pane-count-and-postcondition]
 #[test]
 fn add_pane_count_and_postcondition() {
