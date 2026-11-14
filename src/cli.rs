@@ -240,6 +240,7 @@ pub enum ResizeTarget {
     },
     /// 対象tiled paneの均等化（近似）
     Equalize {
+        #[arg(conflicts_with = "tab")]
         panes: Vec<String>,
         #[arg(long)]
         tab: Option<String>,
