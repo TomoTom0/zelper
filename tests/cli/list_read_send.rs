@@ -9,6 +9,14 @@ use std::path::PathBuf;
 
 fn zelper(tag: &str) -> (Command, PathBuf) {
     let (dir, log) = setup_fake_zellij(tag);
+    (command_on(&dir, &log), log)
+}
+
+/// 既存のshim環境（dir/log）に対する2回目以降のzeller呼出し（TASK-98）。
+/// 同一shim状態file（${FAKE_LOG}.deleted等）を参照し続けるため、remove実行後の
+/// list-sessions応答反映を同一環境で観測できる。zelper()の再呼び出しはsetup時の
+/// 状態file初期化（.deleted truncate等）で反映状態が消えるため使えない
+fn command_on(dir: &std::path::Path, log: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("zelper").unwrap();
     // shimを優先しつつ既存PATH（bash/cat等）を保持する。
     // ZELLIJ_SESSION_NAMEを除去し、zellij session内実行でもsession解決が
@@ -20,9 +28,9 @@ fn zelper(tag: &str) -> (Command, PathBuf) {
     );
     cmd.env("PATH", path)
         .env_remove("ZELLIJ_SESSION_NAME")
-        .env("FAKE_LOG", &log)
+        .env("FAKE_LOG", log)
         .env("FAKE_FIXTURES", fixture_dir());
-    (cmd, log)
+    cmd
 }
 
 fn calls(log: &PathBuf) -> Vec<String> {
@@ -83,7 +91,8 @@ fn list_sessions_and_tabs() {
 
 /// EXITED（dead session）が複数残っていても、list sessionsは対象session解決を
 /// 前提とせず一覧表示できる（実行中のみを表示）。TASK-99: 名前2語目にmarker
-/// 部分文字列（EXITED）を含むrunning行もexited汚染なしで一覧に現れる
+/// 部分文字列（EXITED）を含むrunning行もexited汚染なしで一覧に現れる。
+/// TASK-98: 空白含み名行のNAME列は完全名（x → x EXITED。切り詰め名でなく）
 // [covers:list-display.sessions-live-only-with-exited-present]
 #[test]
 fn list_sessions_works_with_exited_sessions() {
@@ -110,12 +119,12 @@ fn list_sessions_works_with_exited_sessions() {
         .iter()
         .map(|s| s["name"].as_str().unwrap())
         .collect();
-    // 汚染running行（x EXITED）も一覧に現れる（TASK-99 anchor化後の期待値。
-    // 旧期待値〔live-aのみ〕はfixture拡張に伴い更新）
+    // 汚染running行（x EXITED）も一覧に現れる。nameは完全名（TASK-98。
+    // TASK-99時点の期待値live-a+xから更新）
     assert_eq!(
         sessions,
-        vec!["live-a", "x"],
-        "名2語目EXITEDのrunning行がexited汚染で一覧から消えた: {sessions:?}"
+        vec!["live-a", "x EXITED"],
+        "空白含み名行が一覧から消える/切り詰め名で出る: {sessions:?}"
     );
     // EXITED混在環境でも実行中行のmetadata（created/current/PANES）が取れる
     assert_eq!(v["data"]["sessions"][0]["created"], "1m ago");
@@ -123,7 +132,8 @@ fn list_sessions_works_with_exited_sessions() {
         v["data"]["sessions"][0]["panes_per_tab"],
         serde_json::json!([2])
     );
-    // 汚染行もmetadataが取れる（name=先頭word・created=真の生成節）
+    // 空白含み名行もmetadataが取れる（name=完全名・created=真の生成節。
+    // list-tabs呼出は `--session x EXITED action list-tabs`）
     assert_eq!(v["data"]["sessions"][1]["created"], "5m ago");
     assert_eq!(
         v["data"]["sessions"][1]["panes_per_tab"],
@@ -1818,6 +1828,53 @@ fn add_session_invalid_name_is_usage_error() {
             "case {i} calls: {cs:?}"
         );
     }
+}
+
+/// TASK-98 §2.3-1: add session a は空白含み既存名 a b の切り詰めprefix（先頭word
+/// a）と誤衝突しない（Preflight誤拒否の解消。世界modelのnameが完全名化された後の
+/// `s.name == name` 比較では a ≠ a b）。作成・postcondition（list_sessionsに
+/// a行がrunning出現）を通過して成功する
+// [covers:attach-detach.add-session-no-false-collision-with-truncated-prefix]
+#[test]
+fn add_session_no_false_collision_with_truncated_prefix() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (dir, log) = setup_fake_zellij("add-session-ws-prefix");
+    let out = command_on(&dir, &log)
+        .env("FAKE_SESSIONS", "a b [Created 1m ago]")
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "a", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["session"], "a");
+    assert_eq!(v["data"]["created"], true);
+    let cs = calls(&log);
+    assert!(cs.iter().any(|c| c == "attach -b a"), "calls: {cs:?}");
+    // 事後一覧（同一shim状態）: 既存 a b 行と作成 a 行の共存
+    let out = command_on(&dir, &log)
+        .env("FAKE_SESSIONS", "a b [Created 1m ago]")
+        .args(["list", "sessions", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let names: Vec<&str> = v["data"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["a b", "a"],
+        "作成後一覧（postcondition通過の実質）: {names:?}"
+    );
 }
 
 /// TASK-93 D2/D3: 非TTY attachでも解決（--session不在名の事前存在確認・0件自動
@@ -3550,6 +3607,150 @@ fn remove_session_dead_immune_to_marker_substring_pollution() {
     );
 }
 
+/// TASK-98 §2.1-1/§2.3-2: 空白含みsession名は完全名でtargetingされる。
+/// (i) `remove session "a b"` → `delete-session a b -f`（完全名・単一argv要素は
+/// shimのargv要素数検査が保証）。(ii) 切り詰め名（先頭word a）入力は世界modelに
+/// 存在しないためNoTarget・candidates=完全名一覧（誤射系列の消滅検出）。
+/// (iii) 先頭word衝突共存（a と a b）で a b を削除しても非対象 a 行は残存
+/// （shim削除反映の完全名一致——先頭word一致の反映が a 行まで消す巻き込み検出）
+// [covers:remove-session.whitespace-name-full-name-targeting]
+#[test]
+fn remove_session_whitespace_name_full_name_targeting() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let sessions = "a b [Created 1m ago]\nc [Created 3m ago]";
+    // (i) 完全名targeting: delete-session a b -f のみ発行・cへの呼出なし
+    let (mut cmd, log) = zelper("remove-ws-full");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "a b", "--yes", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session a b -f".to_string()],
+        "calls: {cs:?}"
+    );
+
+    // (ii) 切り詰め名入力: NoTarget・candidates=完全名一覧・delete-session不発
+    let (mut cmd, log) = zelper("remove-ws-truncated");
+    let out = cmd
+        .env("FAKE_SESSIONS", sessions)
+        .args(["remove", "session", "a", "--yes", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+    assert_eq!(
+        v["error"]["candidates"],
+        serde_json::json!(["a b", "c"]),
+        "candidates: {}",
+        v["error"]["candidates"]
+    );
+    assert!(
+        !calls(&log).iter().any(|c| c.starts_with("delete-session")),
+        "calls: {:?}",
+        calls(&log)
+    );
+
+    // (iii) 先頭word衝突共存: a b削除の巻き込みで非対象 a 行が消えないこと。
+    // 事後一覧は同一shim状態file（${FAKE_LOG}.deleted反映済み）を参照する2回目の
+    // list sessionsで観測する（zelper()再呼び出しは状態を初期化するため不可）
+    let (dir, log) = setup_fake_zellij("remove-ws-coexist");
+    let coexist = "a [Created 1m ago]\na b [Created 2m ago]";
+    command_on(&dir, &log)
+        .env("FAKE_SESSIONS", coexist)
+        .args(["remove", "session", "a b", "--yes"])
+        .assert()
+        .success();
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session a b -f".to_string()],
+        "calls: {cs:?}"
+    );
+    let out = command_on(&dir, &log)
+        .env("FAKE_SESSIONS", coexist)
+        .args(["list", "sessions", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let names: Vec<&str> = v["data"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["a"],
+        "a b削除の反映が非対象 a 行まで消した: {names:?}"
+    );
+}
+
+/// TASK-98 §2.2: --allのself除外は完全名一致。ZELLIJ_SESSION_NAME="a b"（空白含み
+/// 自session）が世界modelの行（name=完全名）と一致して除外され、otherのみ削除
+/// （切り詰め名比較だと自session行が除外されず delete-session a が発行され、
+/// postconditionもstill listedで失敗する）
+// [covers:remove-session.all-self-exclusion-with-whitespace-name]
+#[test]
+fn remove_session_all_excludes_self_with_whitespace_name() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("remove-all-ws-self");
+    let output = cmd
+        .env(
+            "FAKE_SESSIONS",
+            "a b [Created 1m ago]\nother [Created 1m ago]",
+        )
+        .env("ZELLIJ_SESSION_NAME", "a b")
+        .args(["remove", "session", "--all", "--yes"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let cs = calls(&log);
+    let dels: Vec<&String> = cs
+        .iter()
+        .filter(|c| c.starts_with("delete-session"))
+        .collect();
+    assert_eq!(
+        dels,
+        vec![&"delete-session other -f".to_string()],
+        "calls: {cs:?}"
+    );
+    // 除外warning行は完全名 a bで通知される
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning") && stderr.contains("current session") && stderr.contains("a b"),
+        "stderr: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("removed session 'other'") && !stdout.contains("removed session 'a'"),
+        "stdout: {stdout}"
+    );
+}
+
 /// 0-session環境の事前確認（§2.9）: NAME指定（no zellij sessions found文面）・
 /// --all / --dead（no sessions to remove文面）・--me（env解決名が行になし）の
 /// いずれもNoTarget（exit 3）で中断する
@@ -3775,6 +3976,41 @@ fn rename_session_success_argv_and_report() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["data"]["renamed_session"], "old");
     assert_eq!(v["data"]["name"], "new");
+}
+
+/// TASK-98 §2.1-3/§2.3-2: 旧NAMEに空白含み完全名を指定したrenameは完全名で対象
+/// 解決される（`--session a b action rename-session new`。a bは単一argv要素。
+/// 切り詰め名parseだとNAME="a b"が世界modelに載らずNoTargetになる）
+// [covers:rename.session-whitespace-name-as-source]
+#[test]
+fn rename_session_whitespace_name_as_source() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("rename-sess-ws-source");
+    let out = cmd
+        .env("FAKE_SESSIONS", "a b [Created 1m ago]")
+        .args(["rename", "session", "a b", "new", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["renamed_session"], "a b");
+    assert_eq!(v["data"]["name"], "new");
+    let cs = calls(&log);
+    // 完全名での対象解決: action形式ちょうど1回（top-level形式は不使用）
+    assert_eq!(
+        cs.iter()
+            .filter(|c| **c == "--session a b action rename-session new")
+            .count(),
+        1,
+        "calls: {cs:?}"
+    );
+    assert!(
+        !cs.iter().any(|c| c.starts_with("rename-session")),
+        "calls: {cs:?}"
+    );
 }
 
 /// 旧NAME不在の分類（§2.1）: NAMEがlist_sessionsの行（RUNNING・EXITEDとも）に

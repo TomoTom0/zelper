@@ -56,7 +56,8 @@ fn sessions_parse_flags_current_and_exited() {
 /// `[Created`）を含む行でも、生成metadata field（exited/current/created）は名前由来
 /// の部分文字列で汚染されない。根拠はzellij 0.44.3の行形式の固定性——
 /// `[Created ...]`節は常時name直後・suffixは排他一択で行末（設計§2.1）。
-/// anchor化（ends_with/rfind・trim_end対応）後の期待値のため現行contains判定では赤
+/// TASK-98: 空白含み名5行のname期待値は完全名（marker直前の区切りASCII空白1文字
+/// のみ除去）へ更新。field非汚染assert群は不変・marker不在2行は先頭wordのまま
 // [covers:backend-parser.sessions-name-marker-substrings-do-not-pollute-fields]
 #[test]
 fn sessions_marker_substrings_do_not_pollute_fields() {
@@ -74,28 +75,32 @@ fn sessions_marker_substrings_do_not_pollute_fields() {
                d2 [Created 2m ago] (EXITED - attach to resurrect)\n";
     let s = parse_sessions(out);
     assert_eq!(s.len(), 11);
-    // 名2語目にEXITEDを含むrunning行 → exited=false（createdは真の生成節）
-    assert_eq!(s[0].name, "x");
+    // 名2語目にEXITEDを含むrunning行 → exited=false（createdは真の生成節）。
+    // name=完全名（TASK-98）
+    assert_eq!(s[0].name, "x EXITED");
     assert!(!s[0].exited, "名中EXITEDのrunning行がexitedに汚染");
     assert!(!s[0].current);
     assert_eq!(s[0].created.as_deref(), Some("2m ago"));
-    // 名2語目に(current)を含む行 → current=false
-    assert_eq!(s[1].name, "cur");
+    // 名2語目に(current)を含む行 → current=false。name=完全名（TASK-98）
+    assert_eq!(s[1].name, "cur (current)");
     assert!(!s[1].current, "名中(current)行がcurrentに汚染");
     assert!(!s[1].exited);
-    // 名2語目に`[`を含む行 → createdは真の生成節（名前側の節でない）
-    assert_eq!(s[2].name, "x");
+    // 名2語目に`[`を含む行 → createdは真の生成節（名前側の節でない）。
+    // name=完全名（TASK-98）
+    assert_eq!(s[2].name, "x [foo");
     assert_eq!(
         s[2].created.as_deref(),
         Some("1m ago"),
         "名中`[`行のcreatedが名前側の節に汚染: {:?}",
         s[2].created
     );
-    // 名前が完全な[Created ...]を含む行 → 生成節=最後尾出現が選ばれる
-    assert_eq!(s[3].name, "pre");
+    // 名前が完全な[Created ...]を含む行 → 生成節=最後尾出現が選ばれる。
+    // name=完全名（名前側のmarker字面を含む。TASK-98）
+    assert_eq!(s[3].name, "pre [Created 5m ago]");
     assert_eq!(s[3].created.as_deref(), Some("1m ago"));
-    // 名前末尾が完全なEXITED suffix字面と一致するrunning行 → exited=false
-    assert_eq!(s[4].name, "y");
+    // 名前末尾が完全なEXITED suffix字面と一致するrunning行 → exited=false。
+    // name=完全名（TASK-98）
+    assert_eq!(s[4].name, "y (EXITED - attach to resurrect)");
     assert!(
         !s[4].exited,
         "名末尾EXITED字面のrunning行がexitedに汚染: {:?}",
@@ -137,6 +142,73 @@ fn sessions_marker_substrings_do_not_pollute_fields() {
     assert!(!s[9].exited);
     assert_eq!(s[10].name, "d2");
     assert!(s[10].exited);
+    assert!(!s[10].current);
+}
+
+/// TASK-98: parse_sessionsはnameを生成節より前の全体（完全名）へ復元する。
+/// marker（`[Created `）直前の区切りASCII空白1文字のみを除き、名前自身の末尾空白
+/// （space/tab/NBSP）と内部の複数空白は保存する。marker不在行は先頭wordへ
+/// fallback（既存挙動との互換）。現行（name=split_whitespace先頭word）では
+/// 復元系caseが赤（fail-first）
+// [covers:backend-parser.sessions-whitespace-name-restored-to-full-name]
+#[test]
+fn sessions_whitespace_names_restored_to_full_name() {
+    let out = "a b [Created 2s ago]\n\
+               x EXITED [Created 1m ago]\n\
+               y (current) [Created 1m ago] (current)\n\
+               pre [Created 5m ago] [Created 1m ago]\n\
+               d  x [Created 2m ago] (EXITED - attach to resurrect)\n\
+               a  [Created 1m ago]\n\
+               b\t [Created 1m ago]\n\
+               c\u{00A0} [Created 1m ago]\n\
+               x[Created 1m ago]\n\
+               weird row without marker\n\
+               [Created 1m ago]\n\
+               live-a [Created 1m ago]\n";
+    let s = parse_sessions(out);
+    // 空remainder（[Created ...]で始まる行）はskipされるため12行中11件
+    assert_eq!(s.len(), 11, "空remainder行がskipされていない: {s:?}");
+    // 基本復元: name=完全名・created/flagsはTASK-99 anchorのまま
+    assert_eq!(s[0].name, "a b");
+    assert_eq!(s[0].created.as_deref(), Some("2s ago"));
+    assert!(!s[0].current);
+    assert!(!s[0].exited);
+    // TASK-99汚染fixtureのname側: 名2語目のmarker部分文字列も名前に含まれる
+    assert_eq!(s[1].name, "x EXITED");
+    assert!(!s[1].exited);
+    // suffixと名前末尾の同字面共存: 名中(current)と本物(current) suffixの分離
+    assert_eq!(s[2].name, "y (current)");
+    assert!(s[2].current);
+    assert!(!s[2].exited);
+    // 名前がmarker字面を含む: rfind=最後尾出現が真の生成節（名前側を含む完全名）
+    assert_eq!(s[3].name, "pre [Created 5m ago]");
+    assert_eq!(s[3].created.as_deref(), Some("1m ago"));
+    // 内部複数空白保持 + 本物EXITED suffix
+    assert_eq!(s[4].name, "d  x");
+    assert!(s[4].exited);
+    assert_eq!(s[4].created.as_deref(), Some("2m ago"));
+    // 名前自身の末尾空白（区切りASCII空白1文字のみ除去。trim_end系抽出は全種類の
+    // 空白を削除するため完全復元の反例になる）: space / tab / NBSP
+    assert_eq!(s[5].name, "a ");
+    assert_eq!(s[6].name, "b\t");
+    assert_eq!(s[7].name, "c\u{00A0}");
+    assert_eq!(s[5].created.as_deref(), Some("1m ago"));
+    assert_eq!(s[6].created.as_deref(), Some("1m ago"));
+    assert_eq!(s[7].created.as_deref(), Some("1m ago"));
+    // 区切り不在の非正規行: marker直前の1文字を剥がさない
+    assert_eq!(s[8].name, "x");
+    assert_eq!(s[8].created.as_deref(), Some("1m ago"));
+    assert!(!s[8].exited);
+    assert!(!s[8].current);
+    // marker不在fallback: 既存挙動（先頭word）との互換・created=None
+    assert_eq!(s[9].name, "weird");
+    assert_eq!(s[9].created, None);
+    assert!(!s[9].exited);
+    assert!(!s[9].current);
+    // 標準行回帰: 空白なし名は現行とbit一致
+    assert_eq!(s[10].name, "live-a");
+    assert_eq!(s[10].created.as_deref(), Some("1m ago"));
+    assert!(!s[10].exited);
     assert!(!s[10].current);
 }
 

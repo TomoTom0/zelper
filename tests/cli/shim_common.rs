@@ -12,7 +12,7 @@
 //
 // | 分類 | env名 | 機構 |
 // |---|---|---|
-// | 基盤 | `FAKE_LOG` | 全argv記録（`echo "$*"`。呼出回数・順序の不変性は主張しない） |
+// | 基盤 | `FAKE_LOG` | 全argv記録（`echo "$*"`。呼出回数・順序の不変性は主張しない。TASK-98: 空白結合のためargv境界はlog上で判別不能——空白含みsession名の単一argv要素保証はdelete-session/rename-session各handler内のargv要素数検査が担う） |
 // | 基盤 | `FAKE_FIXTURES` | fixture dir（tests/fixtures/zellij） |
 // | 基盤 | `FAKE_VERSION` | `--version`応答（未設定時は`zellij 0.44.3`） |
 // | fixture選択系 | `FAKE_PANES` / `FAKE_TABS` | FAKE_FIXTURES内のfile名でlist-panes/list-tabs応答fixtureを選択 |
@@ -20,7 +20,7 @@
 // | 応答内容系 | `FAKE_SESSIONS` / `FAKE_SESSIONS_EMPTY` | list-sessions応答の差替 / 0-session環境（rc=1再現） |
 // | 応答内容系 | `FAKE_DUMP_SCREEN` / `FAKE_DUMP_SCREEN_FRAMES` | dump-screen応答の差替（FULL接尾） / pane毎呼出回数で内容が変わる応答（@@ATTEMPT@@区切り） |
 // | 状態管理系（pane/tab） | `FAKE_PANES_JSON` / `FAKE_TABS_JSON` | 行単位object状態file（`${FAKE_LOG}.panes/.tabs`）の初期source。rename-pane/close-pane/new-pane（.panes）・new-tab/rename-tab-by-id/move-tab（.tabs）の作用をlist-panes/list-tabs応答へ反映 |
-// | 状態管理系（session） | （envなし。状態fileはsetup時初期化） | delete-session→`${FAKE_LOG}.deleted`（list-sessions応答から除外）・rename-session→`.renamed`（from名をto名へ差替）・attach -b作成ok→`.sessions`（list-sessions応答へ追加）。FAKE_PANES_JSON/FAKE_TABS_JSONに依存しない独立機構 |
+// | 状態管理系（session） | （envなし。状態fileはsetup時初期化） | delete-session→`${FAKE_LOG}.deleted`（list-sessions応答から除外）・rename-session→`.renamed`（from名をto名へ差替）・attach -b作成ok→`.sessions`（list-sessions応答へ追加）。FAKE_PANES_JSON/FAKE_TABS_JSONに依存しない独立機構。TASK-98: 削除・改名の応答反映は完全名一致（`<名前> [Created `接頭一致——空白含み名で先頭word一致が非対象行まで巻き込むのを防ぐ） |
 // | 状態管理系 | `FAKE_NEW_PANE_TEMPLATE` / `FAKE_NEW_TAB_TEMPLATE` | new-pane/new-tab handlerの採番object雛形（@ID@/@POS@ placeholder） |
 // | 失敗注入系 | `FAKE_FAIL_LIST_TABS` | list-tabsをrc=1 + stderrで失敗 |
 // | 失敗注入系 | `FAKE_FAIL_DUMP_SCREEN` / `FAKE_FAIL_DUMP_SCREEN_AFTER` | 失敗させるpane idのspace区切りlist / `pane:成功回数`形式（成功回数超過から失敗） |
@@ -49,6 +49,15 @@
 //   （状態管理・差替付き / 不在session名はrc=1 + Session not found）
 // - current-tab-info: remap.rs版（tab 0固定の単一object JSON）
 // - `--version`: FAKE_VERSION可変（未設定時は旧list_read_send.rs版と同一応答）
+//
+// TASK-98: 空白含みsession名（`a b`等）対応。FAKE_LOGは`echo "$*"`の空白結合の
+// ためargv境界がlog上で判別不能であり、単一argv要素保証は (1) delete-session
+// handlerのargv要素数検査（`delete-session <NAME> -f`の3要素固定。NAMEが分割
+// 引き渡しされるとrc=1で失敗応答）(2) rename-session handlerの要素数検査
+// （`action rename-session <to>`のto単独1要素）が担う。session名の照合
+// （action入口の存在検証・delete/renameのlist-sessions応答反映）は先頭word一致
+// （awk $1）でなく完全名一致（`<名前> [Created `接頭。行の名前部分=生成節より
+// 前の全体）へ変更済み
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -85,18 +94,31 @@ if [[ "$1" == "list-sessions" ]]; then
   fi
   # TASK-84: ${FAKE_LOG}.deleted（delete-session handlerの削除記録）に含まれる
   # 名前の行は応答から除外する（delete-session後のlist-sessions再取得 =
-  # postcondition検証への応答反映）
+  # postcondition検証への応答反映）。TASK-98: 除外は完全名一致
+  # （`<名前> [Created `接頭一致）——先頭word一致は空白含み名（a b）削除が
+  # 同じ先頭wordの別行（a）まで消す巻き込みになるため
   if [[ -n "$FAKE_SESSIONS" ]]; then all="$FAKE_SESSIONS"; else all="fake-sess [Created 1m ago] (current)"; fi
   [[ -s "$state" ]] && all="$all"$'\n'"$(cat "$state")"
   if [[ -s "${FAKE_LOG}.deleted" ]]; then
-    all="$(printf '%s\n' "$all" | awk 'NR==FNR { del[$1]=1; next } !($1 in del)' "${FAKE_LOG}.deleted" -)"
+    all="$(printf '%s\n' "$all" | awk 'NR==FNR { del[++dn] = $0; next }
+      { skip = 0
+        for (i = 1; i <= dn; i++) if (index($0, del[i] " [Created ") == 1) { skip = 1; break }
+        if (!skip) print }' "${FAKE_LOG}.deleted" -)"
   fi
   # TASK-95: ${FAKE_LOG}.renamed（rename-session handlerの記録）に含まれる
   # from名の行は応答行の先頭field（session名）をto名へ差し替える
   # （rename-session後のlist-sessions再取得 = postcondition検証への応答反映。
-  # .deletedの除外機構と同型の状態file機構。行のEXITED表記等の残りは不変）
+  # .deletedの除外機構と同型の状態file機構。行のEXITED表記等の残りは不変）。
+  # TASK-98: 差替は完全名一致。.renamed行は `<from> <to>`（toはzellerのUsage
+  # 検査で空白不含が保証されるため、最終token=to・残り全体=fromとして復元）。
+  # 照合は `<from> [Created `接頭（from="a"が行 `a b [Created ...`へ誤一致しない）
   if [[ -s "${FAKE_LOG}.renamed" ]]; then
-    all="$(printf '%s\n' "$all" | awk 'NR==FNR { rn[$1]=$2; next } $1 in rn { $1=rn[$1] } { print }' "${FAKE_LOG}.renamed" -)"
+    all="$(printf '%s\n' "$all" | awk 'NR==FNR {
+        n = split($0, p, " "); rn_from[++rn] = $0
+        sub(/ [^ ]+$/, "", rn_from[rn]); rn_to[rn] = p[n]; next }
+      { for (i = 1; i <= rn; i++) if (index($0, rn_from[i] " [Created ") == 1) {
+          $0 = rn_to[i] substr($0, length(rn_from[i]) + 1); break }
+        print }' "${FAKE_LOG}.renamed" -)"
   fi
   printf '%s\n' "$all"
   exit 0
@@ -114,6 +136,13 @@ if [[ "$1" == "delete-session" ]]; then
   # へ直接出す。zellerのwarning行がこのmarkerより前に現れることで「自壊前通知」
   # （§2.3）を検証する
   echo "shim: delete-session handler start" > /proc/$PPID/fd/2 2>/dev/null || true
+  # TASK-98: argv要素数検査——`delete-session <NAME> -f`の3要素固定（NAMEは
+  # 空白含みでも単一argv要素）。FAKE_LOG（echo "$*"の空白結合）では境界が見え
+  # ないため、NAMEを分割して渡す誤実装をここで失敗応答として検出する
+  if [[ $# -ne 3 || "$3" != "-f" ]]; then
+    echo "shim: delete-session requires exactly: delete-session <NAME> -f (NAME as a single argv element)" >&2
+    exit 1
+  fi
   dname="$2"
   for fail in $FAKE_FAIL_DELETE_SESSION; do
     if [[ "$fail" == "$dname" ]]; then echo "boom" >&2; exit 1; fi
@@ -147,9 +176,12 @@ if [[ "$3" == "action" ]]; then
   lines=""
   [[ -s "$state" ]] && lines="$(cat "$state")"
   if [[ -n "$FAKE_SESSIONS" ]]; then lines="$lines"$'\n'"$FAKE_SESSIONS"; else lines="$lines"$'\n'"fake-sess [Created 1m ago] (current)"; fi
-  if ! printf '%s\n' "$lines" | awk -v s="$sess" 'NF && $1 == s { found = 1 } END { exit found ? 0 : 1 }'; then
+  # TASK-98: session照合は完全名（`<名前> [Created `接頭一致）——先頭word比較
+  # （$1 == s）は空白含みsession名（sess="a b"）を誤拒否するため。候補行の表示も
+  # 名前全体（生成節より前）を取り出す
+  if ! printf '%s\n' "$lines" | awk -v s="$sess" 'index($0, s " [Created ") == 1 { found = 1 } END { exit found ? 0 : 1 }'; then
     echo "Session '$sess' not found. The following sessions are active:" >&2
-    printf '%s\n' "$lines" | awk 'NF { print $1 }' >&2
+    printf '%s\n' "$lines" | awk 'NF { name = $0; sub(/ \[Created .*/, "", name); print name }' >&2
     exit 1
   fi
   shift 3
@@ -460,10 +492,18 @@ if [[ "$3" == "action" ]]; then
     # ${FAKE_LOG}.renamedへ記録しない（rc=0黙失敗模擬。M4 I型）。通常はrc=0 +
     # renamed状態fileへ `<from> <to>` 行を追記
     rename-session)
+      # TASK-98: argv要素数検査——`action rename-session <to>`のto単独1要素
+      # （toを分割して渡す誤実装の検出。FAKE_LOGの空白結合では境界が見えない）
+      if [[ $# -ne 1 ]]; then
+        echo "shim: rename-session requires exactly one NEW_NAME argv element" >&2
+        exit 1
+      fi
       for fail in $FAKE_FAIL_RENAME_SESSION; do
         if [[ "$fail" == "$sess" ]]; then echo "boom" >&2; exit 1; fi
       done
       if [[ -z "$FAKE_MUTE_RENAME_SESSION" ]]; then
+        # from（$sess）は空白含み可。反映側（list-sessions分岐）は行全体から
+        # 最終token（=to）を除いてfromを復元する
         echo "$sess $1" >> "${FAKE_LOG}.renamed"
       fi
       exit 0;;
