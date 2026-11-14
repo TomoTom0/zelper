@@ -1103,7 +1103,8 @@ fn send_multiline_text_single_write_chars() {
 /// その後のCR書き込みのみが失敗したpaneは失敗扱い（単対象ならexit 5・
 /// OperationFailed）。失敗はFAKE_FAIL_WRITE（write -p失敗注入）で再現。
 /// log記録後に失敗するため、成功したwrite-chars呼び出しと失敗したwrite 13呼び出し
-/// の両方がlogに観測される
+/// の両方がlogに観測される。CRはtext送信の後（DD-7）のため、log上の両argv位置で
+/// 順序（write-chars < write 13）まで検証する
 // [covers:read-send.send-enter-cr-failure-exit5]
 #[test]
 fn send_enter_cr_failure_is_exit5() {
@@ -1118,17 +1119,15 @@ fn send_enter_cr_failure_is_exit5() {
         .get_output()
         .stdout
         .clone();
-    let cs = calls(&log);
-    // text送信は成功し、その後のCR書き込み（write 13）が失敗する
-    assert!(
-        cs.iter()
-            .any(|c| c.contains("write-chars -p terminal_1 hello")),
-        "calls: {cs:?}"
-    );
-    assert!(
-        cs.iter().any(|c| c.contains("write -p terminal_1 13")),
-        "calls: {cs:?}"
-    );
+    // text送信（write-chars）の後にCR書き込み（write 13）が続く（順序逆転は不可）
+    let raw = std::fs::read_to_string(&log).unwrap();
+    let text_pos = raw
+        .find("write-chars -p terminal_1 hello")
+        .unwrap_or_else(|| panic!("write-chars call not found. log: {raw:?}"));
+    let cr_pos = raw
+        .find("write -p terminal_1 13")
+        .unwrap_or_else(|| panic!("write 13 call not found. log: {raw:?}"));
+    assert!(text_pos < cr_pos, "CR must follow text send. log: {raw:?}");
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(v["ok"], false);
     assert_eq!(v["error"]["class"], "OperationFailed");
@@ -1196,9 +1195,29 @@ fn send_failure_reports_per_pane_contents() {
         .stdout
         .clone();
     let text = String::from_utf8_lossy(&out);
-    assert!(text.contains("sent -> terminal_2"), "stdout: {text:?}");
-    assert!(text.contains("FAILED -> terminal_1: "), "stdout: {text:?}");
-    assert!(text.contains("boom"), "stdout: {text:?}");
+    // 失敗pane行: terminal_1を含む行にFAILEDと失敗理由が揃う（別pane行への
+    // 附着では通らない）
+    let failed_line = text
+        .lines()
+        .find(|l| l.contains("terminal_1"))
+        .unwrap_or_else(|| panic!("failed pane line not found. stdout: {text:?}"));
+    assert!(
+        failed_line.contains("FAILED"),
+        "line: {failed_line:?} (stdout: {text:?})"
+    );
+    assert!(
+        failed_line.contains("boom"),
+        "line: {failed_line:?} (stdout: {text:?})"
+    );
+    // 成功pane行: terminal_2を含む行は送信成功（sent ->）を報告する
+    let sent_line = text
+        .lines()
+        .find(|l| l.contains("terminal_2"))
+        .unwrap_or_else(|| panic!("success pane line not found. stdout: {text:?}"));
+    assert!(
+        sent_line.contains("sent ->"),
+        "line: {sent_line:?} (stdout: {text:?})"
+    );
 
     // JSON: error.data.results[]の成功/失敗entry混在
     let (mut cmd, _) = zelper("send-report-json");
@@ -1231,10 +1250,11 @@ fn send_failure_reports_per_pane_contents() {
 }
 
 /// read失敗時のhuman表示: 失敗pane（terminal_1）の行はpane識別子とtitleを含む
-/// ヘッダ形式（実装はtab情報を省いた === pane_id (title) === 形式。失敗行形式は
-/// 出典規定なし）で現れ、FAILED表示と失敗理由（boom）が続き、成功pane
-/// （terminal_2）のヘッダと内容に混在する。検証はpane判別可能性（識別子・
-/// title・FAILED・理由）までとする（形式全文の固定はしない）
+/// ヘッダ形式（実装はtab情報を省いた形式。失敗行形式は出典規定なし）で現れ、
+/// FAILED表示と失敗理由（boom）が続き、成功pane（terminal_2）のヘッダと内容に
+/// 混在する。検証は失敗pane行内での対応（識別子・title・FAILED・理由が同一行に
+/// 揃うこと。別pane行への附着は不通過）とpane判別可能性までとする（ヘッダの
+/// 括弧内形式・形式全文の固定はしない）
 // [covers:read-send.read-failure-human-shows-failed-pane]
 #[test]
 fn read_failure_human_shows_failed_pane() {
@@ -1250,13 +1270,24 @@ fn read_failure_human_shows_failed_pane() {
         .stdout
         .clone();
     let text = String::from_utf8_lossy(&out);
-    // 失敗pane: 識別子+titleのヘッダ + FAILED表示 + 失敗理由
+    // 失敗pane行: terminal_1識別子を含む行内にtitle・FAILED・失敗理由が揃う
+    // （別pane行への附着では通らない）
+    let failed_line = text
+        .lines()
+        .find(|l| l.contains("=== terminal_1"))
+        .unwrap_or_else(|| panic!("failed pane header line not found. stdout: {text:?}"));
     assert!(
-        text.contains("=== terminal_1 (agent-a)"),
-        "stdout: {text:?}"
+        failed_line.contains("agent-a"),
+        "line: {failed_line:?} (stdout: {text:?})"
     );
-    assert!(text.contains("FAILED"), "stdout: {text:?}");
-    assert!(text.contains("boom"), "stdout: {text:?}");
+    assert!(
+        failed_line.contains("FAILED"),
+        "line: {failed_line:?} (stdout: {text:?})"
+    );
+    assert!(
+        failed_line.contains("boom"),
+        "line: {failed_line:?} (stdout: {text:?})"
+    );
     // 成功paneのヘッダと内容に混在
     assert!(text.contains("=== terminal_2"), "stdout: {text:?}");
     assert!(text.contains("SCREEN[terminal_2]"), "stdout: {text:?}");
