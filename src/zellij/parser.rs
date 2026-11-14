@@ -55,12 +55,7 @@ pub fn parse_sessions(out: &str) -> Vec<SessionRef> {
                 t[start + 1..]
                     .split(']')
                     .next()
-                    .map(|inner| {
-                        inner
-                            .strip_prefix("Created ")
-                            .unwrap_or(inner)
-                            .to_string()
-                    })
+                    .map(|inner| inner.strip_prefix("Created ").unwrap_or(inner).to_string())
             });
             Some(SessionRef {
                 name: name.to_string(),

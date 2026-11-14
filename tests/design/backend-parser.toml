@@ -7,7 +7,7 @@ verified = true
 verified_at = "2026-11-14"
 verified_by = "claude"
 test_command = "cargo test --test parser"
-source_hash = "a2b52470136d46151ff56041ff5787ab0e473787"
+source_hash = "fc535ebd6c3d9cac8441853d1809d1b4ed331920"
 note = "TASK-59: 移行時excluded 1件（zellijのerror出力→error class変換）をsrc/zellij/process.rs内test追加により条件化（backend-process.tomlへ新規起票）。TASK-74（2026-09-15）条件書更新: terminal-command-field-parsed・empty-output-parses-to-none-not-errorの2条件を追加。新期待値は未実装のためfail-first状態——（当時記録。その後の実装・test追従で解消済み・cargo test --test parser は全pass。TASK-74段階8コードレビューCR74-8補正）。verified_at/by/test_command/source_hashはTASK-74前実装に対する最終検証記録。TASK-99（2026-11-14）テスト先行条件書更新: sessions-name-marker-substrings-do-not-pollute-fieldsを追加（8→9条件。名前2語目以降のmarker部分文字列〔EXITED・(current)・[Created〕が生成metadata fieldを汚染しないanchor化後の期待値。テスト先行のためfail-first状態——現行rest.contains系判定では汚染系caseが赤〔exited=true汚染等。tmp/tasks/tm-99/test_red.log〕。（当時記録。TASK-99実装〔parse_sessions anchor化: t=trim_end→ends_with(EXITED_SUFFIX)/(CURRENT_SUFFIX)・created=rfind(CREATED_MARKER)〕で全条件緑化・cargo test --test parser 9件全pass〔tmp/tasks/tm-99/test_green.log〕）。verified/verified_at/test_command/source_hashはTASK-99実装に対する最終検証記録へ更新"
 
 [[condition]]
