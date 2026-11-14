@@ -88,7 +88,7 @@ zelper docs readme | llm usage|skill|snippet
 - remapのslot割当はgroup（block×tab所属）とrun（command+args+cwd）が一意なpaneのslot対応に限り決定的。同一runの複数pane間・複数shell pane間のslot順は保証しない
 - `terminal_command`（`invoked_with`）に `"` `'` `\` 改行・制御文字を含むpane・shell `-c` 起因と疑われるpaneは引数境界を復元できずslot照合を外しうる（warning付きで実行され、適用後検証で検出）
 - `resize` は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない
-- `list sessions` のJSONはzellijが提供しないためテキストparse（name / created / current / panes_per_tab を返す。EXITED な dead session は表示・session解決から除外される）
+- `list sessions` のJSONはzellijが提供しないためテキストparse（name / created / current / panes_per_tab を返す。EXITED な dead session は表示・session解決から除外される）。空白を含むsession名（zellij直接操作で既存の場合）は先頭wordのみ識別され、状態判定・PANES/`panes_per_tab` 取得・`remove session --all`/`--dead` の対象化に影響する（zellerからの作成・rename新名は空白不含等のみでusage error事前拒否）
 - tab IDはclose後に再利用されるため、取得したtab IDは即時使用のみに用いる
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。zellij本体の解決（config.kdlの`layout_dir`）と一致させること
 
