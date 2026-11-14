@@ -73,8 +73,8 @@ id = "attach-detach.detach-fail"
 source_lines = "tests/cli/list_read_send.rs:1503"
 target_function = "app::resolve_session（事前存在確認） → attach::run_detach（非zero終了）"
 source = "tmp/tasks/tm-87/design_verb-extension.md §4.1（detach: zellij非zero OperationFailed 5）・§5.1計画条件detach-fail・§5.3（FAKE_DETACH_FAIL: 該当action非zero exit） + 実測M3: tmp/tasks/tm-89/m3_result.log (b2)（不在session名へのaction detach: rc=1・stderr `Session 'm3ghost' not found. The following sessions are active:` + 稼働session候補行） + TASK-89 body（不在session名はrc=1 Session not found） + tmp/tasks/tm-93/design_session-zero-missing.md D3/D5（TASK-93: --session不在名はresolve_sessionの事前存在確認でNoTarget exit 3・zelper統一文面 + candidates。zellij文面は届かない）"
-description = "detachの失敗mapping: (a) 汎用のaction detach非zero終了（FAKE_DETACH_FAIL）はOperationFailed（exit 5）へ変換しmessageへstderr本文を埋め込む。(b) 不在session名はTASK-93 D3の事前存在確認でNoTarget（exit 3）+ candidates（running名一覧）となり、action detach argvは不発・zellij側のrc=1 Session not found応答（M3 (b2)実測文面）には届かない（従来はexit 5・zellij文面埋込みで文面不統一だったものをzelper側統一文面で解消）"
-given = "fake zellij shimに対するzelper --session X detach --json実行の各構成: (a) FAKE_DETACH_FAILによりaction detachが非zero終了、(b) list-sessions応答（fake-sess稼働）に存在しない--session名X（ghost-sess）を指定"
+description = "detachの失敗mapping: (a) 汎用のaction detach非zero終了（FAKE_FAIL_DETACH）はOperationFailed（exit 5）へ変換しmessageへstderr本文を埋め込む。(b) 不在session名はTASK-93 D3の事前存在確認でNoTarget（exit 3）+ candidates（running名一覧）となり、action detach argvは不発・zellij側のrc=1 Session not found応答（M3 (b2)実測文面）には届かない（従来はexit 5・zellij文面埋込みで文面不統一だったものをzelper側統一文面で解消）"
+given = "fake zellij shimに対するzelper --session X detach --json実行の各構成: (a) FAKE_FAIL_DETACHによりaction detachが非zero終了、(b) list-sessions応答（fake-sess稼働）に存在しない--session名X（ghost-sess）を指定"
 expect_return = "(a) exit 5（OperationFailed）・messageはstderr本文（boom）を含む。(b) exit 3（NoTarget）・messageはsession 'ghost-sess' not foundを含みerror.candidatesにfake-sessを含む。FAKE_LOGにaction detach argvなし（事前確認で不発）"
 
 [[condition]]

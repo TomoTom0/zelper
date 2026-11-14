@@ -11,7 +11,7 @@
 |---|---|---|---|
 | L1 unit | selector / planner / KDL parse・生成 / JSON serialize | `cargo test`（in-module + tests/unit） | なし |
 | L2 fake-backend | ZellijBackend traitのfakeによる多段操作・部分失敗 | `cargo test`（tests/fake_backend） | なし（fake） |
-| L3 CLI契約 | 引数parse・help・exit status・stdout構造・fake shim呼び出し列 | `cargo test`（tests/cli、`assert_cmd`） | fake zellij shim（tests/fixtures/fake-zellij。argvを記録しfixtureを返す実行可能script） |
+| L3 CLI契約 | 引数parse・help・exit status・stdout構造・fake shim呼び出し列 | `cargo test`（tests/cli、`assert_cmd`） | fake zellij shim（test実行時にtests/cli/shim_common.rs正本から生成。argvを記録しfixtureを返す実行可能script） |
 | L4 統合 | 実zellij 0.44.3での実挙動・preservation実証 | podman sandbox（debian:12-slim + ホストバイナリ ro mount、--network=none、config.kdl配置でSetup Wizard抑止、`script -qec` PTY駆動） | あり |
 
 L4の実行形: Phase 1と同一のpodman構成（docs/research/zellij-capabilities.md §3）。テストランナーはコンテナ内で (1) session起動 (2) zelperバイナリ実行（/workにmount） (3) heartbeat / list-panes --json で検証 (4) trapでsession全kill。**実行環境のホストでzellijは実行しない**。
@@ -50,6 +50,16 @@ TASK-87/88改訂（2026-09-26・verb拡張の条件書）: `watch`（TASK-86）�
 - L4でしか検証しない要求（§2.8・§2.11・§3）は§3「L4統合test」節へ集約し、該当条件書の`[[excluded]]`から参照行で指す
 - 条件化しない要求（未test・test支援資産の能力等）は各条件書の`[[excluded]]`に記録
 - test file冒頭のheader comment（`// L1: target resolver（test-plan §2.2）`等）は、参照先の節番号が対応表として存続するため更新を必須としない。新規test fileは条件書を参照するheaderとする
+
+### 2.9 failure injection: L3 shim envとL2 FakeBackend注入APIの語彙対応（TASK-83）
+
+failure injection条件は各機能の条件書へ分散するが、同一の失敗・黙失敗をL2（FakeBackendへのprogrammatic注入）とL3（shimのFAKE_* env注入）でどう担うかの語彙対応は本表で担保する（機構分類・命名規則の正本はtests/cli/shim_common.rs doc comment）:
+
+| 分類 | L3 shim env（tests/cli/shim_common.rs） | L2 FakeBackend API（tests/fake_backend/fake.rs） |
+|---|---|---|
+| 対象指定の失敗注入（rc=1 + stderr） | `FAKE_FAIL_<ACTION>`系（FAKE_FAIL_DETACH / FAKE_FAIL_LIST_TABS / FAKE_FAIL_DUMP_SCREEN / FAKE_FAIL_WRITE_CHARS / FAKE_FAIL_WRITE / FAKE_FAIL_SEND_KEYS / FAKE_FAIL_MOVE_PANE / FAKE_FAIL_MOVE_TAB / FAKE_FAIL_DELETE_SESSION / FAKE_FAIL_RENAME_SESSION） | `inject_failure`（op先頭一致で次回呼出を失敗）/ `inject_failure_as`（ErrorClass指定）・`fail_override_layout_nth` / `fail_companion_wasm_extract` / `fail_companion_permissions_seed`等の個別注入 |
+| 成功回数超過から失敗（polling・postcheck系列） | `FAKE_FAIL_DUMP_SCREEN_AFTER`（`pane:成功回数`のspace区切りlist） | `dump_fail_after`（watch pollingでのpane消滅）・`fail_list_sessions_after_create / _rename / _delete`（事後list_sessions失敗） |
+| 黙失敗（rc=0だが作用なし） | `FAKE_MUTE_DELETE_SESSION` / `FAKE_MUTE_RENAME_SESSION` | `mute_delete_session` / `mute_rename_session` / `mute_create_session` / `mute_rename_tab`等の`mute_*`系 |
 
 ## 3. L4統合test（実zellij・repo管理外）
 

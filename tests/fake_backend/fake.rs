@@ -55,6 +55,7 @@ impl FakeRun {
 /// TASK-95レビュー対応: rename_session呼出後の事後list_sessions状態注入
 /// （postcondition各判定〔旧名消失・新名running出現〕の独立保護検証用）
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // 一部のtest binaryから未使用になりうる
 pub enum RenamePostInjection {
     /// 旧名残存 + 新名running行追加（旧名消失検査の独立保護）
     KeepOldAddNew,

@@ -19,7 +19,8 @@
 // | 逐次差替系 | `FAKE_DUP_AFTER_OVERRIDE` + `FAKE_DUP_PANES` | 呼出列に依存する応答差替（override-layout呼出後・close-pane呼出前のlist-panesのみdup fixtureへ。FAKE_DUP_PANES未設定時はpanes-three-dup.json） |
 // | 応答内容系 | `FAKE_SESSIONS` / `FAKE_SESSIONS_EMPTY` | list-sessions応答の差替 / 0-session環境（rc=1再現） |
 // | 応答内容系 | `FAKE_DUMP_SCREEN` / `FAKE_DUMP_SCREEN_FRAMES` | dump-screen応答の差替（FULL接尾） / pane毎呼出回数で内容が変わる応答（@@ATTEMPT@@区切り） |
-// | 状態管理系 | `FAKE_PANES_JSON` / `FAKE_TABS_JSON` | 行単位object状態file（`${FAKE_LOG}.panes/.tabs`）の初期source。rename-pane/close-pane/new-pane/move-tab/delete-session/rename-session/attach -b作成を応答へ反映 |
+// | 状態管理系（pane/tab） | `FAKE_PANES_JSON` / `FAKE_TABS_JSON` | 行単位object状態file（`${FAKE_LOG}.panes/.tabs`）の初期source。rename-pane/close-pane/new-pane（.panes）・new-tab/rename-tab-by-id/move-tab（.tabs）の作用をlist-panes/list-tabs応答へ反映 |
+// | 状態管理系（session） | （envなし。状態fileはsetup時初期化） | delete-session→`${FAKE_LOG}.deleted`（list-sessions応答から除外）・rename-session→`.renamed`（from名をto名へ差替）・attach -b作成ok→`.sessions`（list-sessions応答へ追加）。FAKE_PANES_JSON/FAKE_TABS_JSONに依存しない独立機構 |
 // | 状態管理系 | `FAKE_NEW_PANE_TEMPLATE` / `FAKE_NEW_TAB_TEMPLATE` | new-pane/new-tab handlerの採番object雛形（@ID@/@POS@ placeholder） |
 // | 失敗注入系 | `FAKE_FAIL_LIST_TABS` | list-tabsをrc=1 + stderrで失敗 |
 // | 失敗注入系 | `FAKE_FAIL_DUMP_SCREEN` / `FAKE_FAIL_DUMP_SCREEN_AFTER` | 失敗させるpane idのspace区切りlist / `pane:成功回数`形式（成功回数超過から失敗） |
