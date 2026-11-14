@@ -2401,6 +2401,28 @@ fn session_multiple_and_none_running_error() {
         );
 }
 
+/// TASK-98: --session "a b"（空白含み完全名）はresolve_sessionの事前存在確認を
+/// 完全名で通過し、backend argvの--session接頭へ完全名（a bは単一argv要素——
+/// shimのaction入口照合が完全名一致で受理）が渡る（切り詰め名parseだと世界model
+/// に載らずNoTargetになる系列の解消）
+// [covers:cli-grammar.session-flag-whitespace-name-pass-through]
+#[test]
+fn session_flag_whitespace_name_passes_resolution() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("sess-flag-ws");
+    cmd.env("FAKE_SESSIONS", "a b [Created 1m ago]")
+        .args(["--session", "a b", "read", "1"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "--session a b action dump-screen -p terminal_1"),
+        "calls: {:?}",
+        calls(&log)
+    );
+}
+
 /// TASK-93 D3: --session不在名の事前存在確認。稼働ありならNoTarget（exit 3）+
 /// candidates（running名一覧。EXITED行は候補から除外）でaction argv不発。完全0-session環境なら作成案内
 /// 文面（candidatesなし）。EXITED名明示は「存在」扱いで解決を通過する
