@@ -245,44 +245,69 @@ fn r28_persistent_conflict_aborts_without_writing() {
 /// XDG_CACHE_HOME隔離（companion_dir()解決の検証に使用。static Mutexで直列化）
 static XDG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// env一時変更のRAII guard（REVIEW指摘minor-1/2対応）: 生成時に元値をvar_osで
+/// 保存し（非UTF-8値も未設定と区別して保持）、Dropで復元する。closure内でpanic
+/// してもunwind経由で確実に復元される
+struct EnvGuard {
+    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+}
+
+impl EnvGuard {
+    /// safety: XDG_LOCKで直列化した範囲内でのみ生成すること（Dropでの復元も
+    /// 同範囲のlock保持中に行われる）
+    unsafe fn save(keys: &[&'static str]) -> Self {
+        EnvGuard {
+            saved: keys.iter().map(|k| (*k, std::env::var_os(k))).collect(),
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, prev) in &self.saved {
+            // safety: 保存した元値への復元のみを行う
+            match prev {
+                Some(p) => unsafe { std::env::set_var(key, p) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+}
+
+/// XDG_LOCK取得。poisonは無視する: envの復元はEnvGuardのDropが保証するため、
+/// poison（panic搬送）は隔離対象の状態破壊を意味せず、後続testを巻き込まない
+/// （fake_remap/fake_moveの同helperと同じ毒化回復方針）
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    XDG_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn with_isolated_xdg<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _guard = XDG_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let dir = std::env::temp_dir().join(format!("zelper-seed-xdg-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let prev = std::env::var("XDG_CACHE_HOME").ok();
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きし、即座に復元する
+    // 宣言順の逆順でdropするため、env復元（_env）はlock解放（_lock）に先行する
+    let _env = unsafe { EnvGuard::save(&["XDG_CACHE_HOME"]) };
+    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きする
     unsafe { std::env::set_var("XDG_CACHE_HOME", &dir) };
-    let out = f(&dir);
-    match prev {
-        Some(p) => unsafe { std::env::set_var("XDG_CACHE_HOME", p) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    out
+    f(&dir)
 }
 
 /// HOME隔離 + XDG_CACHE_HOME未設定（未設定時の既定path解決の検証に使用。XDG_LOCKで直列化）。
 /// 実userの~/.cacheを汚染しないようHOMEを一時dirへ向けてからXDG_CACHE_HOMEをunsetする
 fn with_isolated_home_no_xdg<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _guard = XDG_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let dir = std::env::temp_dir().join(format!("zelper-seed-home-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let prev_home = std::env::var("HOME").ok();
-    let prev_xdg = std::env::var("XDG_CACHE_HOME").ok();
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きし、即座に復元する
+    // 宣言順の逆順でdropするため、env復元（_env）はlock解放（_lock）に先行する
+    let _env = unsafe { EnvGuard::save(&["HOME", "XDG_CACHE_HOME"]) };
+    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書き/unsetする
     unsafe { std::env::set_var("HOME", &dir) };
     unsafe { std::env::remove_var("XDG_CACHE_HOME") };
-    let out = f(&dir);
-    match prev_home {
-        Some(p) => unsafe { std::env::set_var("HOME", p) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
-    match prev_xdg {
-        Some(p) => unsafe { std::env::set_var("XDG_CACHE_HOME", p) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    out
+    f(&dir)
 }
 
 // [covers:companion-seed.concurrent-seeds-serialize-via-advisory-lock]
