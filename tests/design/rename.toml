@@ -61,7 +61,7 @@ expect_return = "Okかつstate整合（panes.len()=1。titleの書き換えとpa
 
 [[condition]]
 id = "rename.session-success-argv-and-report"
-source_lines = "tests/cli/list_read_send.rs:3600"
+source_lines = "tests/cli/list_read_send.rs:3634"
 target_function = "ZellijBackend::rename_session → rename::run_session（実行+報告）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.0（grammar: zelper rename session NAME NEW_NAME [--json]）・§2.7（backend argvは zellij --session <from> action rename-session <to> のaction形式〔top-level rename-sessionは0.44.3に存在しない・M1/M3〕）・§2.6（human報告: renamed session 'old' -> 'new'〔user指定文面・空白含み名のためquote必須〕/ JSON: data.renamed_session=旧名・data.name=新名）・§2.5（postcondition: 事後list_sessionsで旧名消失+新名running出現）"
 description = "rename session成功経路のargvと報告契約: 実行は `--session <from> action rename-session <to>` のaction形式1回で行われ（top-level形式は使わない・成功stdout/stderrは空〔実測M4 H〕）、事後list-sessions再取得のpostcondition（旧名消失+新名running出現）を通過したうえでhuman 1行 / JSON envelope（renamed_session=旧名・name=新名。paneのrenamed・tabのrenamed_tab流儀の継承）で報告する"
@@ -70,7 +70,7 @@ expect_return = "いずれもexit 0。FAKE_LOGに `--session old action rename-s
 
 [[condition]]
 id = "rename.session-missing-name-notarget-with-candidates"
-source_lines = "tests/cli/list_read_send.rs:3655, tests/fake_backend/rename_add_remove.rs:696"
+source_lines = "tests/cli/list_read_send.rs:3689, tests/fake_backend/rename_add_remove.rs:689"
 target_function = "rename::run_session（事前存在確認: list_sessions EXITED込み）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.1（旧NAME事前存在確認はlist_sessions〔EXITED込み〕。不在はNoTarget・candidates=全行のname〔EXITED込み〕・行0件は「no zellij sessions found」文面——remove sessionのremove::session_not_foundと同一基準・同一文面群。単一対象のため不在文面は単数形 session 'NAME' not found）・§2.6表・§2.8（実行順序: 不在判定はEXITED判定・NEW_NAME衝突判定に優先。複合違反入力での優先順位固定はL2の優先順位test〔本条件とexited条件の2条件のtagを持つ〕が担う）"
 description = "旧NAME不在の分類: NAMEがlist_sessionsの行（RUNNING・EXITEDとも）に存在しない場合はNoTarget（exit 3）で中断し、candidatesには全行のname（EXITED行も含む）を出す（remove sessionと同一基準。agentの修正導線が同じになる）。一覧が完全0件（0-session環境）の場合は候補列出力ではなく「no zellij sessions found」の文面でNoTargetになる。いずれもrename呼出は不発（fail-fast）。不在判定はNEW_NAME衝突判定より優先する（§2.8順序3が順序5に先行——不在NAME×NEW_NAME衝突の複合違反では衝突でなくNoTarget）"
@@ -79,7 +79,7 @@ expect_return = "(i) exit 3（NoTarget）。error.candidatesは全行名の完�
 
 [[condition]]
 id = "rename.session-new-name-collision-preflight"
-source_lines = "tests/cli/list_read_send.rs:3717"
+source_lines = "tests/cli/list_read_send.rs:3751"
 target_function = "rename::run_session（NEW_NAME衝突事前検査: EXITED込み）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.2（事前list_sessions一覧でNEW_NAMEと同名の行〔EXITED行を含む〕が存在すればPreflight exit 7でfail-fast拒否。文面はadd sessionと同一形式 session already exists: 'NEW_NAME'。衝突黙失敗〔M4 I: rc=0・旧名消失・既存名のみ残存〕がwrap側の事前検査なしには検出不能であることが根拠。EXITED込みはEXITED名へのrename挙動が未測定のため安全側）・§2.6表"
 description = "NEW_NAME衝突の事前fail-fast: NEW_NAMEが既存行（running・EXITEDの両方）と同名の場合はPreflight（exit 7）で状態変更前に拒否する。zellijは既存名へのrenameをrc=0・両stream空の黙って失敗として受け入れる（M4 I実測）ため、事前検査が唯一の防衛。文面はadd sessionと同一の session already exists 形式"
@@ -88,7 +88,7 @@ expect_return = "いずれもexit 7（Preflight）。messageは session already 
 
 [[condition]]
 id = "rename.session-same-name-usage-error"
-source_lines = "tests/cli/list_read_send.rs:3752"
+source_lines = "tests/cli/list_read_send.rs:3786"
 target_function = "rename::run_session（app層冒頭の同一名検査）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.2（NEW_NAME == NAMEはUsage exit 2・NEW_NAME must differ from NAMEとして、一覧取得より前にapp層冒頭で拒否。zellijは同一名renameをrc=0のno-op成功として受け入れる〔M95-B実測〕が、postconditionの旧名消失が同一名では原理的に不成立のためVerificationFailedへ誤分類される唯一の系——構文的に無意味な入力としてのfail-fast）・§2.6表・§4軸E"
 description = "同一名renameのUsage事前拒否: NAME == NEW_NAMEは一覧取得より前にUsage（exit 2）で拒否する（無駄なbackend呼び出しをしない。app層検査でclapが表現できない Semantics を担う）。同一名を放置するとno-op成功がpostconditionでVerificationFailedに誤分類される"
@@ -97,7 +97,7 @@ expect_return = "exit 2（Usage）。error.class=Usage。messageはmust differ�
 
 [[condition]]
 id = "rename.session-invalid-new-name-usage-error"
-source_lines = "tests/cli/list_read_send.rs:3791"
+source_lines = "tests/cli/list_read_send.rs:3825"
 target_function = "rename::run_session（app層冒頭のNEW_NAME validation）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.3（wrap側事前検査は (a) 空文字 (b) '/'含み (c) 空白含み の3拒否〔いずれもUsage exit 2・一覧取得より前〕。空文字はrc=0両stream空の黙失敗〔M95-C1〕・'/'含みはrc=0でcacheのsession_info directoryのみnested pathへ移動する部分的適用〔M95-C2〕・空白含みはzellij受理後もparse_sessionsがlist-sessions行の先頭wordのみを名前化するため世界modelで復元不能〔postcondition必敗〕のため事前検査必須。先頭'-'はTASK-95時点ではclap拒否済みのため二重検査不要と判断していたが、TASK-97で`--`option終端経由の通過系列（TASK-96実証）により判断を撤回して検査追加〔下記出典〕。それ以外の文字種の推測拒否は行わない——すり抜けはpostconditionが最終防衛）・§2.6表・§4軸D + tmp/tasks/tm-97/design_rename-leading-dash.md §2.1（NEW_NAME検査へ先頭`-`を4種目として追加。`--`option終端経由の通過系列が`--`挿入なしの zellij --session <from> action rename-session <to> 組み立て〔src/zellij/process.rs rename_session〕へ到達するためzeller側clap依存の拒否が成立せず、有効option一致値〔-c等〕の下流挙動は未測定・zellij側option集合はzeller管理外のためzellij委ねでは契約保証不能——下流のoption解釈（zellij有効option一致値・将来版option集合）に依存せずNEW_NAMEを確定拒否する。add session NAME検査〔TASK-96〕と対称の4種目。違反はUsage exit 2・一覧取得より前・文面NEW_NAME must not start with '-'）・§2.2（検査順 empty → '/' → whitespace → 先頭`-` → 同一名differ）・§2.5（4案目のJSON検証は--jsonを--より前に置く形式——`--`以降の--jsonはpositional化するため）"
 description = "NEW_NAME validationの最小set: 空文字・'/'含み・空白含み・先頭`-`（`--`経由）NEW_NAMEはUsage（exit 2）で一覧取得より前に拒否する（観測された黙失敗・状態破壊系と世界modelで復元不能な系に加え、TASK-97で先頭`-`を4種目として追加——`--`option終端経由でCLI解析を通過するためclap依存の拒否が成立せず、下流のoption解釈（zellij有効option一致値・将来版option集合）に依存せずNEW_NAMEを確定拒否する〔add session NAME検査と対称〕。それ以外の文字種の推測拒否は行わない——すり抜けはpostconditionが最終防衛）。空白caseはL3（本条件）とL2（whitespace-name-rejected条件）の、先頭`-`caseはL3（本条件）とL2（session-leading-dash-new-name-rejected条件）の両層で検証"
@@ -106,7 +106,7 @@ expect_return = "いずれもexit 2（Usage）。error.class=Usage。messageは 
 
 [[condition]]
 id = "rename.session-exited-name-preflight-refused"
-source_lines = "tests/cli/list_read_send.rs:3841, tests/fake_backend/rename_add_remove.rs:697"
+source_lines = "tests/cli/list_read_send.rs:3875, tests/fake_backend/rename_add_remove.rs:690"
 target_function = "rename::run_session（EXITED行の事前拒否）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.4（NAMEがEXITED行〔exited == true〕に一致する場合はPreflight exit 7でfail-fast拒否。文面: cannot rename an EXITED (dead) session 'NAME' (attach to resurrect it first)。action rename-sessionは対象sessionのserver processへの接続を必要としserver不在名への呼び出しは失敗のみ〔M95-A/D実測〕のため、成功系列が存在せず事前拒否が無駄なzellij呼び出しを省く。remove sessionのEXITED受理との対比は「対応する成功操作の有無」）・§2.6表・§4軸C・§2.8（EXITED判定はNEW_NAME衝突判定より優先。複合違反入力での優先順位固定はL2の優先順位test〔本条件とmissing条件の2条件のtagを持つ〕が担う）"
 description = "EXITED sessionのrename不可: NAMEが事前一覧のEXITED行に一致する場合はPreflight（exit 7）で状態変更前に拒否し、resurrection（attach）への案内文面を出す（死dataへのaction系呼び出しは失敗のみのため）。存在確認（行にあるか=NoTarget境界）と実行可否判定（runningか=Preflight境界）は別個の検査であることの固定。EXITED判定はNEW_NAME衝突判定より優先する（§2.8順序4が順序5に先行——EXITED行NAME×NEW_NAME衝突の複合違反では衝突でなくEXITED拒否）"
@@ -115,7 +115,7 @@ expect_return = "exit 7（Preflight）。messageは cannot rename an EXITED (dea
 
 [[condition]]
 id = "rename.session-state-rewrite-on-success"
-source_lines = "tests/fake_backend/rename_add_remove.rs:519"
+source_lines = "tests/fake_backend/rename_add_remove.rs:512"
 target_function = "ZellijBackend::rename_session（FakeBackend状態遷移）+ rename::run_session"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.9（L2 FakeBackendのrename_session実装: record `rename-session@{from} {to}`〔list_tabs_forのlist-tabs@{session}流儀。fail_opのprefix照合で失敗注入可〕+ sessions内のname == from行をname = toへ書き換え〔exitedは不変〕）・§2.7（trait signature）"
 description = "成功時のbackend状態書き換え契約: rename_session呼出成功（Ok）時はlist_sessions状態のfrom行がtoへ書き換わる（exited fieldは不変——renameは実行状態を変えない）。呼出記録は `rename-session@<from> <to>` 形式。postcondition検証（事後一覧での旧名消失+新名running出現）はこの状態書き換えの上に成立する"
@@ -124,7 +124,7 @@ expect_return = "Ok。callsは list-sessions → rename-session@old new → list
 
 [[condition]]
 id = "rename.session-silent-noop-detected-by-postcondition"
-source_lines = "tests/fake_backend/rename_add_remove.rs:540"
+source_lines = "tests/fake_backend/rename_add_remove.rs:533"
 target_function = "rename::run_session（postcondition構成）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.5（postcondition: rename呼出後にlist_sessionsを1回取得し (1) 旧NAME行の消失 (2) NEW_NAME行が存在しexited == false の両方を確認。不成立はVerificationFailed exit 7・文面 rename of session 'NAME' did not take effect (unchanged in list-sessions)。衝突黙失敗〔M4 I〕・no-op黙失敗〔M95-B/C1〕など失敗の現れ方が複数あるため両条件必須）・§2.6表・§4軸B"
 description = "rc=0黙失敗のpostcondition検出: rename_session呼出がOkでもlist_sessions状態が書き換わらない系列（rc=0黙失敗。M4 I型）は、事後一覧のpostcondition検証でVerificationFailed（exit 7）として報告する。無検証の成功を返さない構造の固定（rename paneのsilent-noop検出・DD-8サイレント成功対策と同型）"
@@ -133,7 +133,7 @@ expect_return = "Err（class=VerificationFailed・exit 7）。messageはdid not 
 
 [[condition]]
 id = "rename.session-backend-failure-operation-failed"
-source_lines = "tests/fake_backend/rename_add_remove.rs:569"
+source_lines = "tests/fake_backend/rename_add_remove.rs:562"
 target_function = "rename::run_session（backend呼出失敗）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.6表（rename呼出失敗〔zellij非zero終了・rc=0+stderr〔race時の不在名等〕・timeout〕はOperationFailed exit 5）・§2.9（fail_opのprefix照合〔record内starts_with〕により失敗注入可）"
 description = "rename_session呼出自体の失敗はOperationFailedとして伝播する（postcondition検証に到達しない失敗経路。exit 5）。呼出失敗時のclassとexit code対応の維持（事前検査〔Usage/NoTarget/Preflight〕と実行段失敗〔OperationFailed〕の分離）"
@@ -142,7 +142,7 @@ expect_return = "Err（class=OperationFailed・exit 5）。callsに `rename-sess
 
 [[condition]]
 id = "rename.session-postcondition-list-failure-preserves-class"
-source_lines = "tests/fake_backend/rename_add_remove.rs:589"
+source_lines = "tests/fake_backend/rename_add_remove.rs:582"
 target_function = "rename::run_session（事後一覧取得失敗のclass保持伝播）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.5（事後一覧取得の失敗は元class/exitを保持しmessageへ文脈付与〔renamed session 'NAME' but failed to confirm: <元message>——add session DD-14・remove sessionと同一pattern。rename呼出が成功済みの可能性があるため〕）・§2.6表・§2.9（L2 FakeBackend: fail_list_sessions_after_rename注入〔rename-session@呼出観測後のlist_sessions呼出のみ失敗。事前確認は成功。fail_opは先頭一致で事前確認側に当たるため専用arm〕）"
 description = "事後一覧取得失敗の報告: rename呼出成功後のlist_sessions呼出が失敗する系列では、実行済みの結果を検証できないため元のerror class/exitを保持したままmessageへ文脈（but failed to confirm）を付与して報告する（OperationFailedへの素通しでもVerificationFailedへの丸めでもないclass保持。OperationFailed・ZellijUnavailableの両注入でclass/exit保持を検証——class保持が本質）"
@@ -151,7 +151,7 @@ expect_return = "いずれもErr。classは注入と同一の保持（OperationF
 
 [[condition]]
 id = "rename.session-dispatch-via-probe-backend"
-source_lines = "tests/cli/list_read_send.rs:3879"
+source_lines = "tests/cli/list_read_send.rs:3913"
 target_function = "main.rs run（RenameTarget::Session例外dispatch: probe backend + check_capability）→ rename::run_session"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.7（dispatchはRenameTarget::Session例外dispatch——ZellijCliBackend::new(\"zelper-probe-unused\") + check_capability → rename::run_session(&probe, ...)。旧NAMEの存在確認はlist_sessionsで完結し対象session解決〔mk_backend〕を必要としない。共通経路のまま実装すると0-session環境でresolve_sessionのNoTarget〔共通解離文面〕が先に立ち本機能自身の事前確認文面に到達しない。global --session flagは無視——list/add/remove sessionと同一規約）・§4軸F"
 description = "rename sessionの例外dispatch: 対象session解決（mk_backend）を経ないprobe backend直接構築により、zellij sessionが1つも存在しない環境でもrename sessionが事前確認まで到達する（共通解離経路の文面で失敗する回帰の検出）。事前確認文面（no zellij sessions found）がrun_session層由来であることと、probe backend経由でlist-sessions呼出が発生していることで検証する"
@@ -160,7 +160,7 @@ expect_return = "exit 3（NoTarget）。messageはno zellij sessions foundを含
 
 [[condition]]
 id = "rename.session-whitespace-name-rejected"
-source_lines = "tests/fake_backend/rename_add_remove.rs:637"
+source_lines = "tests/fake_backend/rename_add_remove.rs:630"
 target_function = "rename::run_session（空白含みNEW_NAMEの事前拒否）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.3（空白含みNEW_NAMEはUsage exit 2で一覧取得より前に拒否。zellij自体は空白含み名を受理する〔実測M95-C3: s3 → \"a b\" rename成功〕が、parse_sessionsがlist-sessions行の先頭wordのみを名前化するため空白含み名はzellerの世界modelで復元不能——postcondition〔旧名消失+新名running出現〕が必敗になる。zellij受理可能性と世界modelでの表現可能性は別問題であり、世界modelで復元不能な名前の作成は許可しない。TASK-95コードレビューblocker-1対応の設計変更——旧条件 rename.session-whitespace-name-accepted〔受理仕様〕は意味反転のため廃止し本idへ差し替え）・§2.6表・§4軸D"
 description = "空白含みNEW_NAMEのUsage事前拒否: 空白を含むNEW_NAMEはzellijが受理しても（M95-C3実測）一覧取得より前にUsage（exit 2）で拒否する。受理した場合、rename成功後のlist-sessions行は「a b [Created ...]」となるためparse_sessionsが名前を「a」と解釈し、旧名指定はNoTarget・NEW_NAME衝突検査は漏れ・postconditionは必敗（VerificationFailed）になるため。L3 shim（invalid-new-name条件の空白case）と対をなすL2側の検証"
@@ -169,7 +169,7 @@ expect_return = "Err（class=Usage・exit 2）。messageはNEW_NAME must not con
 
 [[condition]]
 id = "rename.session-postcondition-both-branches-required"
-source_lines = "tests/fake_backend/rename_add_remove.rs:660"
+source_lines = "tests/fake_backend/rename_add_remove.rs:653"
 target_function = "rename::run_session（postcondition両判定の独立必要性）"
 source = "tmp/tasks/tm-95/design_rename-session.md §2.5（postconditionは (1) 旧NAME行の消失〔RUNNING/EXITED問わず〕 (2) NEW_NAME行が存在しexited == false の両方を確認。不成立はVerificationFailed exit 7。衝突黙失敗〔M4 I〕は「旧名消失・新名不出現」・no-op黙失敗〔M95-B/C1〕は「旧名残存・新名不出現」など失敗の現れ方が複数あるため両条件必須）・§4軸B・TASK-95コードレビュー指摘2（mute注入では旧名残存・新名不在が同時に成立するため各判定の弱体化を検出できない——独立保護testが必要）"
 description = "postcondition各判定の独立保護: 片方の判定のみを満たす事後状態——(a) 旧名残存+新名running行追加（旧名消失検査の独立保護） (b) 旧名・新名とも行消失（新名running出現検査の独立保護） (c) 旧名消失+新名がEXITED行で出現（exited == false検査の独立保護）——のいずれでもVerificationFailed（exit 7）になる。実装を旧名消失のみ・新名出現のみ・exited検査なしのいずれかへ弱めても本条件が検出する（fake.rsのrename_post_inject注入〔KeepOldAddNew / DropBoth / NewAsExited〕で3系列を再現）"
@@ -178,7 +178,7 @@ expect_return = "いずれの系列もErr（class=VerificationFailed・exit 7）
 
 [[condition]]
 id = "rename.session-leading-dash-new-name-rejected"
-source_lines = "tests/fake_backend/rename_add_remove.rs:746"
+source_lines = "tests/fake_backend/rename_add_remove.rs:739"
 target_function = "rename::run_session（app層冒頭のNEW_NAME validation: 先頭`-`）"
 source = "tmp/tasks/tm-97/design_rename-leading-dash.md §2.1（NEW_NAME検査へ先頭`-`を4種目として追加。`--`option終端経由の通過系列が`--`挿入なしの zellij --session <from> action rename-session <to> 組み立て〔src/zellij/process.rs rename_session〕へ到達するためzeller側clap依存の拒否が成立せず、有効option一致値〔-c等〕の下流挙動は未測定・zellij側option集合はzeller管理外のためzellij委ねでは契約保証不能——下流のoption解釈（zellij有効option一致値・将来版option集合）に依存せずNEW_NAMEを確定拒否。add session NAME検査〔TASK-96〕と対称）・§2.2（検査順 empty → '/' → whitespace → 先頭`-` → 同一名differ。先頭`-`は同一名differの前——文字種4種〔形式検査〕が関係検査〔differ〕に先行。文面NEW_NAME must not start with '-'）・§2.3（旧NAMEへの文字種Usage検査は追加しない——世界model〔一覧行〕にある名前は文字種にかかわらずrename対象とする既存契約を変えない。一覧存在時のbackend到達は既存契約の帰結）・§2.5 L2新条件欄"
 description = "先頭`-`NEW_NAMEのUsage事前拒否と検査順・旧NAME非検査の契約保護（L2）: 先頭`-`NEW_NAMEはUsage（exit 2）で一覧取得より前に拒否する（run_session直呼びのためclapを経由しない系列〔先頭`-`直値〕で検証）。あわせて (a) 先頭`-`×同一名の複合違反では先頭`-`優先（differ文面でない——§2.2の挿入位置保護） (b) 先頭`-`×'/'・先頭`-`×空白の複合違反では既存文字種優先（先頭`-`検査を'/'やwhitespaceより前に誤挿入する実装の検出——本taskが定める順序の固定。add側L2条件〔TASK-96〕はdifferを持たずrename側の挿入位置を保護しないためrename側で保護する） (c) 旧NAME=\"-x\"（一覧に行が存在しrunning）はUsage拒否されずbackend呼出へ到達（§2.3決定の契約保護——対称性から旧NAMEへもstarts_with('-')を誤追加する実装の検出）を担う。L3 shim条件（invalid-new-name-usage-errorの先頭`-`案）と対をなすL2側の検証"
@@ -226,7 +226,7 @@ expect_return = "いずれの構成もErr（class=VerificationFailed・exit 7）
 
 [[condition]]
 id = "rename.tab-success-argv-and-report"
-source_lines = "tests/cli/list_read_send.rs:3920"
+source_lines = "tests/cli/list_read_send.rs:3954"
 target_function = "ZellijBackend::rename_tab → rename::run_tab（TABSPEC解決+実行+報告）"
 source = "docs/design/detailed-design.md DD-8（plan: rename-tab-by-id <id> <name>・postcondition: list-tabsでname反映確認・検証失敗はVerificationFailed exit 7）+ DD-1.3（TABSPEC = tab IDまたは一意なtab名——全verb共通解決）+ docs/testing/test-plan.md §2.5（pane/tab rename呼び出しとpostcondition検証）"
 description = "rename tab成功経路のTABSPEC解決とargv・報告契約: TABSPEC一意名はresolve_tabでTabIdへ解決され（全verb共通解決のverb経由確認——L2成功条件のID/一意名両case直呼びと対）、実行は `--session <sess> action rename-tab-by-id <id> <name>` 1回、postcondition（list-tabs再取得でname反映）通過後にhuman 1行 / JSON envelope（renamed_tab=id・name=新名。paneのrenamed・sessionのrenamed_session流儀の継承）で報告する。cli-grammar.rename-parse-emits-typed-argv（ID指定・human報告・argv形式）と分担: 本条件は一意名解決込み系列とJSON envelopeを担う"

@@ -267,6 +267,18 @@ if [[ "$3" == "action" ]]; then
     # stdoutへechoし（parse_created_paneはstdout全体をpane specとしてparse）、
     # FAKE_NEW_PANE_TEMPLATE（@ID@=数値placeholderの1 pane object JSON）の行をappend
     new-pane)
+      # 引数境界検証（TASK-67レビューminor-1）: `--`以降は独立引数列（DD-11 pane
+      # map: -- command）。--以降に空白を含む引数があれば複数wordの誤結合（例:
+      # ["codex","exec"]を"codex exec"の単一引数へ結合する誤実装）として失敗応答
+      # する。echo "$*"の空白連結logでは引数境界が見えないためhandler内で検査。
+      # 空白含みの正当な単一command語（quote渡し）は本shimの対象外
+      seen_dd=0
+      for a in "$@"; do
+        if [[ $seen_dd -eq 1 && "$a" == *[[:space:]]* ]]; then
+          echo "shim: args after -- must be separate argv elements" >&2; exit 1
+        fi
+        [[ "$a" == "--" ]] && seen_dd=1
+      done
       state="${FAKE_LOG}.panes"
       if [[ -n "$FAKE_PANES_JSON" ]]; then
         if [[ ! -f "$state" ]]; then
@@ -293,6 +305,23 @@ if [[ "$3" == "action" ]]; then
     # placeholderの1 tab object JSON）の行をappend（add tab postconditionの
     # list-tabs存在確認への反映。new-pane handlerと同一構成）
     new-tab)
+      # 引数境界検証（TASK-67レビューminor-1）: -l/--layout-stringは単一値option
+      # （DD-11 tab map: -l NAME・-l PATH・--layout-string KDL）。値の次のtokenが
+      # 「不在か--」であることを検査し、値を複数argvへ分割する誤実装（例: inline
+      # KDL "layout {}"を"layout"と"{}"の2引数へ分割）を失敗応答で検出する。
+      # echo "$*"の空白連結logでは引数境界が見えないためhandler内で検査
+      i=1
+      while [[ $i -le $# ]]; do
+        if [[ "${!i}" == "-l" || "${!i}" == "--layout-string" ]]; then
+          v=$((i + 1)); nx=$((i + 2))
+          if [[ $v -gt $# ]] || { [[ $nx -le $# ]] && [[ "${!nx}" != "--" ]]; }; then
+            echo "shim: -l/--layout-string requires a single value argument" >&2; exit 1
+          fi
+          i=$nx
+        else
+          i=$((i + 1))
+        fi
+      done
       state="${FAKE_LOG}.tabs"
       if [[ -n "$FAKE_TABS_JSON" ]]; then
         if [[ ! -f "$state" ]]; then
