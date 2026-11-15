@@ -49,6 +49,7 @@ cargo install --git https://github.com/TomoTom0/zelper
 cargo install --path .
 mise run install        # 同等（repoのmise.tomlに定義済み）
 cargo build --release   # target/release/zelper（buildのみ）
+mise run release        # release作成（test→musl build→package→GitHub Release公開を冪等に実行）
 ```
 
 build時にcompanion plugin（wasm）を自動buildしてbinaryへ埋め込むため、install・配布形態は従来どおり単一binary（追加assetなし）。prebuilt wasmを使う場合は `ZELPER_PLUGIN_WASM` envにpathを指定する（CI等の高速化・escape hatch）。
