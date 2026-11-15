@@ -4,12 +4,12 @@
 [meta]
 feature = "add-remove"
 source_file = "src/app/remove.rs"
-verified = false
-verified_at = "2026-11-14"
+verified = true
+verified_at = "2026-11-15"
 verified_by = "claude"
 test_command = "cargo test --test fake_rename_add_remove --test cli_list_read_send -- add_ remove_"
 source_hash = "e4ef5aa2b1de74cbe07704fdb11dda6fb935ed90"
-note = "src/app/add.rs・src/zellij/process.rs（new_pane/new_tabの引数map）も検証対象。TASK-67: excluded 2件（option map・部分失敗）をL3 2条件+L2 2条件へ条件化（追加testは既存実装に対して緑。実装変更なし）。TASK-102（2026-11-15）テスト先行case追加: add-tab-layout-source-argv-mapへ(v)〜(viii)の4 case（ZELLIJ_LAYOUT_DIR設定時の--layout-dir付与契約。設計: tmp/tasks/tm-102/design-layout-dir-unification.md §7）。テスト先行のためfail-first状態——現行（flag付与なし）では(v)(viii)が赤〔tmp/tasks/tm-102/test_red.log・test_red_viii.log〕。meta.verifiedはTASK-102実装工程での緑化確認後に再設定するためfalseへ移行。source_hashはsource_fileが本更新で不変のため従来記録を継承"
+note = "src/app/add.rs・src/zellij/process.rs（new_pane/new_tabの引数map）も検証対象。TASK-67: excluded 2件（option map・部分失敗）をL3 2条件+L2 2条件へ条件化（追加testは既存実装に対して緑。実装変更なし）。TASK-102（2026-11-15）テスト先行case追加: add-tab-layout-source-argv-mapへ(v)〜(viii)の4 case（ZELLIJ_LAYOUT_DIR設定時の--layout-dir付与契約。設計: tmp/tasks/tm-102/design-layout-dir-unification.md §7）。テスト先行のためfail-first状態——現行（flag付与なし）では(v)(viii)が赤〔tmp/tasks/tm-102/test_red.log・test_red_viii.log〕。meta.verifiedはTASK-102実装工程での緑化確認後に再設定するためfalseへ移行。source_hashはsource_fileが本更新で不変のため従来記録を継承——（当時記録。TASK-102実装〔src/zellij/process.rs new_tabのname分岐へ--layout-dir前置付与: ZELLIJ_LAYOUT_DIRがOkかつ非空のとき-lの前に--layout-dir <env値>をpush〕で緑化・cargo test --test cli_list_read_send add_tab_layout_source_argv_map 10 case全pass〔tmp/tasks/tm-102/test_green.log〕・add系既存11件全pass〔test_green_add_existing.log〕）。verified/verified_atはTASK-102緑化確認に対する記録へ再設定。source_hashはsource_file〔src/app/remove.rs〕が実装でも不変のため従来記録を継承"
 
 [[condition]]
 id = "add-remove.add-pane-count-and-postcondition"

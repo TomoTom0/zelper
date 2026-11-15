@@ -430,6 +430,25 @@ impl ZellijBackend for ZellijCliBackend {
         if let Some(layout) = &spec.layout {
             layout.validate_exclusive()?;
             if let Some(name) = &layout.name {
+                // TASK-102: ZELLIJ_LAYOUT_DIR設定時（Okかつ空でない）は探索先を
+                // zeller一覧基準（layout_dir。DD-3.4）と統一するため --layout-dir
+                // <env値> を -l の前に付与する。zellij 0.44.3の名前探索は
+                // --layout-dir で「切替」となる（HOME既定dirは探索されず・builtin
+                // 名は併存受理・path値への干渉なし。実測: tmp/tasks/tm-102/
+                // m1_result.log・m2_result.log）で、TASK-91既知制限（一覧〔ZELLIJ_
+                // LAYOUT_DIR基準〕の名前がaddで見つからない・同名fileが双方のdir
+                // にあれば別内容を読む）を解消する。env未設定・空文字時はargvを
+                // 変更せずzellij既定（HOME layouts探索）へ委ねる（この場合の探索
+                // 先一致は保証外。設計§9）。-l値そのものは拒否・書換えしない
+                // （DD-11透過契約の維持）。--layout-dirの前置は設計・実測形式に
+                // 合わせるもので、後置〔-l NAME --layout-dir X〕はshimの-l単一値
+                // 検証がexit 1で拒むためL3 test上も不可
+                if let Ok(d) = std::env::var("ZELLIJ_LAYOUT_DIR") {
+                    if !d.is_empty() {
+                        args.push("--layout-dir".into());
+                        args.push(d);
+                    }
+                }
                 args.push("-l".into());
                 args.push(name.clone());
             } else if let Some(path) = &layout.path {
