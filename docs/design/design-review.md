@@ -534,3 +534,39 @@ TASK-73実装（tests/cli/list_read_send.rs・tests/cli/remap.rs・tests/README.
 **検証**: cargo test 172/172 green（新規1件・追従4件込み） / mise run verify-conditions exit 0（16file・172条件・172tag・46excluded） / clippy 0 warning / fmt clean。いずれもfake/L2・実file（tempdir）で機械検証される変更のためE2E再実行は不要。
 
 **総評**: 指摘2件はいずれも修正で解消（負債化・却下なし）。PR#6のCI確認はpush後に実施。
+
+### 4.26 mise releaseタスク設計レビュー（release経路のmise移行）
+
+レビュー日: 2026-11-15。対象: release作成のmiseタスク化（`mise run release`・scripts/release.sh新設・release.yml trigger変更）の設計書（`tmp/tasks/tm-1/design_release-task.md`・repo管理外decision record。決定D-1〜D-16+実装擬似code §4）。作成者と別subagentによる独立レビュー（指摘一覧正本: `tmp/tasks/tm-2/findings.md`）。指摘10件（P1: 0件・P2: 1件・P3: 9件）。IDはMR-n。レビュアー総評は「実装着手可（P1なし）」。
+
+| ID | severity | 該当 | 指摘 | disposition |
+|---|---|---|---|---|
+| MR-1 | P2 | D-6・§4 Phase 2/8 | tag新規作成・pushがtest/buildより前（Phase 2）。test・musl build失敗後に修正commitでHEADが変わると「tag移動禁止」で停止し、push済みtagの手動削除という危険な復旧が必要になる経路が§5の収束記述から漏れている | **修正（案a採用）**: tag作成・pushをPhase 8直前（package・version検証・notes生成通過後）へ移動。Phase 2には既存tagとの不一致検査（早期fail）とremoteのみtagのfetch合流を残す。notes生成のrange参照はTAGではなくHEAD基準（`PREV_TAG=git describe --match 'v*' --abbrev=0 HEAD^`・`RANGE=${PREV_TAG}..HEAD`）へ変更（tag未作成状態で`${TAG}^`参照が落ちるのを回避。Phase 2でHEAD==tag commitが保証済みのため内容等価） |
+| MR-2 | P3 | D-4 | version正規表現が完全なsemverでない（prerelease内hyphen・build metadata拒否。「semver形式を検証」との記述と実態が乖離。fail-closed） | **修正**: prerelease部を `(-[0-9A-Za-z.-]+)?` へ拡張。build metadata（`+`）は本repo運用で使わないため拒否継続と設計判断を明記 |
+| MR-3 | P3 | §4 Phase 1/2 | network系command（`cargo metadata \| jq`・`git ls-remote \| cut`×2・tag fetch）にdie()方針が適用されず無言exitになる | **修正**: 該当箇所へ `\|\| die` を付与 |
+| MR-4 | P3 | D-6 | 「lightweight不可」はtag作成時のみ実効で、既存tagがlightweightでも検査を通過する | **記載のみ**: annotated強制は作成時のみと設計判断を明示。`git cat-file -t`型検査の追加は既存tag運用への過剰制約となるため却下（v0.1.0/v0.2.0はannotated実績） |
+| MR-5 | P3 | D-13 | `git describe --tags`が非v\* tagをPREV_TAG候補に取りうる | **修正**: `--match 'v*'` を追加 |
+| MR-6 | P3 | §4 Phase 8 | 最終logのrelease URLがhardcode | **修正**: `gh release view "$TAG" --json url --jq .url` の取得値へ変更 |
+| MR-7 | P3 | §4 Phase 4 | BIN pathがCARGO_TARGET_DIR未設定前提（設定環境でbuild成功後に誤停止） | **修正**: `${CARGO_TARGET_DIR:-target}/...` へ変更 |
+| MR-8 | P3 | D-3 | `gh auth status`成功はwrite権限を保証せず、権限不足はPhase 8で初めて発覚 | **記載のみ**: 事前の安定した確認手段が乏しいため、 scopes表示のlog出力程度を実装裁量として残し設計判断を明記 |
+| MR-9 | P3 | §4 Phase 2 | `git branch -r --contains \| grep -q .`のpipefail下SIGPIPE理論値 | **修正**: `[ -n "$(git branch -r --contains ...)" ]` へ置換 |
+| MR-10 | P3 | §4全体 | 初回実行が本番releaseそのものになり、tag不在時自動作成経路等の実地検証機会が次回versionまでない。検証方針が設計にない | **対応済み**: 別立ての検証計画（`tmp/tasks/tm-3/verification-plan.md`。local bare repoをoriginに隔離したsandboxでtag自動作成経路・guard挙動・冪等再実行をrehearsal）でカバー。`bash -n`構文検査は実装verifyに含める。v0.2.0本番実行はcreate経路の実地検証を兼ねる |
+
+**検証**: 指摘のうち設計書の記述修正は設計段階で完結（実装は反映後の設計+本dispositionを正本とする）。code修正分（MR-1〜3・5〜7・9）は実装後のguard検証（TASK-3計画）とcargo test全件・verify-conditionsで確認。
+
+**総評**: 指摘10件は修正7件（MR-1〜3・5〜7・9）・記載のみ2件（MR-4・8）・対応済み1件（MR-10）で解消（負債化なし）。MR-1のphase移動により「test/build失敗→tag再作成」経路が構造的に消え、tag削除・付け直し（本作業の禁止事項）を要求する経路は存在しなくなった。
+
+### 4.27 mise releaseタスク コードレビュー（実装レビュー）
+
+レビュー日: 2026-11-15。対象: mise releaseタスク実装（mise.toml・scripts/release.sh新設・release.yml trigger変更+jq修正・README開発者向け節1行・§4.26記録。実装者と別subagentによる独立レビュー）。実装時検証: cargo test 172/172・verify-conditions OK・fmt clean・clippy 0 warning・sandbox guard検証V1〜V7（local bare originでGitHub隔離。V4/V5はcargo test後clean再検査guard追加後の更新版で実施）。指摘4件（P1: 0件・P2: 1件・P3: 3件）。IDはMRC-n。レビュアー総評は「merge可（P1なし）」。
+
+| ID | severity | 該当 | 指摘 | disposition |
+|---|---|---|---|---|
+| MRC-1 | P2 | 全体（運用前提） | v0.2.0 GitHub release未作成の解消が両経路で構造的に不可能。mise経路: HEAD==v0.2.0 tag（d4d8e1e）が要求だがscripts/release.shはd4d8e1eに存在せず（本変更の新規file）、merge後HEADではtag一致guardが正しくdieする。dispatch経路: ref=v0.2.0では旧workflow（bug入り）が走り、fix済みrefでは`GITHUB_REF_NAME`がbranch名になり検証fail。§4.26 MR-10 dispositionの「v0.2.0本番実行はcreate経路の実地検証を兼ねる」はこの点で事実と合わない | **運用決定+記録**: code変更なし（guardの挙動は正しい）。(a) v0.2.0のpublishはtag v0.2.0が指すcommit（d4d8e1e）のdetached worktreeでscriptと同一手順（musl build→v0.1.0同一構成package→--version検証→v0.1.0..v0.2.0 notes→`gh release create v0.2.0 --verify-tag`）をone-offで実行して作成する。tag削除・付け直しは行わない（禁止事項どおり）。merge後のdev HEADで`mise run release`を実行しtag一致guardが拒否する様を記録してこの判断の根拠とする。(b) MR-10 dispositionの当該記述は本項をもって訂正する（v0.2.0に対するcreate経路の実地検証は発生せず、次回version以降に初回実地となる）。create経路自体はsandbox検証V4で同等手順として実証済み |
+| MRC-2 | P3 | scripts/release.sh Phase 6 | `ACTUAL="$(cd "$STAGE" && ./zelper --version)"`はsubstitution失敗時（musl binaryがhostで実行不可等）にset -eの無言exitとなりdie()方針の唯一の漏れ。また「実行machineはx86_64 Linux」前提が明記されていない | **修正**: `\|\| die`付与+冒頭commentへ実行環境前提1行を追加 |
+| MRC-3 | P3 | scripts/release.sh Phase 3 | cargo test後clean再検査のdie文がCargo.lock不整合のみを案内し、非ignore pathの`CARGO_TARGET_DIR`等でも発火し得る実態とズレる | **修正**: die文を「Cargo.lock不整合または非ignore build出力」を扱う文言へ修正 |
+| MRC-4 | P3 | release.yml:39 vs script Phase 7 | 保留したdispatch経路は`--generate-notes`（PR list形式）のまま、mise経路はcommit list形式で、同一versionでもnotes形式が経路で分かれる | **記録のみ**: dispatch経路は「local musl環境が整わないmachine向けの障害時代替」位置づけとし、notes形式差は許容する（本項がその記録。統一するにはworkflow側へnotes生成を移植する必要があり、代替経路の保守costに見合わない） |
+
+**検証**: MRC-2/3修正後に`bash -n`とsandbox V4/V5再実行（guard検証）で確認。MRC-1は運用決定であり本PRのcodeには影響しない。
+
+**総評**: 指摘4件は修正2件（MRC-2・3）・運用決定+記録1件（MRC-1）・記録のみ1件（MRC-4）で解消（却下・負債化なし）。MRC-1により「v0.2.0を正規経路で作成できない」構造的事実と対応（one-off手順）が確定した。
