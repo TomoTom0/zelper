@@ -1,9 +1,7 @@
 name: release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,7 +16,7 @@ jobs:
       - name: verify tag matches Cargo.toml version
         run: |
           tag_ver="${GITHUB_REF_NAME#v}"
-          cargo_ver="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          cargo_ver="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "zelper") | .version')"
           if [ "$tag_ver" != "$cargo_ver" ]; then
             echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_ver" >&2
             exit 1
