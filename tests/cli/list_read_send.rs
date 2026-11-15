@@ -2757,21 +2757,58 @@ fn add_pane_option_argv_map() {
 /// postcondition通過でexit 0する。(iv)は--layoutへのpath形式入力（'/'入り）が
 /// 拒否・書換えされず-lへ透過するzellerの契約検証（TASK-91: 適用しない決定。
 /// zellij -lがpathを正規受理するため。DD-11 tab --layout受理仕様）。
+/// TASK-102: (v)〜(viii)でZELLIJ_LAYOUT_DIR設定時の--layout-dir付与契約を検証
+/// （名前探索dirを一覧基準へ統一。設計tmp/tasks/tm-102/design-layout-dir-unification.md §5/§7）。
+/// (v)(viii)は付与正例（flag前置: new-tab --layout-dir <dir> ... -l <name>。
+/// shimの-l単一値検査と整合する順序）、(vi)は空文字envのargv不変、(vii)は
+/// --path/--inline/sourceなしのargv不変（全source誤付与の検出）。env制御は
+/// 各Commandの.env()/.env_remove()で子process環境のみ隔離（設計§7 minor-1。
+/// 親process envは並列test汚染のため不使用）
 /// --name連番suffixと排他負例（3source併用）はadd-removeのL2既存条件が担う
 // [covers:add-remove.add-tab-layout-source-argv-map]
 #[test]
 fn add_tab_layout_source_argv_map() {
     let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    // (layout source 3形式の引数列, 期待new-tab argv断片)。layout名はlayout_dir
-    // 解決のためshimでは存在確認されない（mapが本条件の対象）
-    for (i, (source, expect)) in [
-        (vec!["--layout", "mylayout"], "new-tab -l mylayout"),
-        (vec!["--path", "./x.kdl"], "new-tab -l ./x.kdl"),
+    // (ZELLIJ_LAYOUT_DIR設定: None=未設定保証〔env_remove〕/ Some(v)=設定〔空文字含む〕,
+    //  layout source引数列, 期待new-tab argv断片)。layout名はlayout_dir解決のため
+    //  shimでは存在確認されない（mapが本条件の対象）
+    for (i, (ldir, source, expect)) in [
+        // (i)〜(iv): ZELLIJ_LAYOUT_DIR未設定環境（付与されない。env_removeで保証）
+        (None, vec!["--layout", "mylayout"], "new-tab -l mylayout"),
+        (None, vec!["--path", "./x.kdl"], "new-tab -l ./x.kdl"),
         (
+            None,
             vec!["--inline", "layout {}"],
             "new-tab --layout-string layout {}",
         ),
-        (vec!["--layout", "./x.kdl"], "new-tab -l ./x.kdl"),
+        (None, vec!["--layout", "./x.kdl"], "new-tab -l ./x.kdl"),
+        // (v) 非空env + 名前 → --layout-dir付与の正例（現行実装では--layout-dir不在で赤。
+        //  実装工程で緑化）
+        (
+            Some("/ly"),
+            vec!["--layout", "mylayout"],
+            "new-tab --layout-dir /ly -l mylayout",
+        ),
+        // (vi) 空文字env + 名前 → argv不変（空文字誤付与の検出）
+        (
+            Some(""),
+            vec!["--layout", "mylayout"],
+            "new-tab -l mylayout",
+        ),
+        // (vii) 非空env + --path / --inline / sourceなし → argv不変（全source誤付与の検出）
+        (Some("/ly"), vec!["--path", "./x.kdl"], "new-tab -l ./x.kdl"),
+        (
+            Some("/ly"),
+            vec!["--inline", "layout {}"],
+            "new-tab --layout-string layout {}",
+        ),
+        (Some("/ly"), vec![], "new-tab"),
+        // (viii) 非空env + --layout path形式値 → flag付与・-l値不変
+        (
+            Some("/ly"),
+            vec!["--layout", "./x.kdl"],
+            "new-tab --layout-dir /ly -l ./x.kdl",
+        ),
     ]
     .iter()
     .enumerate()
@@ -2779,15 +2816,24 @@ fn add_tab_layout_source_argv_map() {
         let (mut cmd, log) = zelper(&format!("add-tab-layout-{i}"));
         let mut args: Vec<&str> = vec!["add", "tab"];
         args.extend(source.iter().copied());
+        match ldir {
+            Some(v) => {
+                cmd.env("ZELLIJ_LAYOUT_DIR", v);
+            }
+            None => {
+                cmd.env_remove("ZELLIJ_LAYOUT_DIR");
+            }
+        }
         cmd.env("FAKE_TABS_JSON", format!("[{}]", tab_json(0, "work", 2, 0)))
             .env("FAKE_NEW_TAB_TEMPLATE", FAKE_NEW_TAB_TEMPLATE)
             .args(&args)
             .assert()
             .success()
             .stdout("created tab 1\n");
+        // 末尾spaceなしprefix: sourceなしcase（argv空・行末がnew-tabで終わる）も拾う
         let argv: Vec<String> = calls(&log)
             .into_iter()
-            .filter(|c| c.contains(" action new-tab "))
+            .filter(|c| c.contains(" action new-tab"))
             .map(|c| c.rsplit("action ").next().unwrap().to_string())
             .collect();
         assert_eq!(

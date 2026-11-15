@@ -4,12 +4,12 @@
 [meta]
 feature = "add-remove"
 source_file = "src/app/remove.rs"
-verified = true
+verified = false
 verified_at = "2026-11-14"
 verified_by = "claude"
 test_command = "cargo test --test fake_rename_add_remove --test cli_list_read_send -- add_ remove_"
 source_hash = "e4ef5aa2b1de74cbe07704fdb11dda6fb935ed90"
-note = "src/app/add.rs・src/zellij/process.rs（new_pane/new_tabの引数map）も検証対象。TASK-67: excluded 2件（option map・部分失敗）をL3 2条件+L2 2条件へ条件化（追加testは既存実装に対して緑。実装変更なし）"
+note = "src/app/add.rs・src/zellij/process.rs（new_pane/new_tabの引数map）も検証対象。TASK-67: excluded 2件（option map・部分失敗）をL3 2条件+L2 2条件へ条件化（追加testは既存実装に対して緑。実装変更なし）。TASK-102（2026-11-15）テスト先行case追加: add-tab-layout-source-argv-mapへ(v)〜(viii)の4 case（ZELLIJ_LAYOUT_DIR設定時の--layout-dir付与契約。設計: tmp/tasks/tm-102/design-layout-dir-unification.md §7）。テスト先行のためfail-first状態——現行（flag付与なし）では(v)(viii)が赤〔tmp/tasks/tm-102/test_red.log・test_red_viii.log〕。meta.verifiedはTASK-102実装工程での緑化確認後に再設定するためfalseへ移行。source_hashはsource_fileが本更新で不変のため従来記録を継承"
 
 [[condition]]
 id = "add-remove.add-pane-count-and-postcondition"
@@ -40,12 +40,12 @@ expect_return = "exit 0・FAKE_LOGにaction new-pane --tab-id 0 --name w --cwd /
 
 [[condition]]
 id = "add-remove.add-tab-layout-source-argv-map"
-source_lines = "tests/cli/list_read_send.rs:2761"
+source_lines = "tests/cli/list_read_send.rs:2768"
 target_function = "add tabのlayout source map（src/zellij/process.rs new_tab）"
-source = "docs/design/detailed-design.md DD-11 add（tab: --layoutは-l NAMEへ、--pathは-l PATHへ、--inlineは--layout-stringへmap。tab --layoutの受理仕様〔TASK-91: '/'入り値は拒否せず-lへ透過〕） + docs/design/first/260821/requirements.md §2.7"
-description = "add tabのlayout source 3形式のmap先: --layoutは-l NAME・--pathは-l PATH・--inlineは--layout-string。3source併用の排他負例はadd-remove.add-tab-layout-sources-conflictが・count>1の連番suffixと途中失敗はadd系のL2条件が担う。本条件は3形式の正例argv mapを担う（shimのnew-tab handler〔TASK-67拡張: 採番id応答+tabs状態file反映〕でpostcondition通過させる）。(iv)は--layoutへのpath形式入力（'/'入り）の透過契約（TASK-91・適用しない決定: zellij -lがpathを正規受理するため拒否・書換えせず-lへ渡す。拒否検査を追加する実装でtestが赤になる）。単一値optionの引数境界（-l/--layout-stringの値が単一argv要素。空白連結logでは不可視）はshim new-tab handler内検査で保護（値分割実装でtestが赤になる）"
-given = "FAKE_TABS_JSON（tab 0）で (i) zelper add tab --layout mylayout (ii) zelper add tab --path ./x.kdl (iii) zelper add tab --inline \"layout {}\" (iv) zelper add tab --layout ./x.kdl"
-expect_return = "いずれもexit 0・FAKE_LOGに (i) action new-tab -l mylayout (ii) action new-tab -l ./x.kdl (iii) action new-tab --layout-string layout {} (iv) action new-tab -l ./x.kdl が各1回・stdout \"created tab 1\""
+source = "docs/design/detailed-design.md DD-11 add（tab: --layoutは-l NAMEへ、--pathは-l PATHへ、--inlineは--layout-stringへmap。tab --layoutの受理仕様〔TASK-91: '/'入り値は拒否せず-lへ透過〕+ 探索先統一〔TASK-102: ZELLIJ_LAYOUT_DIRがOkかつ非空のとき--layout値へ--layout-dir <env値>を前置付与。設計: tmp/tasks/tm-102/design-layout-dir-unification.md §5/§7〕） + docs/design/first/260821/requirements.md §2.7"
+description = "add tabのlayout source 3形式のmap先: --layoutは-l NAME・--pathは-l PATH・--inlineは--layout-string。3source併用の排他負例はadd-remove.add-tab-layout-sources-conflictが・count>1の連番suffixと途中失敗はadd系のL2条件が担う。本条件は3形式の正例argv mapを担う（shimのnew-tab handler〔TASK-67拡張: 採番id応答+tabs状態file反映〕でpostcondition通過させる）。(iv)は--layoutへのpath形式入力（'/'入り）の透過契約（TASK-91・適用しない決定: zellij -lがpathを正規受理するため拒否・書換えせず-lへ渡す。拒否検査を追加する実装でtestが赤になる）。TASK-102: (v)〜(viii)で--layout-dir付与契約を担う——(v)非空env+名前→--layout-dir前置付与の正例、(vi)空文字env+名前→argv不変（空文字誤付与の検出）、(vii)非空env+--path/--inline/sourceなし→argv不変（全source誤付与の検出）、(viii)非空env+--layout path形式値→flag付与+-l値不変。env制御は各Commandの.env()/.env_remove()で子process環境のみ隔離（親process envは並列test汚染のため不使用。設計§7 minor-1）。(i)〜(iv)はZELLIJ_LAYOUT_DIR未設定前提（env_removeで保証）。テスト先行のためfail-first: 現行（flag付与なし）では(v)(viii)が赤（tmp/tasks/tm-102/test_red.log・test_red_viii.log。TASK-102実装工程で緑化）。単一値optionの引数境界（-l/--layout-stringの値が単一argv要素。空白連結logでは不可視）はshim new-tab handler内検査で保護（値分割実装でtestが赤になる）"
+given = "FAKE_TABS_JSON（tab 0）で (i) zelper add tab --layout mylayout（env未設定保証） (ii) zelper add tab --path ./x.kdl（同） (iii) zelper add tab --inline \"layout {}\"（同） (iv) zelper add tab --layout ./x.kdl（同） (v) ZELLIJ_LAYOUT_DIR=/ly設定下 zelper add tab --layout mylayout (vi) ZELLIJ_LAYOUT_DIR=（空文字）設定下 zelper add tab --layout mylayout (vii) ZELLIJ_LAYOUT_DIR=/ly設定下 zelper add tab --path ./x.kdl / --inline \"layout {}\" / sourceなしの3通り (viii) ZELLIJ_LAYOUT_DIR=/ly設定下 zelper add tab --layout ./x.kdl"
+expect_return = "いずれもexit 0・FAKE_LOGに (i) action new-tab -l mylayout (ii) action new-tab -l ./x.kdl (iii) action new-tab --layout-string layout {} (iv) action new-tab -l ./x.kdl (v) action new-tab --layout-dir /ly -l mylayout (vi) action new-tab -l mylayout（argv不変） (vii) action new-tab -l ./x.kdl / --layout-string layout {} / new-tab（argv不変） (viii) action new-tab --layout-dir /ly -l ./x.kdl が各1回・stdout \"created tab 1\""
 
 [[condition]]
 id = "add-remove.remove-pane-safety-gate"

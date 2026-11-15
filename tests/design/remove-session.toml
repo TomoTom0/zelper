@@ -16,7 +16,7 @@ note = "TASK-84実装工程で全条件緑化・検証記録を再設定（設�
 
 [[condition]]
 id = "remove-session.selector-exactly-one-usage-error"
-source_lines = "tests/cli/list_read_send.rs:2973"
+source_lines = "tests/cli/list_read_send.rs:3019"
 target_function = "remove::run_session（app層exactly-one検証）+ cli.rs RemoveTarget::Session（clap pairwise conflicts）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.0（対象selectorは NAME...（1件以上）/ --all / --dead / --me の4者のうちちょうど1つ。DD-1.5排他規則に追加。違反はusage error exit 2。clapのpairwise conflicts + app層のexactly-one検証——moveの三者排他と同一pattern）・§2.9表（selector不在/併用違反 Usage 2）"
 description = "remove sessionの4 selector排他: NAME...（1件以上）・--all・--dead・--meは相互排他かつちょうど1つ必須。0個（全selector不在）と2個以上の同時指定はusage error（exit 2）で状態変更前に拒否する。clap pairwise conflicts（parse段の併用拒否）とapp層のexactly-one検証（0個拒否・clapで表現できない組合せの最終検証）の二段構えで、単一の検証だけで素通りさせない"
@@ -25,7 +25,7 @@ expect_return = "(i)〜(v) はいずれもexit 2（Usage）。(vi) はexit 2に�
 
 [[condition]]
 id = "remove-session.missing-name-notarget-with-candidates"
-source_lines = "tests/cli/list_read_send.rs:3015"
+source_lines = "tests/cli/list_read_send.rs:3061"
 target_function = "remove::run_session（事前存在確認: list_sessions EXITED込み）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.9表（指定NAMEがlist_sessions〔EXITED込み〕に行なし → NoTarget・candidates=全行のname〔EXITED込み〕。行0件なら「no zellij sessions found」文面）・§2.4（事前list_sessions検査: 指定NAMEが行に存在しない〔RUNNINGでもEXITEDでもない〕→ NoTarget）・§2.3（--meと同一の事前存在確認）"
 description = "明示NAMEの不在分類: 指定NAMEがlist_sessionsの行（RUNNING・EXITEDとも）に存在しない場合はNoTarget（exit 3）で中断し、candidatesには全行のname（EXITED行も含む）を出す（DD-1.2の--session事前確認と異なる点——削除対象の存在確認はEXITED込み）。一覧が完全0件（0-session環境）の場合は候補列出力ではなく「no zellij sessions found」の文面でNoTargetになる"
@@ -43,7 +43,7 @@ expect_return = "(i) Err（class=Preflight・exit 7）。delete_session呼出な
 
 [[condition]]
 id = "remove-session.dry-run-plan-states-and-counts"
-source_lines = "tests/cli/list_read_send.rs:3068"
+source_lines = "tests/cli/list_read_send.rs:3114"
 target_function = "remove::run_session（dry-run plan組立）+ ZellijBackend::list_tabs_for"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.6（per-targetのplan形式・list_sessions由来のstate + list_tabs_for由来のtab/pane数。humanは[plan]接頭辞・DD-4.1規約・`[plan] remove session 'foo' (running, 3 tabs, 7 panes)` / `[plan] remove session 'bar' (dead)` / `2 session(s) to remove; pass --yes to execute`。JSONはdata.plan.targets[]〔name/state/tabs/panes〕。tabs/panesはrunning対象のみlist_tabs_forから算出。dead（EXITED行）対象はlist_tabs_forを呼ばずtabs/panes=null固定——EXITED名へのaction系呼び出しの副作用が未検証のため呼んで失敗→nullではなく呼ばない。running対象の取得失敗もnull。状態変更・backend呼出（list系読み取りを除く）は一切行わない）"
 description = "dry-runのplan表示契約: 対象毎にlist_sessions由来のstate（running/dead）とlist_tabs_for由来のtabs/panes数を付与したplan行/JSONを出力し、状態変更は一切行わない。dead対象にはlist_tabs_forを呼ばない（非破壊保証の確実な方針——呼んで失敗ならnullでなく呼ばない）。humanは[plan]行+合計行、JSONはdata.plan.targets[]でtabs/panesはrunning対象のみ数値・dead対象はnull"
@@ -52,7 +52,7 @@ expect_return = "いずれもexit 0。humanは `[plan] remove session 'foo' (run
 
 [[condition]]
 id = "remove-session.delete-session-f-argv"
-source_lines = "tests/cli/list_read_send.rs:3141"
+source_lines = "tests/cli/list_read_send.rs:3187"
 target_function = "ZellijBackend::delete_session → remove::run_session（実行）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.1（各対象のbackend操作は zellij delete-session NAME -f（1呼び出し・状態問わず）に統一。kill-sessionとは終状態が同一で状態に依らず唯一動作する単一操作）・§2.7（argvは zellij delete-session <NAME> -f（top-level positional形式・run()経由・timeout 10s・stdin null）。session解決（mk_backend）を経ない例外dispatchでmain.rsから呼ぶ。global --session形式は使わない）・§3実測2（delete-session -fは状態に依らず唯一動作: RUNNING→kill+delete 1呼び出しrc=0・死data→そのまま削除rc=0）"
 description = "削除のbackend argv契約: 各対象sessionは `zellij delete-session <NAME> -f` のtop-level positional形式（run_actionの--session接頭なし）で1回ずつ呼ばれる。kill-session/kill-all-sessions/delete-all-sessionsは発行しない（§2.2不採用）。成功stdout（2行の状況文）は捨ててrc=0+stderr空判定（DD-3.1）で成功扱いする"
@@ -61,7 +61,7 @@ expect_return = "exit 0。FAKE_LOGに `delete-session foo -f` がちょうど1�
 
 [[condition]]
 id = "remove-session.per-target-partial-failure"
-source_lines = "tests/cli/list_read_send.rs:3179"
+source_lines = "tests/cli/list_read_send.rs:3225"
 target_function = "remove::run_session（per-target順次loop + report）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.12（DD-11 remove規則を継承——targetを順次実行し、失敗しても残targetを実行し、per-targetに報告する。全失敗=exit 5・部分失敗=exit 6。rollback・補償操作は行わない）・§2.9表（zellij呼出失敗・全target失敗 OperationFailed 5 / 一部target失敗 PartialFailure 6）・§2.9報告形式（失敗時envelopeはmainからerror.data.results[]込みで1通・report()pattern）"
 description = "部分失敗の継続実行と報告: 一部targetのdelete-session呼出が非zero終了しても残targetを実行し、全体はPartialFailure（exit 6）でper-target結果（data.results[]）付きで報告する。失敗targetはok=false+error message（backend失敗文）・成功targetはok=true。rollbackしない。失敗は先頭targetへ注入する（最後のtargetの失敗では早期打ち切り実装でも通るため）"
@@ -88,7 +88,7 @@ expect_return = "いずれもErr。classは注入と同一の保持（OperationF
 
 [[condition]]
 id = "remove-session.self-name-without-me-refused"
-source_lines = "tests/cli/list_read_send.rs:3229"
+source_lines = "tests/cli/list_read_send.rs:3275"
 target_function = "remove::run_session（NAME経路のself検査: ZELLIJ_SESSION_NAME照合）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.3（NAME経路の保護: 環境変数ZELLIJ_SESSION_NAMEが解決済みtarget集合に含まれるかで検出。NAME... に該当名が含まれる → 状態変更前にPreflight拒否〔exit 7。文面は remove session --me へ案内〕。「--session flag == target」は自sessionの証拠にならないため検出に使わない）・§2.9表（NAME... に自sessionが含まれる〔--meなし〕 Preflight 7・fail-fast・状態変更前）"
 description = "NAME経路の自session保護: ZELLIJ_SESSION_NAME（zellijが自paneへ注入する値）が解決済みtarget集合に含まれる場合、--meなしの実行は状態変更前にPreflight（exit 7）で拒否する（zelperが対象session内のpaneで動いている場合、server killとともにzelper自身のprocess treeが巻き込まれ報告・検証が保証できないため）。messageは remove session --me への案内を含む"
@@ -97,7 +97,7 @@ expect_return = "exit 7（Preflight）。messageは remove session --me への�
 
 [[condition]]
 id = "remove-session.me-requires-env"
-source_lines = "tests/cli/list_read_send.rs:3260"
+source_lines = "tests/cli/list_read_send.rs:3306"
 target_function = "remove::run_session（--me解決: ZELLIJ_SESSION_NAME）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.3（--me の解決: 環境変数ZELLIJ_SESSION_NAMEのみ。--session flagはsession外からも指定可能で自sessionの証拠にならないため解決に使わない。env不在 → Preflight〔exit 7〕「remove session --me requires running inside a zellij session (ZELLIJ_SESSION_NAME is not set)」）・§2.6（env不在はdry-runでもPreflight 7〔plan表示に解決名が必要なため〕）"
 description = "--meのenv解決必須: ZELLIJ_SESSION_NAMEが設定されていない環境での--me実行はdry-runでもPreflight（exit 7）で拒否される（解決名がないとplan・実行の対象が定まらない。--session flagは解決に使わない）"
@@ -106,7 +106,7 @@ expect_return = "いずれもexit 7（Preflight）。messageはrequires running 
 
 [[condition]]
 id = "remove-session.me-selector-argv-uses-resolved-name"
-source_lines = "tests/cli/list_read_send.rs:3299"
+source_lines = "tests/cli/list_read_send.rs:3345"
 target_function = "remove::run_session（--me: env解決名での実行）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.3（env設定時も他NAME対象と同一の事前存在確認〔list_sessions・EXITED込み〕を行い、不在はNoTarget 3——解決名が実在targetであることを破壊的操作の前提として要求）・§2.0（--me はselector〔NAME.../--all/--dead/--me の4者排他〕）"
 description = "--meの解決名実行契約: --meはZELLIJ_SESSION_NAMEの解決名を対象として通常のremove session NAMEと同一経路（事前存在確認→delete-session <name> -f→postcondition→報告）で実行する。env解決名がlist_sessionsの行に存在しない場合はNoTarget（exit 3）で中断する（env値を無検証でtargetにしない）"
@@ -115,7 +115,7 @@ expect_return = "(i) exit 0。FAKE_LOGに `delete-session fake-sess -f` がち�
 
 [[condition]]
 id = "remove-session.me-preflight-warning-before-execution"
-source_lines = "tests/cli/list_read_send.rs:3351"
+source_lines = "tests/cli/list_read_send.rs:3397"
 target_function = "remove::run_session（--me実行前のstderr warning）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.3（自壊時の報告契約〔best-effort〕: --me実行ではdelete-sessionの効果としてzelper自身が巻き込まれ、報告・exit status・postcondition検証が実行されない可能性がある。実装は通常経路と同一code pathとし検証・報告を意図的にskipする特殊分岐は作らない。kill後の出力は失われるため、実行前にstderrへ警告行を出力する〔唯一確実な通知経路〕: warning: removing the current session 'X'; zelper may be terminated before reporting）"
 description = "--me実行前の警告行: 自session削除はzelper自身のprocess treeを巻き込みうるため、delete-session呼出の前にstderrへ警告行（removing the current session + 実行されない可能性の旨）を出力する。実行自体は通常経路（検証・報告の意図的skipなし）で、fake backend環境では通常の成功経路としてremoved報告まで完結する。警告行が削除開始より前であることはshimのdelete handler開始marker（親zellerのstderrへ直接出力）との順序比較で検証する"
@@ -124,7 +124,7 @@ expect_return = "exit 0。stderrにwarning行（removing the current sessionを�
 
 [[condition]]
 id = "remove-session.me-dry-run-current-annotation"
-source_lines = "tests/cli/list_read_send.rs:3390"
+source_lines = "tests/cli/list_read_send.rs:3436"
 target_function = "remove::run_session（--me dry-runのplan注記）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.6（--meのdry-run: env解決名のplan行に current session 注記を付ける〔human: `[plan] remove session 'foo' (running, 3 tabs, 7 panes) [current session]`・JSON: 当該targetへ \"current\": true field追加〕）"
 description = "--me dry-runのcurrent注記: plan表示のenv解決名対象には現在sessionである旨の注記を付ける（humanはplan行末尾の [current session]・JSONは当該targetへのcurrent: true field）。dry-runであるためdelete-sessionは不発"
@@ -133,7 +133,7 @@ expect_return = "いずれもexit 0。humanのplan行は `[plan] remove session 
 
 [[condition]]
 id = "remove-session.all-excludes-self-with-warning"
-source_lines = "tests/cli/list_read_send.rs:3441"
+source_lines = "tests/cli/list_read_send.rs:3487"
 target_function = "remove::run_session（--allのself除外+warning）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.3（--all は対象集合から自sessionを除外し、除外をstderrのwarning行として通知〔human/json共通。stdout契約を壊さないstderr経路はDD-10.10のwarning伝達と同一〕。除外後に対象0件〔自sessionのみが存在する環境〕→ NoTarget 3）・§2.2（--all: list_sessionsの全行〔EXITED行を含む〕が対象。§2.3のself除外を適用）・§2.6（--all時のself除外はdry-runにも反映〔除外行を[plan]でなくwarning行で表示〕）"
 description = "--allの自session除外: --allの対象集合からZELLIJ_SESSION_NAME該当行を除外し、除外した旨をstderrのwarning行で通知する（stdoutのresults/plan契約は壊さない）。除外対象へのdelete-sessionは発行されない"
@@ -142,7 +142,7 @@ expect_return = "exit 0。FAKE_LOGに `delete-session other -f` のみでfake-se
 
 [[condition]]
 id = "remove-session.all-self-only-notarget"
-source_lines = "tests/cli/list_read_send.rs:3482"
+source_lines = "tests/cli/list_read_send.rs:3528"
 target_function = "remove::run_session（--all除外後0件のNoTarget）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.3（--all は対象集合から自sessionを除外し…除外後に対象0件〔自sessionのみが存在する環境〕→ NoTarget 3〔文面は remove session --me へ案内〕）・§2.9表（--allのself除外後に対象0件〔自sessionのみ存在〕 NoTarget 3・--me案内文面）"
 description = "--allの除外後0件分類: 自sessionのみが存在する環境での--all実行は、self除外により対象が0件になるためNoTarget（exit 3）で中断する。messageは remove session --me への案内を含む（意図的な自session終了の経路を案内）"
@@ -151,7 +151,7 @@ expect_return = "exit 3（NoTarget）。messageは remove session --me への案
 
 [[condition]]
 id = "remove-session.dead-selector-exited-rows-only"
-source_lines = "tests/cli/list_read_send.rs:3511"
+source_lines = "tests/cli/list_read_send.rs:3557"
 target_function = "remove::run_session（--dead: EXITED行選択）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.2（--dead: EXITED行〔SessionRef.exited == true〕のみが対象。行0件〔RUNNINGのみ or 完全0件〕ならNoTarget。実行はper-targetの順次loop）・§2.9表（--all/--deadで対象行なし NoTarget〔「no sessions to remove」文面〕）・§2.4（EXITED行は削除対象として受理・実行はRUNNINGと同一のdelete-session NAME -f 1呼び出し・状態分岐なし）"
 description = "--dead selectorの対象選択: 対象はlist_sessionsのEXITED行のみ（RUNNING行は対象外）。EXITED行が存在すれば各対象へdelete-session <name> -fを順次実行し、EXITED行が1件もない（RUNNINGのみ or 完全0件）環境ではNoTarget（exit 3・no sessions to remove）で中断する"
@@ -160,7 +160,7 @@ expect_return = "(i) exit 0。FAKE_LOGに `delete-session deadx -f` のみでfak
 
 [[condition]]
 id = "remove-session.dead-selector-immune-to-marker-substring-pollution"
-source_lines = "tests/cli/list_read_send.rs:3562"
+source_lines = "tests/cli/list_read_send.rs:3608"
 target_function = "remove::run_session（--dead: 汚染行の対象選択排除）+ parse_sessions（exited抽出）"
 source = "tmp/tasks/tm-99/design_parse-field-pollution.md §2.2-1（--dead誤対象の実害〔最重度・破壊系〕: 名2語目にEXITEDを含むrunning行がexited=trueになり、truncated名でdelete-sessionが呼ばれる。truncated名と一致する別running sessionが存在すれば生きたsessionの誤削除・不在ならFAILED報告の混乱）・§3.5決定・§5 test構成（L3条件。設計レビューmajor-4でL2案から変更）"
 description = "--dead対象選択のmarker部分文字列耐性: 名前2語目以降にEXITEDを含むrunning行（zellij外部由来の空白含み名想定）は本物のEXITED suffix行と区別され、--deadの対象に選ばれない（parse_sessions anchor化後の振る舞い。TASK-99 §2.2-1破壊系系列の回帰検出）。L3構成の理由: L2のFakeBackendはSessionRefを直接保持し生textをparse_sessionsへ通さないため、parse修正の回帰検出にはshimのFAKE_SESSIONS生textを経由するL3のみが有効。fail-first: 現行rest.contains系判定では汚染行がexited=trueになりplan/report/delete-sessionへ切り詰め名が混入して赤。TASK-98: 当該行のnameは完全名（x EXITED）へ復元されるが、本条件のassertはdead1のみでname期待値を持たないため期待値不変（name復元の正本はbackend-parser.sessions-whitespace-name-restored-to-full-name条件）"
@@ -169,7 +169,7 @@ expect_return = "(i) exit 0。data.plan.targetsはdead1のみ（state=dead。汚
 
 [[condition]]
 id = "remove-session.whitespace-name-full-name-targeting"
-source_lines = "tests/cli/list_read_send.rs:3638"
+source_lines = "tests/cli/list_read_send.rs:3684"
 target_function = "remove::run_session（空白含みNAMEの完全名targeting）+ parse_sessions（name抽出）"
 source = "tmp/tasks/tm-98/design_name-truncation.md §2.1-1（remove session NAME切り詰め名の破壊系: delete-session <切り詰め名>が別実在sessionを誤削除+still listed破綻報告）・§2.3-2（完全名NoTarget: remove session \"a b\"が世界modelに載らずNoTarget・candidatesに切り詰め名が出る）・§5 test構成（L3条件。shim改修要件〔argv境界の要素数検査・削除反映の完全名一致〕の前提） + tmp/tasks/tm-84/design_remove-session.md §2.1（delete-session NAME -f統一）・§2.9表（指定NAMEがlist_sessions〔EXITED込み〕に行なし NoTarget・candidates=全行のname）"
 description = "空白含みsession名の完全名targeting: (i) remove session \"a b\" はlist_sessions行（name=完全名復元後）に一致し `delete-session a b -f`（完全名・NAMEは単一argv要素——shimのargv要素数検査が保証）を発行する (ii) 切り詰め名（先頭word a）入力は世界modelに存在しないためNoTarget（exit 3）でcandidates=完全名一覧・delete-session不発（TASK-98 §2.1-1誤射系列の消滅検出） (iii) 先頭word衝突共存環境（a と a b）でa bを削除しても非対象 a 行が事後一覧に残存する（shim削除反映の完全名一致——先頭word一致の反映が a 行まで消す巻き込みの検出） (iv) marker含有名共存環境（a と true name \"a [Created 5m ago]\" の並存）でaを削除してもmarker含有行は巻き込まれない（shim削除反映の完全名一致——`名前 [Created`接頭一致はmarker含有名で反例〔実装レビューmajor〕）。fail-first: 現行（name=先頭word）では(i)完全名がNoTarget・(ii)切り詰め名が誤targeting・(iii)事後一覧が共に赤（TASK-98 name抽出実装で緑化）"
@@ -178,7 +178,7 @@ expect_return = "(i) exit 0。FAKE_LOGのdelete-session呼出は `delete-session
 
 [[condition]]
 id = "remove-session.all-self-exclusion-with-whitespace-name"
-source_lines = "tests/cli/list_read_send.rs:3779"
+source_lines = "tests/cli/list_read_send.rs:3825"
 target_function = "remove::run_session（--allのself除外: 完全名一致）"
 source = "tmp/tasks/tm-98/design_name-truncation.md §2.2（--all self除外失敗の再評価: ZELLIJ_SESSION_NAME完全名 `a b` と切り詰めparse名 `a` の比較が不一致になり自session行が除外されずdelete-session <切り詰め名>が発行される——§2.2逆方向の系列〔自sessionが単語名 a・空白含み名 a b 併存での二重一致〕も参照）・§5 test構成（L3条件） + tmp/tasks/tm-84/design_remove-session.md §2.3（--allは対象集合から自sessionを除外し除外をstderrのwarning行で通知）"
 description = "--all self除外の空白含み自session対応: ZELLIJ_SESSION_NAME（完全名 `a b`）がlist_sessions行のname（完全名復元後）と一致して自session行が対象集合から除外され、otherのみdelete-sessionが発行される。除外はstderr warning行（current session + 完全名 a b）で通知される。fail-first: 現行（name=先頭word）では `a b` ≠ `a` で自session行が除外されずdelete-session aが発行され、postconditionもstill listedで失敗するため赤（TASK-98 §2.2系列の解消検出）"
@@ -187,7 +187,7 @@ expect_return = "exit 0。FAKE_LOGのdelete-session呼出は `delete-session oth
 
 [[condition]]
 id = "remove-session.zero-session-notarget"
-source_lines = "tests/cli/list_read_send.rs:3826"
+source_lines = "tests/cli/list_read_send.rs:3872"
 target_function = "remove::run_session（0-session環境の事前確認）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.9表（指定NAMEがlist_sessions〔EXITED込み〕に行なし NoTarget・行0件なら「no zellij sessions found」文面 / --all・--deadで対象行なし〔0-session・dead行なし〕 NoTarget〔「no sessions to remove」文面〕）・§2.3（--meはenv設定時も同一の事前存在確認を行い不在はNoTarget 3）・§2.7（0-session環境で動作——list_sessionsの0件decode TASK-93によりOk(vec![])）"
 description = "0-session環境の事前確認: list-sessionsが0件（rc=1 + 0件文面marker → backend decodeでOk(0件)）の環境では、NAME指定（no zellij sessions found文面）・--all / --dead（no sessions to remove文面）・--me（env解決名が行になし）のいずれもNoTarget（exit 3）で中断する。0件をbackend失敗として扱わない（TASK-93 D1 decode経由の正常取得）"
@@ -196,7 +196,7 @@ expect_return = "いずれもexit 3（NoTarget）。(i) messageはno zellij sess
 
 [[condition]]
 id = "remove-session.dispatch-via-probe-backend"
-source_lines = "tests/cli/list_read_send.rs:3895"
+source_lines = "tests/cli/list_read_send.rs:3941"
 target_function = "main.rs run（RemoveTarget::Session例外dispatch: probe backend + check_capability）→ remove::run_session"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.7（dispatch: AddTarget::Sessionと同一の例外dispatch——ZellijCliBackend::new(\"zelper-probe-unused\") + check_capability → remove::run_session(&probe, ...)。0-session環境で動作〔list_sessionsの0件decode TASK-93によりOk(vec![])〕。global --session flagはlist sessions等と同じく無視〔session解決を行わないため〕）・§2.9表・§7 DD-14例外dispatchの一般化"
 description = "remove sessionの例外dispatch: 対象session解決（mk_backend）を経ないprobe backend直接構築により、zellij sessionが1つも存在しない環境でもremove sessionが事前確認まで到達する（共通経路のまま実装するとresolve_sessionのNoTarget〔no running zellij session found + add session案内〕で失敗する回帰の検出）。事前確認の文面（no zellij sessions found）がrun_session層由来であることと、probe backend経由でlist-sessions呼出が発生していることで検証する"
@@ -214,7 +214,7 @@ expect_return = "Ok。delete_session呼出は a→c→b の3回のみ（指定�
 
 [[condition]]
 id = "remove-session.success-report-results-and-human-lines"
-source_lines = "tests/cli/list_read_send.rs:3932"
+source_lines = "tests/cli/list_read_send.rs:3978"
 target_function = "remove::run_session（report: results[]と成功行文面のstate表示）"
 source = "tmp/tasks/tm-84/design_remove-session.md §2.9報告形式（成功時 data.results[]〔TargetedResult。target=session名〕。humanは removed session 'foo'〔running対象〕/ removed session 'bar' (was dead) / removed session 'me' (current session)〔--me・best-effort〕/ FAILED <name> : <msg> 行 + gate通過済みのdry-run note）・§2.12（report()の流用+state表示〔(was dead)・--me時の(current session)〕の最小拡張）"
 description = "成功報告の契約: 成功時はper-targetのresults[]（JSON。target=name・ok=true）と、humanは対象のstateを反映した成功行（running対象は removed session 'X'・dead対象は (was dead) 付き・--me対象は (current session) 付き）で報告する。dry-run note行はgate通過済み文面"
