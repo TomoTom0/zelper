@@ -57,7 +57,7 @@ failure injection条件は各機能の条件書へ分散するが、同一の失
 
 | 分類 | L3 shim env（tests/cli/shim_common.rs） | L2 FakeBackend API（tests/fake_backend/fake.rs） |
 |---|---|---|
-| 対象指定の失敗注入（rc=1 + stderr） | `FAKE_FAIL_<ACTION>`系（FAKE_FAIL_DETACH / FAKE_FAIL_LIST_TABS / FAKE_FAIL_DUMP_SCREEN / FAKE_FAIL_WRITE_CHARS / FAKE_FAIL_WRITE / FAKE_FAIL_SEND_KEYS / FAKE_FAIL_MOVE_PANE / FAKE_FAIL_MOVE_TAB / FAKE_FAIL_DELETE_SESSION / FAKE_FAIL_RENAME_SESSION） | `inject_failure`（op先頭一致で次回呼出を失敗）/ `inject_failure_as`（ErrorClass指定）・`fail_override_layout_nth` / `fail_companion_wasm_extract` / `fail_companion_permissions_seed`等の個別注入 |
+| 対象指定の失敗注入（rc=1 + stderr） | `FAKE_FAIL_<ACTION>`系（FAKE_FAIL_DETACH / FAKE_FAIL_LIST_TABS / FAKE_FAIL_LIST_PANES（TASK-64。LIST_TABSと対称） / FAKE_FAIL_DUMP_SCREEN / FAKE_FAIL_WRITE_CHARS / FAKE_FAIL_WRITE / FAKE_FAIL_SEND_KEYS / FAKE_FAIL_MOVE_PANE / FAKE_FAIL_MOVE_TAB / FAKE_FAIL_DELETE_SESSION / FAKE_FAIL_RENAME_SESSION / FAKE_FAIL_SESSION（TASK-64。一覧に存在するsession名のaction呼出全体を失敗=確認中のsession消滅模擬）） | `inject_failure`（op先頭一致で次回呼出を失敗）/ `inject_failure_as`（ErrorClass指定）・`fail_override_layout_nth` / `fail_companion_wasm_extract` / `fail_companion_permissions_seed`等の個別注入 |
 | 成功回数超過から失敗（polling・postcheck系列） | `FAKE_FAIL_DUMP_SCREEN_AFTER`（`pane:成功回数`のspace区切りlist） | `dump_fail_after`（watch pollingでのpane消滅）・`fail_list_sessions_after_create / _rename / _delete`（事後list_sessions失敗） |
 | 黙失敗（rc=0だが作用なし） | `FAKE_MUTE_DELETE_SESSION` / `FAKE_MUTE_RENAME_SESSION` | `mute_delete_session` / `mute_rename_session` / `mute_create_session` / `mute_rename_tab`等の`mute_*`系 |
 

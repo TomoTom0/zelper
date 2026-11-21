@@ -1180,6 +1180,248 @@ fn list_layouts_compact_shows_names_only() {
         .stdout("solo\n");
 }
 
+/// list panesのbackend失敗（list-panes action呼出のrc=1）は、--tab TABSPEC併用時も
+/// 対象（tab）解決より前のlist_panes呼出段で伝播しOperationFailed（exit 5）になる。
+/// 「対象解決前」は、単独ならNoTargetになる不在tab id（--tab 999）を併用しても
+/// list-tabs呼出がshim logへ現れないことで固定する（tab解決が先に立つ実装なら
+/// exit 3になるため検出可能）。失敗注入はFAKE_FAIL_LIST_PANES
+/// （FAKE_FAIL_LIST_TABSと対称・未設定時は従来応答）
+// [covers:list-display.panes-fetch-failure-operation-failed-exit5]
+#[test]
+fn list_panes_fetch_failure_is_operation_failed_exit5() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, log) = zelper("list-panes-fail");
+    let out = cmd
+        .env("FAKE_FAIL_LIST_PANES", "1")
+        .args(["list", "panes", "--tab", "999", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    // 注入した失敗（boom）がmessageへ伝播していること
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("boom"),
+        "message: {}",
+        v["error"]["message"]
+    );
+    let cs = calls(&log);
+    assert!(
+        cs.iter().any(|c| c.contains("action list-panes")),
+        "calls: {cs:?}"
+    );
+    assert!(
+        !cs.iter().any(|c| c.contains("action list-tabs")),
+        "tab resolution (list-tabs) must not run: the list-panes failure \
+         propagates before target resolution. calls: {cs:?}"
+    );
+}
+
+/// list panes --tab TABSPEC絞り込み: tab ID指定と一意なtab名指定は当該tabのpane
+/// のみへ絞り込み、同名tab複数一致の名前はAmbiguousTarget（exit 3・candidatesは
+/// 一致tab id）、不在名はNoTarget（exit 3）。resolve_tab自体の4分岐はL1
+/// （selector.tab-resolution-by-id-or-unique-name）が担い、本testは
+/// list-panes→list-tabs→tab解決→tab_id filter→出力のCLI全体経路の固定。
+/// fixture（tabs-ambiguous.json / panes-threetabs.json）は3tab構成:
+/// 一意名alpha（tab_id 0）+同名dupペア（tab_id 1・2）+ 各tabへterminal 1件
+// [covers:list-display.panes-tab-filter-id-name-ambiguous]
+#[test]
+fn list_panes_tab_filter_id_name_and_ambiguous() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let pane_ids = |out: &[u8]| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_slice(out).unwrap();
+        v["data"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["pane_id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // (i) tab ID指定: tab 1（同名dupペアの1つ目）のpaneのみ
+    let (mut cmd, _) = zelper("list-panes-tab-id");
+    let out = cmd
+        .env("FAKE_TABS", "tabs-ambiguous.json")
+        .env("FAKE_PANES", "panes-threetabs.json")
+        .args(["list", "panes", "--tab", "1", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(pane_ids(&out), vec!["terminal_2"], "tab id 1 filter");
+
+    // (ii) 一意名指定: alpha → tab 0のpaneのみ
+    let (mut cmd, _) = zelper("list-panes-tab-name");
+    let out = cmd
+        .env("FAKE_TABS", "tabs-ambiguous.json")
+        .env("FAKE_PANES", "panes-threetabs.json")
+        .args(["list", "panes", "--tab", "alpha", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(pane_ids(&out), vec!["terminal_1"], "unique name filter");
+
+    // (iii) 同名ペア名: dup → AmbiguousTarget（exit 3。candidatesは一致tab id）
+    let (mut cmd, _) = zelper("list-panes-tab-ambig");
+    let out = cmd
+        .env("FAKE_TABS", "tabs-ambiguous.json")
+        .env("FAKE_PANES", "panes-threetabs.json")
+        .args(["list", "panes", "--tab", "dup", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "AmbiguousTarget");
+    let cands = v["error"]["candidates"].as_array().unwrap();
+    assert!(
+        cands.iter().any(|c| c == "1") && cands.iter().any(|c| c == "2"),
+        "candidates: {cands:?}"
+    );
+
+    // (iv) 不在名: NoTarget（exit 3）
+    let (mut cmd, _) = zelper("list-panes-tab-missing");
+    let out = cmd
+        .env("FAKE_TABS", "tabs-ambiguous.json")
+        .env("FAKE_PANES", "panes-threetabs.json")
+        .args(["list", "panes", "--tab", "no-such-tab", "--json"])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "NoTarget");
+}
+
+/// list tabs --jsonのdata.tabs要素のfield構成: 各tab objectは
+/// tab_id/position/name/active/selectable_tiled_panes_count/
+/// selectable_floating_panes_countの6 fieldを過不足なく持つ（key集合の完全一致で
+/// 固定。human表はlist_sessions_and_tabsが担当）。fixtureは--tab絞り込みtestと
+/// 同一の3 tab構成（alpha + 同名dupペア）を再利用し、active・floating countを
+/// tab毎に変えて値の対応まで検証する
+// [covers:list-display.tabs-json-field-composition]
+#[test]
+fn list_tabs_json_field_composition() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut cmd, _) = zelper("list-tabs-json-fields");
+    let out = cmd
+        .env("FAKE_TABS", "tabs-ambiguous.json")
+        .args(["list", "tabs", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], true);
+    let tabs = v["data"]["tabs"].as_array().unwrap();
+    assert_eq!(tabs.len(), 3);
+    // field構成の固定（過不足なし）: key集合が6 fieldと完全一致
+    let mut keys: Vec<&str> = tabs[0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "active",
+            "name",
+            "position",
+            "selectable_floating_panes_count",
+            "selectable_tiled_panes_count",
+            "tab_id",
+        ],
+        "data.tabs要素は6 fieldと完全一致（過不足なし）"
+    );
+    assert_eq!(
+        tabs[0],
+        serde_json::json!({
+            "tab_id": 0, "position": 0, "name": "alpha", "active": true,
+            "selectable_tiled_panes_count": 2, "selectable_floating_panes_count": 0
+        })
+    );
+    assert_eq!(
+        tabs[1],
+        serde_json::json!({
+            "tab_id": 1, "position": 1, "name": "dup", "active": false,
+            "selectable_tiled_panes_count": 1, "selectable_floating_panes_count": 1
+        })
+    );
+    assert_eq!(
+        tabs[2],
+        serde_json::json!({
+            "tab_id": 2, "position": 2, "name": "dup", "active": false,
+            "selectable_tiled_panes_count": 3, "selectable_floating_panes_count": 0
+        })
+    );
+}
+
+/// 対象session解決（list-sessions事前存在確認）を通過した後のaction呼出失敗
+/// （確認中のsession消滅・race相当。FAKE_FAIL_SESSION: 一覧に存在するsession名の
+/// action呼出全体をrc=1で失敗させる）は、list tabs/list panesともOperationFailed
+/// （exit 5）へwrappingされる。不在session名自体は事前存在確認がNoTarget（exit 3）
+/// へ分類するため本条件の対象外（TASK-93 D3）。zellij側の失敗形態（session消滅時の
+/// 応答形式等）の実測はL4領域（本testはshimのrc=1注入でzelper側のwrapping契約を
+/// 固定する）
+// [covers:list-display.session-missing-action-failure-operation-failed]
+#[test]
+fn list_tabs_panes_action_failure_is_operation_failed() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // (i) list tabs: 解決（list-sessions -n）は通過し、action list-tabsのみが失敗
+    let (mut cmd, log) = zelper("list-tabs-action-fail");
+    let out = cmd
+        .env("FAKE_FAIL_SESSION", "fake-sess")
+        .args(["list", "tabs", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["class"], "OperationFailed");
+    // 失敗が解決段でなくaction段であることの分離: 事前存在確認のlist-sessions呼出
+    // と失敗したaction list-tabs呼出が両方logに観測される
+    let cs = calls(&log);
+    assert!(
+        cs.iter().any(|c| c == "list-sessions -n"),
+        "事前存在確認（対象session解決）を通過していること. calls: {cs:?}"
+    );
+    assert!(
+        cs.iter().any(|c| c.contains("action list-tabs")),
+        "calls: {cs:?}"
+    );
+
+    // (ii) list panes: 同一の失敗がpanes側でも同じclassへwrapされる
+    let (mut cmd, _) = zelper("list-panes-action-fail");
+    let out = cmd
+        .env("FAKE_FAIL_SESSION", "fake-sess")
+        .args(["list", "panes", "--json"])
+        .assert()
+        .failure()
+        .code(5)
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["error"]["class"], "OperationFailed");
+}
+
 // ---------------------------------------------------------------------------
 // watch（TASK-86・watch.toml 16条件のうち文法・出力契約・exit分類の10条件。
 // loop系6条件はtests/fake_backend/watch.rs。設計§5.3/R6: 実行時間抑制のため

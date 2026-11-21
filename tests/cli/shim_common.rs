@@ -23,6 +23,8 @@
 // | 状態管理系（session） | （envなし。状態fileはsetup時初期化） | delete-session→`${FAKE_LOG}.deleted`（list-sessions応答から除外）・rename-session→`.renamed`（from名をto名へ差替）・attach -b作成ok→`.sessions`（list-sessions応答へ追加）。FAKE_PANES_JSON/FAKE_TABS_JSONに依存しない独立機構。TASK-98: 削除・改名の応答反映は完全名一致（行から最後の`[Created `markerで名前を抽出し〔区切りASCII空白1文字のみ除去=本体parserと同一論理〕等値比較——空白含み名・marker含有名の共存で先頭word一致・接頭一致が非対象行まで巻き込むのを防ぐ） |
 // | 状態管理系 | `FAKE_NEW_PANE_TEMPLATE` / `FAKE_NEW_TAB_TEMPLATE` | new-pane/new-tab handlerの採番object雛形（@ID@/@POS@ placeholder） |
 // | 失敗注入系 | `FAKE_FAIL_LIST_TABS` | list-tabsをrc=1 + stderrで失敗 |
+// | 失敗注入系 | `FAKE_FAIL_LIST_PANES` | list-panesをrc=1 + stderrで失敗（FAKE_FAIL_LIST_TABSと対称。TASK-64） |
+// | 失敗注入系 | `FAKE_FAIL_SESSION` | 単一session名に一致するaction呼出全体をrc=1 + stderrで失敗（action入口の存在確認通過後の失敗=確認中のsession消滅・race模擬。TASK-64） |
 // | 失敗注入系 | `FAKE_FAIL_DUMP_SCREEN` / `FAKE_FAIL_DUMP_SCREEN_AFTER` | 失敗させるpane idのspace区切りlist / `pane:成功回数`形式（成功回数超過から失敗） |
 // | 失敗注入系 | `FAKE_FAIL_WRITE_CHARS` / `FAKE_FAIL_WRITE` / `FAKE_FAIL_SEND_KEYS` | 失敗させるpane idのspace区切りlist（該当actionをrc=1） |
 // | 失敗注入系 | `FAKE_FAIL_MOVE_PANE` / `FAKE_FAIL_MOVE_TAB` | move-pane系/move-tab actionをrc=1 |
@@ -230,8 +232,19 @@ if [[ "$3" == "action" ]]; then
   fi
   shift 3
   action="$1"; shift
+  # TASK-64: FAKE_FAIL_SESSION（単一session名）に一致するaction呼出は全体をrc=1 + stderrで
+  # 失敗させる。上記存在確認は通過しているsession（list-sessions一覧に存在）のactionのみが
+  # 失敗する=確認中のsession消滅・race模擬。list tabs/panesのOperationFailed wrapping契約
+  # （list-display.session-missing-action-failure-operation-failed）の検証用。
+  # 未設定時は従来挙動のまま（後方互換）
+  if [[ -n "$FAKE_FAIL_SESSION" && "$sess" == "$FAKE_FAIL_SESSION" ]]; then
+    echo "boom" >&2; exit 1
+  fi
   case "$action" in
     list-panes)
+      # TASK-64: FAKE_FAIL_LIST_PANES設定時はlist-panesをrc=1 + stderrで失敗させる
+      # （FAKE_FAIL_LIST_TABSと対称・未設定時は従来応答のまま後方互換）
+      if [[ -n "$FAKE_FAIL_LIST_PANES" ]]; then echo "boom" >&2; exit 1; fi
       # TASK-65: FAKE_PANES_JSON設定時は行単位の状態file（1行=1pane object）で
       # pane状態を管理し、rename-pane/close-pane/new-pane handlerの作用を
       # list-panes応答へ反映する（未設定時はfixture応答。FAKE_TABS_JSONの

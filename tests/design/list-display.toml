@@ -1,14 +1,14 @@
 # list表示（src/app/list.rs）の検証条件。出典: test-plan §2.1（list系）・DD-4.1/DD-5/DD-3.4・TASK-93設計書（session-zero-missing.md D2: 0-session時のlist sessions出力）
-# 対応test: tests/cli/list_read_send.rs（部分11件。TASK-93の0-session出力1件を含む）+ lib src/app/list.rs（3件）。1条件=1 test fnの1:1対応（設計書§2.3/3.4）
+# 対応test: tests/cli/list_read_send.rs（部分17件。TASK-93の0-session出力1件・TASK-64の4件を含む）+ lib src/app/list.rs（3件）。1条件=1 test fnの1:1対応（設計書§2.3/3.4）
 [meta]
 feature = "list-display"
 source_file = "src/app/list.rs"
 verified = true
-verified_at = "2026-11-14"
+verified_at = "2026-11-21"
 verified_by = "claude"
-test_command = "cargo test --test cli_list_read_send list_sessions && cargo test --lib"
+test_command = "cargo test && uv run --no-project scripts/design/verify-conditions.py --strict-source --complete"
 source_hash = "aabbaadf7985228c4a42e18f1288c1c013885450"
-note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。（TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕）——TASK-82（2026-11-14）テスト先行条件書更新: layouts-symlink-follow-target-statを追加（fail-first。当時の現行実装はlstatのためlinkedのsize==link先path長8・modified_epoch==link作成時刻now近傍・brokenに値が出ることで赤〔tmp/tasks/tm-82/test_red.log〕）。併せてexcluded「layoutsのstat失敗・mtime不明時の-表示」を2系列へ分割: stat失敗(None, None)系列は本条件（壊れたsymlinkで実体化）へ昇格して削除、mtimeのみ不明(Some(size), None)系列は実測困難性（metadata成功時にmodified()がErrになるのは機能不支持fs等に限る）の理由を付してexcludedへ残置。（TASK-82実装でsrc/app/list.rsのLayouts分岐をe.metadata()からstd::fs::metadata(&path)へ変更し緑化・cargo test --test cli_list_read_send list_ 14件・cargo test --lib list:: 3件 全pass〔2026-11-14〕。verified/verified_at/verified_by/source_hashはTASK-82実装に対する最終検証記録へ更新）——コードレビュー対応〔2026-11-14・tmp/tasks/tm-82/codex_review_impl.log〕minor-1: human MODIFIED同一文字列比較はhuman_ageが行毎に現在時刻を取得するため行間の時間境界跨ぎで稀に不一致になる→Nd Nh ago形を時間換算し行間差±1h以内の比較へ安定化（値源検出力は維持: lstat由来なら6年超の差）。minor-2: mtime不明(Some(size), None)系列はmodified()失敗とepoch変換失敗の2分岐を含むことが判明→epoch変換失敗側（pre-epoch mtimeで再現可能）をlayouts-pre-epoch-mtime-modified-null条件として条件化・解消し、modified()自体のErr側（機能不支持fs等に限り実測困難）のみexcludedへ正確化残置——TASK-99（2026-11-14）テスト先行条件書更新: sessions-live-only-with-exited-presentへ汚染running行（名2語目にEXITEDを含む `x EXITED [Created 5m ago]`）をfixtureへ追加し期待値も更新（live-aのみ→live-a+x。設計§5のとおり「既存入力〔標準形式行〕に対するparse結果の不変」と「fixture拡張後の期待値更新」は別物〔設計レビューminor-2〕。表示側はfilter(!exited)の既存ロジックでparse単位条件backend-parser.sessions-name-marker-substrings-do-not-pollute-fieldsが本体のため新規条件なし）。テスト先行のためfail-first状態——現行rest.contains系判定では当該行がexited=trueで一覧から消えるため赤〔tmp/tasks/tm-99/test_red.log〕。（当時記録。TASK-99実装〔parse_sessions anchor化〕で緑化・cargo test --test cli_list_read_send list_sessions 6件・cargo test --lib 14件 全pass〔tmp/tasks/tm-99/test_green.log〕）。verified/test_commandはTASK-99緑化確認に対する記録へ更新。source_hashはsource_file〔src/app/list.rs〕がTASK-99実装で不変のためTASK-82実装時の記録を継承（panes/layouts系などfixture不変の既存条件も実装不変で従来検証のまま有効）——TASK-98（2026-11-14）テスト先行条件書更新: sessions-live-only-with-exited-presentの空白含み名行（x EXITED）の期待値を切り詰め名xから完全名\"x EXITED\"へ更新（設計: tmp/tasks/tm-98/design_name-truncation.md §5 minor-2(i)。shimのlist-tabs応答はsession名keyingでないため当該期待の追加変更なし。テスト先行のためfail-first状態——現行〔name=先頭word〕では一覧のnameがxになるため赤〔tmp/tasks/tm-98/test_red.log〕。meta.verifiedはTASK-98実装工程での緑化確認後に再設定するためfalseへ移行。source_hashはsource_fileが本更新で不変のためTASK-82実装時の記録を継承）——（当時記録。TASK-98実装〔parse_sessions name抽出変更〕で緑化・cargo test --test cli_list_read_send 112件全pass〔tmp/tasks/tm-98/test_green.log〕）。verified/test_commandはTASK-98緑化確認に対する記録へ再設定。source_hashはsource_file〔src/app/list.rs〕がTASK-98実装でも不変のためTASK-82実装時の記録を継承"
+note = "TASK-93（2026-11-12）条件書更新: sessions-zero-session-normal-outputを追加（D2: 0-session環境のlist sessionsは空一覧の正常系。shimのFAKE_SESSIONS_EMPTY 0件文面をstderr出力へ修正済み——backend decode条件〔rc=1 + stderr完全一致 + stdout空〕の適合前提）。excluded「list系のsession不存在失敗（OperationFailedで包む）」を廃止: 0-sessionは空一覧の正常系化（D1）により「session不存在＝失敗」の前提が消失。不在名に起因しない真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま残り、backend-process.list-sessions-empty-marker-decodeの負荷側が担保する。（TASK-93実装でlist sessions 0個が空一覧の正常系へ緑化・cargo test --test cli_list_read_send/--lib 全pass・コードレビュー指摘対応まで完了〔2026-11-12〕）——TASK-82（2026-11-14）テスト先行条件書更新: layouts-symlink-follow-target-statを追加（fail-first。当時の現行実装はlstatのためlinkedのsize==link先path長8・modified_epoch==link作成時刻now近傍・brokenに値が出ることで赤〔tmp/tasks/tm-82/test_red.log〕）。併せてexcluded「layoutsのstat失敗・mtime不明時の-表示」を2系列へ分割: stat失敗(None, None)系列は本条件（壊れたsymlinkで実体化）へ昇格して削除、mtimeのみ不明(Some(size), None)系列は実測困難性（metadata成功時にmodified()がErrになるのは機能不支持fs等に限る）の理由を付してexcludedへ残置。（TASK-82実装でsrc/app/list.rsのLayouts分岐をe.metadata()からstd::fs::metadata(&path)へ変更し緑化・cargo test --test cli_list_read_send list_ 14件・cargo test --lib list:: 3件 全pass〔2026-11-14〕。verified/verified_at/verified_by/source_hashはTASK-82実装に対する最終検証記録へ更新）——コードレビュー対応〔2026-11-14・tmp/tasks/tm-82/codex_review_impl.log〕minor-1: human MODIFIED同一文字列比較はhuman_ageが行毎に現在時刻を取得するため行間の時間境界跨ぎで稀に不一致になる→Nd Nh ago形を時間換算し行間差±1h以内の比較へ安定化（値源検出力は維持: lstat由来なら6年超の差）。minor-2: mtime不明(Some(size), None)系列はmodified()失敗とepoch変換失敗の2分岐を含むことが判明→epoch変換失敗側（pre-epoch mtimeで再現可能）をlayouts-pre-epoch-mtime-modified-null条件として条件化・解消し、modified()自体のErr側（機能不支持fs等に限り実測困難）のみexcludedへ正確化残置——TASK-99（2026-11-14）テスト先行条件書更新: sessions-live-only-with-exited-presentへ汚染running行（名2語目にEXITEDを含む `x EXITED [Created 5m ago]`）をfixtureへ追加し期待値も更新（live-aのみ→live-a+x。設計§5のとおり「既存入力〔標準形式行〕に対するparse結果の不変」と「fixture拡張後の期待値更新」は別物〔設計レビューminor-2〕。表示側はfilter(!exited)の既存ロジックでparse単位条件backend-parser.sessions-name-marker-substrings-do-not-pollute-fieldsが本体のため新規条件なし）。テスト先行のためfail-first状態——現行rest.contains系判定では当該行がexited=trueで一覧から消えるため赤〔tmp/tasks/tm-99/test_red.log〕。（当時記録。TASK-99実装〔parse_sessions anchor化〕で緑化・cargo test --test cli_list_read_send list_sessions 6件・cargo test --lib 14件 全pass〔tmp/tasks/tm-99/test_green.log〕）。verified/test_commandはTASK-99緑化確認に対する記録へ更新。source_hashはsource_file〔src/app/list.rs〕がTASK-99実装で不変のためTASK-82実装時の記録を継承（panes/layouts系などfixture不変の既存条件も実装不変で従来検証のまま有効）——TASK-98（2026-11-14）テスト先行条件書更新: sessions-live-only-with-exited-presentの空白含み名行（x EXITED）の期待値を切り詰め名xから完全名\"x EXITED\"へ更新（設計: tmp/tasks/tm-98/design_name-truncation.md §5 minor-2(i)。shimのlist-tabs応答はsession名keyingでないため当該期待の追加変更なし。テスト先行のためfail-first状態——現行〔name=先頭word〕では一覧のnameがxになるため赤〔tmp/tasks/tm-98/test_red.log〕。meta.verifiedはTASK-98実装工程での緑化確認後に再設定するためfalseへ移行。source_hashはsource_fileが本更新で不変のためTASK-82実装時の記録を継承）——（当時記録。TASK-98実装〔parse_sessions name抽出変更〕で緑化・cargo test --test cli_list_read_send 112件全pass〔tmp/tasks/tm-98/test_green.log〕）。verified/test_commandはTASK-98緑化確認に対する記録へ再設定。source_hashはsource_file〔src/app/list.rs〕がTASK-98実装でも不変のためTASK-82実装時の記録を継承——TASK-64（2026-11-21）excluded残3件の条件化+session系action失敗の条件化（実装不変・test追加のみ）: panes-fetch-failure-operation-failed-exit5（shimへFAKE_FAIL_LIST_PANES追加。FAKE_FAIL_LIST_TABSと対称・後方互換。「対象解決前」は--tab 999併用+shim logのlist-panes在/list-tabs不在で固定）・panes-tab-filter-id-name-ambiguous（新規合成fixtureペアtabs-ambiguous.json/panes-threetabs.json=3tab〔一意名alpha+同名dupペア〕を追加しFAKE_TABS/FAKE_PANESで選択。※選択env自体はTASK-83 shim統一で既存のため追加不要〔body軸5からの食い違い〕。resolve_tab 4分岐はL1 selector.tab-resolution-by-id-or-unique-nameと役割分担）・tabs-json-field-composition（同tabs fixture再利用。6 field過不足なしをkey集合一致で固定）の3条件でexcluded該当3行（2026-09-13起票分）を解消。session-missing-action-failure-operation-failedを追加（shimへFAKE_FAIL_SESSION追加: list-sessions一覧に存在するsession名のaction呼出全体をrc=1——TASK-93 D3で不在名自体はNoTarget事前確認へ分離された後の残る真backend失敗系列。旧excluded行はTASK-93廃止済みのため対応行削除なし。zellij側失敗形態はL4領域とsourceへ明記）。TASK-64計画（2026-09-18 body 7軸）からの変更2件: (1)旧軸4の「dirのx権限を外す方式」は対象の(None,None)系列がTASK-82実装（lstat→follow変更）で壊れたsymlinkによりlayouts-symlink-follow-target-statとして条件化済みのため同一code分岐の重複となり不採用（excludedのlayouts行はmodified()自体のErr側のみ残存と理由追記。中間caseの取り扱い〔条件化せず限界note〕はTASK-82レビューminor-2の分割で既に解決済み）。(2)旧軸7の総数計画（全repo 183条件・excluded 38）は2026-09-19時点値で現行は350→354条件・excluded 64→61"
 
 [[condition]]
 id = "list-display.sessions-and-tabs-basic-output"
@@ -128,30 +128,9 @@ given = "pathとraw_homeの組: (/home/tomo/work, /home/tomo) / (/home/tomo, /ho
 expect_return = "~/work / ~ / /home/tomox / /home/tomo2/x / /usr/bin / /home/tomo/work / ~/work"
 
 [[excluded]]
-item = "list-panesがerrorを返す場合の対象解決前の失敗伝播"
-source = "docs/testing/test-plan.md §2.9（list-panesがerror → 対象解決前の失敗伝播）"
-reason = "未test。既存133 testにlist-panes失敗時の伝播を検証するtest fnが存在しないため本移行では条件化できない（fake shimのlist-panesは常時成功）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
-
-[[excluded]]
-item = "list panesの--tab TABSPEC絞り込み（tab解決後のfilter）"
-source = "docs/design/detailed-design.md DD-1.2（--tabはpanesの絞り込みに使用） + DD-5（panes→list-panes -a --json（--tab絞り込みはzelper側でtab解決後にfilter））"
-reason = "未test。既存133 testにlist panes --tab併用を検証するtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
-
-[[excluded]]
-item = "list tabs --jsonのdata.tabs field構成（tab_id/position/name/active/selectable_*_count）"
-source = "docs/design/detailed-design.md DD-4.2（成功時envelope・dataにコマンド固有object） + DD-4.1（list tabs表のJSON対応）"
-reason = "未test。既存133 testにlist tabs --jsonを検証するtest fnが存在しないため本移行では条件化できない（tabsはhuman出力のみ検証済み。envelope一般契約はjson-contract.ok-envelope-shapeが担保）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
-
-[[excluded]]
 item = "layoutsのmetadata成功後にmodified()自体がErrになる系列の-表示（JSONはnull。Some(size), Noneのうちmodified()失敗側）"
 source = "docs/design/detailed-design.md DD-4.1（list layouts: NAME / SIZE / MODIFIED） + entriesをOption<u64>化しsize/modified取得失敗時は-（JSONはnull）表示（src/app/list.rs modified().ok()経路） + tmp/tasks/tm-82/design_symlink-stat.md §6.2 excluded分割"
-reason = "未test（実測困難）。旧excluded「layoutsのstat失敗・mtime不明時の-表示」（2026-09-13）は2系列を含み、stat失敗(None, None)系列はTASK-82のlayouts-symlink-follow-target-stat条件（壊れたsymlinkで実体化）へ昇格して解消。mtime不明(Some(size), None)系列はレビューminor-2で2分岐へ正確化され、epoch変換失敗側（duration_since(UNIX_EPOCH) Err。pre-epoch mtimeで再現可能）はlayouts-pre-epoch-mtime-modified-null条件へ条件化して解消。残る本系列はmetadata成功時にmodified()がErrになるのが機能不支持のfilesystem等に限られ、test環境の通常local filesystemでは人工的に発生させられないため条件化できない。将来発生条件が特定できた時点で条件化する"
+reason = "未test（実測困難）。旧excluded「layoutsのstat失敗・mtime不明時の-表示」（2026-09-13）は2系列を含み、stat失敗(None, None)系列はTASK-82のlayouts-symlink-follow-target-stat条件（壊れたsymlinkで実体化）へ昇格して解消。mtime不明(Some(size), None)系列はレビューminor-2で2分岐へ正確化され、epoch変換失敗側（duration_since(UNIX_EPOCH) Err。pre-epoch mtimeで再現可能）はlayouts-pre-epoch-mtime-modified-null条件へ条件化して解消。残る本系列はmetadata成功時にmodified()がErrになるのが機能不支持のfilesystem等に限られ、test環境の通常local filesystemでは人工的に発生させられないため条件化できない。将来発生条件が特定できた時点で条件化する。TASK-64（2026-11-21）: 当task計画時（2026-09-18 body軸4）に挙げられていた「dirのx権限を外す方式」はmetadata呼出自体のEACCESによる(None, None)系列であり、TASK-82実装（lstat→follow変更）後は壊れたsymlinkで実体化済みのlayouts-symlink-follow-target-statと同一code分岐（unwrap_or((None, None))）になるため重複として不採用。本行はmodified()自体のErr側のみを対象とする"
 decided_at = "2026-11-14"
 decided_by = "claude"
 
@@ -181,3 +160,39 @@ source = "tmp/tasks/tm-82/design_symlink-stat.md §5失敗系列表・§6.2 excl
 description = "実fileのmtimeがUnix epoch以前の場合のMODIFIED扱い: modified()は成功するがduration_since(UNIX_EPOCH)がErr（負経過）になるため、sizeは数値・modified_epochはnull（human MODIFIEDは-）へ落ちる。誤った値（負epoch相当の誤表現）を出さないC16契約のmtime側固定。旧excludedのmtime不明系列は本条件（再現可能側: touch -d @-100）とexcluded（modified()自体のErr側）へ分割済み"
 given = "ZELLIJ_LAYOUT_DIRへ実体old.kdl（13 bytes）のみを置き、mtimeをtouch -d @-100でepoch以前（1969-12-31T23:58:20Z）へ設定した環境での zelper list layouts --json と zelper list layouts（human）の各実行"
 expect_return = "JSON: name=old・size=13・modified_epoch=null。human: header行 + old TAB 13 TAB - の1行"
+
+[[condition]]
+id = "list-display.panes-fetch-failure-operation-failed-exit5"
+source_lines = "tests/cli/list_read_send.rs:1189"
+target_function = "list::run（Panes: list_panes失敗の伝播）"
+source = "docs/testing/test-plan.md §2.9旧対応表（2026-09-13時点: list-panesがerror → 対象解決前の失敗伝播。現行§2.9は語彙対応表へ再編済み） + docs/design/detailed-design.md DD-5（panes→list-panes -a --json（--tab絞り込みはzelper側でtab解決後にfilter）——panes取得が先であり、list-panes失敗はtab解決より前に伝播する） + DD-4.3（5 = 操作失敗。error.class対応: OperationFailed=5）"
+description = "list panesのbackend失敗（list-panes action呼出のrc=1）はOperationFailed（exit 5・--json時はerror envelope）へwrappingされ、--tab TABSPEC併用時も対象（tab）解決より前のlist_panes呼出段で失敗する。「対象解決前」は、単独ならNoTargetになる不在tab id（--tab 999）を併用してもlist-tabs呼出がshim logへ現れないことで固定する（tab解決が先に立つ実装ならexit 3になるため検出可能）。非zero終了→OperationFailed変換のL2単位はbackend-process.nonzero-exit-operation-failedが担い、本条件はlist panes CLI経路のL3契約"
+given = "shimのFAKE_FAIL_LIST_PANES（list-panes actionをrc=1 + stderrで失敗させる注入。FAKE_FAIL_LIST_TABSと対称・未設定時は従来応答）を設定した環境でのzelper list panes --tab 999 --jsonの実行"
+expect_return_shape = "exit 5。stdoutはerror envelope（ok=false・error.class=OperationFailed・messageに注入stderr（boom）を含む）。shim logに `--session fake-sess action list-panes` の呼出が観測され `action list-tabs` は不発"
+
+[[condition]]
+id = "list-display.panes-tab-filter-id-name-ambiguous"
+source_lines = "tests/cli/list_read_send.rs:1231"
+target_function = "list::run（Panes: --tab TABSPEC絞り込み）"
+source = "docs/design/detailed-design.md DD-1.2（--tabはpanesの絞り込みに使用） + DD-5（panes→list-panes -a --json（--tab絞り込みはzelper側でtab解決後にfilter）） + DD-4.3（3 = 対象解決失敗（no target / ambiguous）。NoTarget・AmbiguousTarget=3） + resolve_tabの4分岐（ID/一意名/曖昧/不在）自体はL1 selector.tab-resolution-by-id-or-unique-nameが担う（本条件はlist panes全体経路（list-panes→list-tabs→tab解決→tab_id filter→出力）のL3固定——役割分担）"
+description = "list panes --tab TABSPEC絞り込み: tab ID指定と一意なtab名指定は当該tabのpaneのみへ絞り込み、同名tab複数一致の名前はAmbiguousTarget（exit 3・candidatesは一致tab id）、不在名はNoTarget（exit 3）になる。tab解決後にpaneをtab_idでfilterする経路の固定（CMR-5: ID/一意名の成功2系列と曖昧/不在の失敗2系列を1条件に統合）"
+given = "3 tab構成（一意名alpha〔tab_id 0〕+同名dupペア〔tab_id 1・2〕）のtabs fixtureと各tabへterminal pane 1件ずつのpanes fixtureをFAKE_TABS/FAKE_PANESで選択したshimに対する (i) zelper list panes --tab 1 --json (ii) zelper list panes --tab alpha --json (iii) zelper list panes --tab dup --json (iv) zelper list panes --tab no-such-tab --json の各実行"
+expect_return_shape = "(i)(ii)はexit 0でdata.panesは当該tabのpaneのみ（(i)はterminal_2・(ii)はterminal_1）。(iii)はexit 3・error.class=AmbiguousTarget・candidatesにtab id 1と2を含む。(iv)はexit 3・error.class=NoTarget"
+
+[[condition]]
+id = "list-display.tabs-json-field-composition"
+source_lines = "tests/cli/list_read_send.rs:1313"
+target_function = "list::run（Tabs: JSON出力）"
+source = "docs/design/detailed-design.md DD-4.2（成功時はコマンド固有のobjectをdataへ格納したenvelope） + DD-4.1（list tabs: TAB_ID / POS / ACTIVE / NAME / PANES表のJSON対応。PANESはtiled count・floatingがあれば2+1f形式） + envelope一般契約はjson-contract.ok-envelope-shapeが担保（本条件はdata.tabsの固有field構成を担当）"
+description = "list tabs --jsonのdata.tabs要素のfield構成: 各tab objectはtab_id/position/name/active/selectable_tiled_panes_count/selectable_floating_panes_countの6 fieldを過不足なく持つ。tabs human表（sessions-and-tabs-basic-outputが担当）のJSON対応（CMR-5: field構成の固定と値の対応を1条件に統合）"
+given = "3 tab構成（一意名alpha+同名dupペア。active・tiled/floating countをtab毎に変えてある）のtabs fixtureをFAKE_TABSで選択したshimに対するzelper list tabs --jsonの実行"
+expect_return_shape = "exit 0。data.tabsは3要素で各要素のkey集合は6 fieldと完全一致、値はfixture対応（alpha: tab_id=0・position=0・name=alpha・active=true・tiled=2・floating=0。tab_id 1: name=dup・active=false・tiled=1・floating=1。tab_id 2: name=dup・active=false・tiled=3・floating=0）"
+
+[[condition]]
+id = "list-display.session-missing-action-failure-operation-failed"
+source_lines = "tests/cli/list_read_send.rs:1380"
+target_function = "list::run（Tabs/Panes: 対象session解決通過後のaction失敗wrapping）"
+source = "docs/design/detailed-design.md DD-5失敗節（真のbackend失敗（marker不一致rc=1・確認中のsession消滅等）はOperationFailedのまま） + DD-1.2（対象session解決は--session明示/autoともlist-sessions事前存在確認〔TASK-93 D3〕が先行——不在名はNoTarget exit 3へ分類されaction呼出失敗とは別分離。本条件は解決通過後のaction失敗側） + DD-4.3（OperationFailed=5） + zellij側の失敗形態（session消滅時の応答形式等）の実測はL4領域として本条件の対象外（shimのrc=1注入でzelper側のwrapping契約に限定）"
+description = "list tabs/list panesの対象session解決（list-sessions事前存在確認）を通過した後のaction呼出失敗（確認中のsession消滅・race相当）はOperationFailed（exit 5・--json時はerror envelope）へwrappingされる。旧excluded「list系のsession不存在失敗（OperationFailedで包む）」はTASK-93で名前不在の前提が消失して廃止済みであり、本条件はそのnoteに残された真backend失敗系列（tabs/panesのaction呼出側。list sessions負荷側はbackend-process.list-sessions-empty-marker-decode等が担保）の固定"
+given = "shimのFAKE_FAIL_SESSION（単一session名。list-sessions一覧には存在して事前存在確認を通過するが、当該sessionへのaction呼出全体をrc=1 + stderrで失敗させる注入）をfake-sessへ設定した環境での (i) zelper list tabs --json (ii) zelper list panes --json の各実行"
+expect_return_shape = "ともにexit 5・error.class=OperationFailed。(i)のshim logにはlist-sessions -n（事前存在確認の通過）と `--session fake-sess action list-tabs` の両方が観測され、失敗が解決段でなくaction段であることが分離できる"
