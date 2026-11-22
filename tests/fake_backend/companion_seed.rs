@@ -3,6 +3,8 @@
 // 形式はE6実験（tmp/e6_plugin/run3.sh。session起動前seedで自動grantを実証）に基づく:
 // node名 = plugin wasm絶対pathのquoted KDL node・権限は子のbare node。
 // fail-first: 実装（TASK-39）前にfailする（test-plan §5のseed判定を含む）。
+mod env_util;
+use env_util::{with_isolated_home_no_xdg, with_isolated_xdg};
 use zelper::companion::{REQUIRED_PERMISSIONS, ensure_permissions, seeded_content};
 use zelper::error::ErrorClass;
 
@@ -242,24 +244,8 @@ fn r28_persistent_conflict_aborts_without_writing() {
 
 // ---- C2/C4（TASK-39コードレビュー対応） ----
 
-/// XDG_CACHE_HOME隔離（companion_dir()解決の検証に使用。static Mutexで直列化）
-static XDG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn with_isolated_xdg<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
-    let _guard = XDG_LOCK.lock().unwrap();
-    let dir = std::env::temp_dir().join(format!("zelper-seed-xdg-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let prev = std::env::var("XDG_CACHE_HOME").ok();
-    // safety: XDG_LOCKで直列化した範囲内でのみ一時的に上書きし、即座に復元する
-    unsafe { std::env::set_var("XDG_CACHE_HOME", &dir) };
-    let out = f(&dir);
-    match prev {
-        Some(p) => unsafe { std::env::set_var("XDG_CACHE_HOME", p) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    out
-}
+// XDG_CACHE_HOME/HOME隔離helper群（EnvGuard RAII復元 + lock_env直列化）は
+// env_util.rsへ共通化（TASK-83 Phase 1。TASK-71でこのfileに確立した形が正本）
 
 // [covers:companion-seed.concurrent-seeds-serialize-via-advisory-lock]
 #[test]
@@ -409,6 +395,38 @@ fn c4_failed_wasm_extract_write_leaves_no_partial_temp_file() {
             names,
             vec![".zelper-companion.wasm.tmp-".to_string() + &std::process::id().to_string()],
             "{names:?}"
+        );
+    });
+}
+
+// ---- XDG_CACHE_HOME未設定時の既定path解決（TASK-71） ----
+
+// [covers:companion-seed.xdg-cache-home-unset-falls-back-to-home-dot-cache]
+#[test]
+fn xdg_cache_home_unset_falls_back_to_home_dot_cache() {
+    // XDG_CACHE_HOME未設定時の既定解決（DD-10.3/10.4）: companion配置・permissions.kdl
+    // 対象はHOME基準の~/.cacheへ向かう。HOMEを一時dirへ隔離し、XDG_CACHE_HOMEを
+    // unsetした状態で検証する（実userの~/.cacheを汚染しない）
+    with_isolated_home_no_xdg(|home| {
+        // permissions.kdl対象: <HOME>/.cache/zellij/permissions.kdl
+        let path = zelper::companion::permissions_path().unwrap();
+        assert_eq!(
+            path,
+            home.join(".cache").join("zellij").join("permissions.kdl")
+        );
+        // companion配置dir: <HOME>/.cache/zelper/companion/<zelper-version>（DD-10.3）
+        assert_eq!(
+            zelper::companion::companion_dir().unwrap(),
+            home.join(".cache")
+                .join("zelper")
+                .join("companion")
+                .join(env!("CARGO_PKG_VERSION"))
+        );
+        // 既定解決pathへのseedが当該pathへfileを作成する
+        ensure_permissions(&path, NODE, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            node_block(NODE, &all_perms())
         );
     });
 }

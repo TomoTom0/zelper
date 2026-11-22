@@ -5,6 +5,7 @@ Zellij向けの構造化automation/orchestration CLI。複数pane/tab・外部sc
 ```text
 zelper send --command codex -- y        # codexを走らせたpane全てにyを送る
 zelper read --tab agents                # agents tabの全paneの画面を読む
+zelper watch --command codex -- READY   # codex paneのいずれかにREADYが出るまで待つ
 zelper remap three                      # 動いているpaneをprocess保持のまま3分割layoutへ
 ```
 
@@ -75,6 +76,7 @@ zelper read [PANE...] [filters] [--full] [--tail N] [--json]
 zelper send (PANE... | filters) ( -- TEXT | --keys KEY... ) [--enter] [--json]
 zelper rename pane PANE NAME
 zelper rename tab TAB NAME
+zelper rename session NAME NEW_NAME           （session名変更。事前衝突検査+事後一覧検証つき）
 zelper resize pane PANE (grow|shrink) (left|right|up|down) [STEPS]
 zelper resize equalize [--tab T | PANE...] [--json]
 zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
@@ -83,6 +85,27 @@ zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
+zelper remove session NAME... [--yes] [--dry-run] [--json]
+zelper remove session (--all | --dead | --me) [--yes] [--dry-run] [--json]
+                                        （sessionの完全削除〔行もresurrection dataも消す〕。
+                                         selector 4者排他: NAME... / --all / --dead / --me。
+                                         常に--yes/--dry-run必須〔単一対象でも〕。
+                                         --meは自session削除〔ZELLIJ_SESSION_NAME解決〕で、
+                                         実行前にstderr warningを出すbest-effort契約）
+zelper move pane PANE (left|right|up|down|rotate) [--backwards] [--json]
+zelper move pane PANE --to-tab TAB | --swap-with PANE   （3形式は相互排他）
+zelper move tab TAB --swap-with TAB [--json]
+                                        （単一pane/tabの移動・交換。方向移動・rotateは
+                                         slot間swap〔端ではno-op warning〕・tab間移動と
+                                         pane交換はcompanion plugin・tab交換はmove-tab合成。
+                                         対象はtiled terminal paneのみ: floating paneは
+                                         remap --embed-floatingでtiled化してから）
+zelper [--session NAME] attach [--json]     （対話attach。TTY必須: 非TTYはexit 7）
+zelper [--session NAME] detach [--json]     （対象sessionのattach clientをdetach）
+zelper add session NAME [--json]            （detached session作成。session 0件環境でも動作）
+zelper watch [PANE...] [filters] [--regex] [--full] [--interval SECS] [--max N] [--json] -- PATTERN
+                                        （pane出力のpattern監視。polling: 1s間隔・最大30回で
+                                         hitならexit 0、回数切れはexit 5。PATTERNは1件）
 zelper completion bash|zsh|fish
 zelper docs readme | llm usage|skill|snippet
                                         （ドキュメント配布物の出力。docs/usage/参照）
@@ -97,32 +120,57 @@ zelper docs readme | llm usage|skill|snippet
 5 操作失敗 / 6 部分失敗 / 7 preflight・layout不正・検証失敗
 ```
 
+## watchの意味論
+
+- 対象pane（複数可・any-hit）の出力を`--interval`秒間隔（既定1s・1s未満はusage error）でpollingし、`-- PATTERN`（1件）を含む行が出現したら即座にhit報告（exit 0）。既定の照合は固定substring（行単位）・`--regex`で正規表現（大文字小文字無視は`(?i)`表現）
+- attempt 1はsleepなしの即時実行のため、watch開始前に既に出力済みのテキストでもhitします（`--full`でscrollback込み）。hit paneが複数あり得る場合はvisual order最初のpane 1件を報告
+- 最大試行回数`--max`（既定30）に到達すると失敗（exit 5。監視中のpane消失を一部に伴う場合はexit 6）。pollingは`dump-screen`の反復で、対象解決は開始時1回のみ（新規paneの追加は対象外）
+- 照合は`dump-screen`生テキストの行単位（ANSI escapeの正規化は行わない）
+
+## session lifecycle（attach / detach / add session / remove session）
+
+- `attach` は対話clientの起動です。stdin・stdoutの両方がTTYであることを要求し、非TTY（script・agent実行等）ではzellijを起動する前にexit 7で拒否します（非TTYの素attachはzellij側でpanicするため。`--session` 不在名・session 0個のexit 3〔NoTarget〕はこのTTY検査より先に立ちます）。対話終了後に `attach session 'NAME' ended` の1行（`--json` は `data.session`）を報告します。zellijの非zero終了はexit 5になります
+- `detach` は `--session NAME action detach` のwrapです。client不在でも成功（no-op）扱いで `detached clients from session 'NAME'` を報告します。不在session名はexit 3（NoTarget・候補表示付き）で拒否します。複数clientがattachしている場合、zellijの仕様としてdetachは最新のattach clientのみ切断し、先発clientは画面凍結のまま残留します（M3実測: 反復detachでも先発clientは残留するため、全client切断の手段としては機能しません）
+- `add session NAME` はdetached sessionを作成します（`zellij attach -b NAME` 相当）。sessionが1つも存在しない環境でも動作し、同名running sessionが既にあれば作成前にexit 7で拒否、作成後のlist-sessions出現を検証してから `created session 'NAME' (detached)` を報告します。作成直後は空session（tab 1・pane 0件）で、最初のattach時にdefault layoutが具現化します。layoutを適用したい場合は作成後の `remap` 合成（`zelper add session work && zelper --session work remap three`）で行います
+- `remove session` はsessionを完全に削除します（session行もresurrection dataも消す。killのみ/dataのみの区別はzellij 0.44.3に存在しないため単一意味論。各対象は `zellij delete-session NAME -f` 1呼び出し）。対象selectorは `NAME...`（複数可・重複は除去）/ `--all`（EXITED行を含む全行）/ `--dead`（EXITED行のみ）/ `--me`（自session）の4者のうちちょうど1つで、EXITED行も削除対象として受理します（不在名はexit 3・候補はEXITED込み）。**常に** `--yes` か `--dry-run` が必要です（単一対象でも。`--dry-run` は対象毎のstate（running/dead）とtab/pane数のplanを出力）
+- 自sessionの保護: 自session（環境変数 `ZELLIJ_SESSION_NAME`）の削除は `--me` 指定時のみ許可されます。`NAME...` に自sessionが含まれる場合は状態変更前にexit 7で拒否し、`--all` は自sessionを除外してstderrのwarning行で通知します（自sessionのみが存在するならexit 3で `--me` を案内）。`--me` はzellij外ではexit 7です。`--me` 実行はzelper自身が巻き込まれて報告・exit status・検証が実行されない可能性があるためbest-effort契約とし、実行前にstderr warning行を出します
+- 削除は対象毎に順次実行し、失敗しても残対象を実行してper-targetに報告します（部分失敗はexit 6）。全対象実行後にlist-sessionsで消失を検証し、残存があれば失敗報告します（rc=0でも無操作があり得るため）
+
+## moveの意味論（単一対象の移動・交換）
+
+- remapがlayout基準の全体再配置（heavyweight）であるのに対し、moveは単一pane/tabの即時・可逆な相対位置変更（lightweight）です
+- 方向移動・rotate（`move pane P left` 等）はzellijの`move-pane`wrapで、slot幾何はそのままにpaneの付け替えswapとして動きます。移動方向の端にいる場合はrc=0でも何も変わらないため、実行後に幾何を再取得して比較し、no-opならwarning行を出してexit 0します（無検証の成功を返しません）
+- `move pane P --to-tab T` はcompanion plugin（remapと共用）によるプロセス保存移動です。pane IDは不変（実行後に検証）。宛先が現tabと同じならpipeなしのno-op（warning + exit 0）
+- `move pane A --swap-with B` は2回の移動でpaneを交換します（cross-tabのみ。同一tab内の位置交換はzellijに機構がないためexit 7 + remap誘導）。片方だけが所属tabの最後のselectable paneである構成では移動順序を調整してtabの自動closeを回避します。両paneがそれぞれ所属tabの最後のselectable pane（両側singleton）である構成では、順序を変えてもtabの自動closeを回避できないため実行前にexit 7で拒否し、`move tab --swap-with`（tab名・tab IDの帰属は入れ替わらない点がpane交換と異なる）か`remap`を案内します。2回の移動の間で失敗した場合は移動済み/未移動を正確に報告し、atomicityは主張しません
+- `move tab A --swap-with B` は`move-tab -t`の繰返し合成（距離dに対し2d-1回）で両tabのpositionを入れ替えます。tab ID・tab名は不変（実行後に検証）
+
 ## remapの意味論
 
 既存の動いているpaneのprocessを**すべて**保持したまま、指定layoutに再配置します。対象はsession全体のselectable・tiledなterminal pane（`--tab T` 指定時はそのtabのpaneに絞り込み、かつそのtabが再配置のanchorになる）。
 
 - pane数 M・slot数 N から **k = max(1, ceil(M/N))** 個のlayout instanceを生成し、layoutを反復して全paneを配置します。**M > N でもerrorになりません**
-- **kill/restartする経路は存在しません**。他tabへのpane移動はcompanion plugin（zelper binaryに埋め込んだwasm）によるプロセス保存移動で行います
+- 既存paneの**kill/restartは行いません**。run一致不成立でzelper自身がspawnした複製paneのみcloseして報告します（JSON `closed_duplicates`）。他tabへのpane移動はcompanion plugin（zelper binaryに埋め込んだwasm）によるプロセス保存移動で行います
 - instance 0は既存tab（`--tab`指定時はそのtab、省略時はactive tab。tab名は保持）。instance 1以降は新規tabに `<layout名>-2`、`<layout名>-3` …と連番で命名（`--path`はfile stem、`--inline`は `remap-2` 等がbase）
 - 割当順はvisual order（tab position → y → x）で決定的。空slot（最終instanceにのみ発生）は既定shellで埋まります。移動によって空になったtabはzellijにより自動closeされます
 - 移動が必要な場合（k > 1、または対象paneの一部がanchor tab外）のみcompanion pluginを使用し、状態変更前に応答性確認（probe）を行います。probe不成立なら一切の状態変更を行わず中断（exit 5）。移動が不要ならcompanion pluginは一切使われません
-- floating paneはremapで移動できないため、存在時はpreflight error。`--embed-floating` でtiled化（process保持）してから組入れ
-- 適用後にpane IDの生存・割当tab所属・各tabのpane数を検証し、不一致はexit 7で報告
+- floating paneはremapで移動できないため、存在時の実行はpreflight error。`--embed-floating` でtiled化（process保持）してから組入れ。`--dry-run` はfloating保有でも仮想embedの計画と警告を出してexit 0で終わります（実行は変わらずpreflight error）
+- 適用後にpane IDの生存・割当tab所属・各tabのpane数・pane focus・run一意割当の位置照合を検証し、不一致はexit 7で報告
 - atomicityは主張しない。途中失敗時は実行済み/失敗/未実行を報告
 
 ## 互換性
 
 - 要件: zellij >= 0.44.3（companion plugin駆動のため）。0.44.x系列を超えるversion（0.45.0等）は未実証としてexit 4で拒否します
-- 検証: zellij 0.44.3 + zellij-tile 0.44.3（実機統合テスト S-v2-1〜6: 9 pane → 3 instanceの全pid保存、dry-runの状態不変、移動不要時のplugin不使用、floating paneのpreflight errorと `--embed-floating` 組入れ、probe不成立時の状態変更前中断を実証）
+- 検証: zellij 0.44.3 + zellij-tile 0.44.3（実機統合テスト S-v2-1〜6: 9 pane → 3 instanceの全pid保存、dry-runの状態不変、移動不要時のplugin不使用、floating paneのpreflight errorと `--embed-floating` 組入れ、probe不成立時の状態変更前中断を実証。S-v3-1〜5: multi-tab layout全体再現。TASK-81 E2E: cwd注入によるrun一致照合・照合不成立複製paneのclose回収・dry-runのfloating保有緩和を実証）
 - companion plugin: remapで移動が必要なときのみ動作。binary埋込のwasmを `$XDG_CACHE_HOME/zelper/companion/<version>/` に展開し、`$XDG_CACHE_HOME/zellij/permissions.kdl` に権限をseed（不足分のみ追記）して権限dialogを自動化します。installは単一binaryのままで追加assetなし
 - 利用する公開interface: `zellij action`（list-panes/list-tabs --json、override-layout、pipe --plugin、new-pane/new-tab等）、`zellij list-sessions`、`zellij setup`
 
 ## 既知の制限
 
-- remapのslot割当は、group（instance/tab）所属とcommand+argsが一意なpaneのslot対応に限り決定的。同一commandの複数pane間・複数shell pane間のslot順は保証しません
-- `pane_command` に `"` `'` `\` 改行・制御文字を含むpaneは、空白分割でquotingを復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）
+- remapのslot割当は、group（instance/tab）所属とrun（command+args+cwd）が一意なpaneのslot対応に限り決定的。同一runの複数pane間・複数shell pane間のslot順は保証しません
+- `terminal_command`（JSON `invoked_with`）に `"` `'` `\` 改行・制御文字を含むpaneやshell `-c` 起因と疑われるpaneは、空白分割で引数境界を復元できずslot照合を外しうる（warningを出して実行し、適用後検証で検出）。cwd注入後も、起動後のchdir・path正規化差があるpaneは照合を外しうる
 - `resize`は反復と幾何検証による近似。正確な行/列数・完全均等は保証しない（step刻みはzellij側仕様）
-- `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する
+- `list sessions` のJSONはzellijが提供しないため、`list-sessions`テキストをparse（name/created/current。作成時刻はzellijの相対表記のまま）。EXITED（resurrection待ちのdead session）は除外して表示・session解決する。sessionが1つもない場合も正常終了します（exit 0。humanはheaderのみ+stderrに作成案内note・JSONは空配列）
+- `remove session` の存在確認はlist-sessions行基準のため、行の出ない残data（registry掃除済みでcacheにsession_infoのみ残留するsession）には到達できません。その場合は `zellij delete-session NAME` を直接実行してください
 - tab IDはclose後に再利用されるため、zelperは取得したtab IDを即時使用のみに用いる
 - layout名解決は `ZELLIJ_LAYOUT_DIR` > `~/.config/zellij/layouts`。zellij本体の解決（config.kdlの`layout_dir`）と一致させること
 

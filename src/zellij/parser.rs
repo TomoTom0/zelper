@@ -21,29 +21,74 @@ pub fn parse_version(out: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
+/// zellij 0.44.3 `print_sessions`（`-n`形式）の行末suffix。排他一択で
+/// `[Created ...]`節の後の行末に置かれる。文言・構造の変更は形式変化であり
+/// DD-3.5 compatibility policy（実証済みは0.44.3のみ）の再実証対象
+const CURRENT_SUFFIX: &str = "(current)";
+const EXITED_SUFFIX: &str = "(EXITED - attach to resurrect)";
+/// 生成節の開始marker。0.44.3では無条件で常に存在しname直後に置かれる
+const CREATED_MARKER: &str = "[Created ";
+
 /// `list-sessions -n`テキスト（例: `zelper-p1-basic [Created 10s ago]`）→ SessionRef列
 /// 実行形式は `NAME [Created X ago]` + suffix（なし / `(current)` /
 /// `(EXITED - attach to resurrect)`）。EXITED行もparseして返す（resurrection待ちの
 /// dead session）。実行中のみへの絞り込みは呼び出し側の責務
+///
+/// 生成metadata（exited/current/created）の抽出は行末anchor（TASK-99）:
+/// 0.44.3の`print_sessions`は`[Created ...]`節を無条件でname直後に置き、
+/// suffixをその後の行末へ置くため、名前が行区切り（改行）を含まない限り
+/// 名前内容は行末に来得ない。ends_with/rfind系判定により、名前の2語目以降に
+/// marker部分文字列（EXITED・`(current)`・`[Created`）を含む行でもfieldは汚染
+/// されない（trim_endはsuffixなし行の行末空白対応）
+///
+/// nameの復元（TASK-98）: marker（`[Created `の最後尾出現）位置より前の全体から、
+/// marker直前の区切りASCII空白1文字のみを除いた完全名を返す（print_sessionsの
+/// nameと生成節の区切りは`format!("{} {} {}", ...)`由来のASCII空白1文字固定）。
+/// 名前自身の末尾空白（space/tab/NBSP等）と内部の複数空白は保存する
+/// （trim_end系の抽出では末尾空白が削除され完全復元の反例になる）。区切り不在の
+/// 非正規行はmarker直前の1文字を剥がさない。marker不在行（0.44.3の正規出力には
+/// 不存在・防御parse対象）は先頭wordへfallbackする——既存挙動との互換であって
+/// 安全化ではない。空remainder（`[Created ...`で始まる行）は実機生成不能
+/// （zellijは空名をvalidation拒否）のため行skipする
 pub fn parse_sessions(out: &str) -> Vec<SessionRef> {
     out.lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| {
-            let mut words = l.split_whitespace();
-            let name = words.next()?;
-            let rest = words.collect::<Vec<_>>().join(" ");
-            // `[Created 1m 45s ago]` → `1m 45s ago`（"Created " prefixを除去）
-            let created = rest.find('[').and_then(|start| {
-                rest[start + 1..]
+            let t = l.trim_end();
+            // name = 生成節より前の全体（TASK-98）。marker直前が区切りASCII空白
+            // 1文字（print_sessionsの区切り）ならそれのみ剥がし、名前自身の末尾
+            // 空白は保存する。marker不在時は先頭wordへfallback（既存挙動との互換）。
+            // 空remainder（markerより前が空）は行skip（filter_mapのNone）
+            let name = match t.rfind(CREATED_MARKER) {
+                Some(i) => {
+                    let s = if i > 0 && t.as_bytes()[i - 1] == b' ' {
+                        &t[..i - 1]
+                    } else {
+                        &t[..i]
+                    };
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                }
+                None => t.split_whitespace().next().map(|w| w.to_string()),
+            }?;
+            // `[Created 1m 45s ago]` → `1m 45s ago`（"Created " prefixを除去）。
+            // 生成節はname直後に常に存在するため最後尾出現（rfind）が真の生成節
+            // （名前が`[Created ...]`字面を含む場合の名前側の出現でない）。
+            // marker不在行はNone（find('[') heuristicへは戻さない——名前側'['の誤抽出）
+            let created = t.rfind(CREATED_MARKER).and_then(|start| {
+                t[start + 1..]
                     .split(']')
                     .next()
                     .map(|inner| inner.strip_prefix("Created ").unwrap_or(inner).to_string())
             });
             Some(SessionRef {
-                name: name.to_string(),
+                name,
                 created,
-                current: rest.contains("(current)"),
-                exited: rest.contains("EXITED"),
+                current: t.ends_with(CURRENT_SUFFIX),
+                exited: t.ends_with(EXITED_SUFFIX),
             })
         })
         .collect()

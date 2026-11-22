@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 Panels are addressed by pane id (terminal_3, plugin_1, or a bare number).\n\
 Targets: positional pane ids plus filter options (--tab/--name/--command/--cwd/--all).\n\
 \n\
-Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run",
+Examples:\n  zelper list panes\n  zelper read --tab agents\n  zelper send --command codex -- y\n  zelper rename pane 12 worker-1\n  zelper resize equalize --tab 2\n  zelper remap three --dry-run\n  zelper move pane 3 left\n  zelper watch --command codex -- READY\n  zelper add session work",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -83,6 +83,9 @@ pub enum Verb {
     /// 既存paneをlayoutに再配置（process保持・全pane対象）
     Remap {
         /// layout名（layout_dir解決。--path/--inlineと排他）
+        // '/'を含む値はlayout_dir直下のfile stemとして不成立なため構文段（exit 2）で
+        // 拒否し--pathへの案内を出す（DD-1.6非例「remap ./three.kdl」の意図。TASK-65）
+        #[arg(value_parser = parse_layout_name)]
         layout: Option<String>,
         #[arg(long, conflicts_with_all = ["layout", "inline"])]
         path: Option<std::path::PathBuf>,
@@ -104,10 +107,49 @@ pub enum Verb {
         #[command(subcommand)]
         target: AddTarget,
     },
-    /// pane/tab削除
+    /// pane/tab/session削除
     Remove {
         #[command(subcommand)]
         target: RemoveTarget,
+    },
+    /// 単一pane/tabの移動・交換（remap=全体再配置に対するlightweight操作）
+    Move {
+        #[command(subcommand)]
+        target: MoveTarget,
+    },
+    /// 対話attach（TTY必須。非TTYはexit 7）
+    Attach {
+        #[arg(long)]
+        json: bool,
+    },
+    /// 対象sessionのattach clientをdetach
+    Detach {
+        #[arg(long)]
+        json: bool,
+    },
+    /// pane出力のpattern監視（polling。hitまたは最大試行回数到達まで）
+    Watch {
+        /// pane ID（terminal_3 / plugin_1 / 3）。複数指定可（any-hit）
+        panes: Vec<String>,
+        #[command(flatten)]
+        filter: FilterArgs,
+        /// PATTERNを正規表現として照合（大文字小文字無視は`(?i)`表現）
+        #[arg(long)]
+        regex: bool,
+        /// scrollback込みで取得（dump-screen -f）
+        #[arg(long)]
+        full: bool,
+        /// polling間隔（秒）。1.0未満はusage error
+        #[arg(long, default_value_t = 1.0)]
+        interval: f64,
+        /// 最大試行回数（既定30）
+        #[arg(long, default_value_t = 30)]
+        max: u32,
+        #[arg(long)]
+        json: bool,
+        /// 監視pattern（`--`以降。v1はちょうど1件）
+        #[arg(last = true)]
+        pattern: Vec<String>,
     },
     /// shell補完scriptの生成（文書化されたverb原則の例外）
     Completion { shell: clap_complete::Shell },
@@ -163,6 +205,24 @@ pub enum RenameTarget {
         #[arg(long)]
         json: bool,
     },
+    /// session名変更: zelper rename session NAME NEW_NAME [--json]
+    /// （TASK-95）。旧名・新名とも必須（不足はusage error）。global --session
+    /// flagは無視（list/add/remove sessionと同一規約——対象session名をpositional
+    /// で明示するため解決に使わない）。既存session名へのrename・空文字・'/'含み
+    /// 新名はzellijがrc=0で黙って失敗し（M4 I・M95-C1/C2実測）、空白含み新名は
+    /// zellij受理後もlist-sessions行から名前を復元できないため、いずれもwrap側が
+    /// 事前検査で拒否しpostcondition検証を行う。先頭'-'はNEW_NAMEのみUsage事前
+    /// 検査で拒否する（TASK-97: `--`option終端経由でparseを通過するためclap拒否
+    /// に頼れず、add session NAME検査〔TASK-96〕と対称の4種目）。旧NAMEは文字種
+    /// 検査の対象外——世界model（list-sessions一覧）に存在する名前はそのまま
+    /// rename対象とし、不在はNoTarget+candidatesで案内する（`--`経由の旧NAME
+    /// 先頭'-'も一覧に存在すれば対象化）
+    Session {
+        name: String,
+        new_name: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -180,6 +240,7 @@ pub enum ResizeTarget {
     },
     /// 対象tiled paneの均等化（近似）
     Equalize {
+        #[arg(conflicts_with = "tab")]
         panes: Vec<String>,
         #[arg(long)]
         tab: Option<String>,
@@ -204,6 +265,18 @@ pub enum Direction {
 
 #[derive(Subcommand, Debug)]
 pub enum AddTarget {
+    /// detached session作成: zelper add session NAME [--json]（session 0件環境でも
+    /// 動作・TASK-89）。NAMEの空文字・'/'含み・空白含み・先頭'-'はwrap側がUsage
+    /// 事前検査で拒否する（TASK-96）: 空白含み名はzellij受理後もlist-sessions行から
+    /// 名前を復元できないため（parse_sessionsが先頭wordのみを名前化）、空文字・'/'
+    /// はzellijが明示拒否するが対称性・fail-fastでwrap側でも事前検査（rename
+    /// sessionのNEW_NAMEと同一規約）、先頭'-'は`--`通過系列が下流のoption解釈に
+    /// 到達するため事前拒否
+    Session {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
     Pane {
         #[arg(long)]
         tab: Option<String>,
@@ -240,6 +313,46 @@ pub enum AddTarget {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum MoveTarget {
+    /// pane移動: zelper move pane PANESPEC (left|right|up|down|rotate) [--backwards]
+    ///          / zelper move pane PANESPEC --to-tab TABSPEC / --swap-with PANESPEC
+    ///          （action positional / --to-tab / --swap-with は三者排他かつちょうど1つ）
+    Pane {
+        pane: String,
+        /// 方向移動・rotate（--to-tab / --swap-with と排他）
+        action: Option<MovePaneAction>,
+        /// rotateを逆回しにする（action=rotateとのみ併用可）
+        #[arg(long, requires = "action")]
+        backwards: bool,
+        /// 移動先tab（ID or 一意な名前。action positional / --swap-with と排他）
+        #[arg(long = "to-tab", conflicts_with_all = ["action", "swap_with"])]
+        to_tab: Option<String>,
+        /// 交換相手pane（action positional / --to-tab と排他）
+        #[arg(long, conflicts_with_all = ["action", "to_tab"])]
+        swap_with: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// tab交換: zelper move tab TABSPEC --swap-with TABSPEC
+    Tab {
+        tab: String,
+        #[arg(long)]
+        swap_with: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum MovePaneAction {
+    Left,
+    Right,
+    Up,
+    Down,
+    Rotate,
+}
+
+#[derive(Subcommand, Debug)]
 pub enum RemoveTarget {
     Pane {
         panes: Vec<String>,
@@ -255,6 +368,38 @@ pub enum RemoveTarget {
         /// 「空tab」（selectable paneが0個）を削除対象にする
         #[arg(long)]
         empty: bool,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// session削除（TASK-84）: zelper remove session NAME... / --all / --dead / --me
+    ///
+    /// selectorは NAME...（1件以上）/ --all / --dead / --me の4者のうちちょうど1つ
+    /// （DD-1.5排他）。単一の完全削除意味論（session行もresurrection dataも消す。
+    /// backendは常に `zellij delete-session NAME -f`）。常時--yes/--dry-run必須。
+    /// global --sessionは無視（対象は4 selectorのみ。--meの解決も
+    /// ZELLIJ_SESSION_NAMEのみ——--sessionはsession外からも指定可能で自sessionの
+    /// 証拠にならないため）
+    /// --meはbest-effort: 自session削除でzelper自身が巻き込まれ、報告・exit
+    /// status・検証が実行されない可能性がある（実行前にstderr warning行を出す）。
+    /// 既知制限: list-sessions行なしの残data（registry掃除済み・cacheにsession_info
+    /// 残留）は対象外——`zellij delete-session NAME` でのみ到達可能
+    Session {
+        /// 削除対象session名（複数指定可・重複は除去。--all/--dead/--meと排他）
+        #[arg(conflicts_with_all = ["all", "dead", "me"])]
+        names: Vec<String>,
+        /// 全sessionを対象（EXITED行を含む。現在sessionは除外してwarning通知）
+        #[arg(long, conflicts_with_all = ["dead", "me"])]
+        all: bool,
+        /// EXITED行（resurrection可能な死session）のみを対象
+        #[arg(long, conflicts_with = "me")]
+        dead: bool,
+        /// 現在session（ZELLIJ_SESSION_NAME解決）を対象
+        #[arg(long)]
+        me: bool,
         #[arg(long)]
         yes: bool,
         #[arg(long)]
@@ -278,4 +423,17 @@ pub struct FilterArgs {
     pub cwd: Option<String>,
     #[arg(long)]
     pub all: bool,
+}
+
+/// remapのpositional layout名検証: layout名はlayout_dir直下の平坦なfile stemであり
+/// '/'を含む値はpath誤渡しとみなす（要件2.9が排他（併用時exit 2）を要求するのに対し、
+/// 単独positional pathの構文段拒否はDD-1.6非例の意図を実装側で完結させる設計裁量）
+fn parse_layout_name(s: &str) -> Result<String, String> {
+    if s.contains('/') {
+        Err(format!(
+            "invalid layout name '{s}': layout names are looked up under the layout dir; use --path for a file path"
+        ))
+    } else {
+        Ok(s.to_string())
+    }
 }

@@ -1,27 +1,28 @@
-# add / remove操作（src/app/remove.rs・src/app/add.rs）の検証条件。出典: requirements §2.7/2.8・DD-11・DD-1.5・design-review §4.2 MR-20
-# 対応test: tests/fake_backend/rename_add_remove.rs（部分7件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# add / remove操作（src/app/remove.rs・src/app/add.rs）の検証条件。出典: requirements §2.7/2.8・DD-11・DD-1.5
+# 対応test: tests/fake_backend/rename_add_remove.rs（L2層。1条件=1 test fnの1:1対応。設計書§2.3/3.4）+
+# tests/cli/list_read_send.rs（L3層・option map系2条件。TASK-67。shim FAKE_LOG argv確認）
 [meta]
 feature = "add-remove"
 source_file = "src/app/remove.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-11-15"
 verified_by = "claude"
-test_command = "cargo test --test fake_rename_add_remove"
-source_hash = "b739af7764216efc96fe31918fe1c9f5fe596174"
-note = "src/app/add.rs も検証対象"
+test_command = "cargo test --test fake_rename_add_remove --test cli_list_read_send -- add_ remove_"
+source_hash = "e4ef5aa2b1de74cbe07704fdb11dda6fb935ed90"
+note = "src/app/add.rs・src/zellij/process.rs（new_pane/new_tabの引数map）も検証対象。TASK-67: excluded 2件（option map・部分失敗）をL3 2条件+L2 2条件へ条件化（追加testは既存実装に対して緑。実装変更なし）。TASK-102（2026-11-15）テスト先行case追加: add-tab-layout-source-argv-mapへ(v)〜(viii)の4 case（ZELLIJ_LAYOUT_DIR設定時の--layout-dir付与契約。設計: tmp/tasks/tm-102/design-layout-dir-unification.md §7）。テスト先行のためfail-first状態——現行（flag付与なし）では(v)(viii)が赤〔tmp/tasks/tm-102/test_red.log・test_red_viii.log〕。meta.verifiedはTASK-102実装工程での緑化確認後に再設定するためfalseへ移行。source_hashはsource_fileが本更新で不変のため従来記録を継承——（当時記録。TASK-102実装〔src/zellij/process.rs new_tabのname分岐へ--layout-dir前置付与: ZELLIJ_LAYOUT_DIRがOkかつ非空のとき-lの前に--layout-dir <env値>をpush〕で緑化・cargo test --test cli_list_read_send add_tab_layout_source_argv_map 10 case全pass〔tmp/tasks/tm-102/test_green.log〕・add系既存11件全pass〔test_green_add_existing.log〕）。verified/verified_atはTASK-102緑化確認に対する記録へ再設定。source_hashはsource_file〔src/app/remove.rs〕が実装でも不変のため従来記録を継承"
 
 [[condition]]
 id = "add-remove.add-pane-count-and-postcondition"
-source_lines = "tests/fake_backend/rename_add_remove.rs:78"
+source_lines = "tests/fake_backend/rename_add_remove.rs:159"
 target_function = "add::run_pane"
 source = "docs/design/first/260821/requirements.md §2.7（add pane(s)・count > 1 should be supported） + docs/design/detailed-design.md DD-11 add（pane: new-paneをcount回（--cwd/--name/--tab-id/-- commandをmap）。戻りIDをresultsへ / postcondition: list-panes/list-tabsで存在確認）"
-description = "add paneの基本経路: count回のnew-pane実行と--nameの付与（連番suffix）、postconditionとしての存在確認。検証限界: --name（w-1/w-2）とcountの組合せのみのassertであり、--cwd/--tab/-- CMD...の各option mapは未検証（excluded参照）"
+description = "add paneの基本経路: count回のnew-pane実行と--nameの付与（連番suffix）、postconditionとしての存在確認。検証限界: --name（w-1/w-2）とcountの組合せのみのassertであり、--cwd/--tab/-- CMD...の各option mapは本条件では対象外、add-remove.add-pane-option-argv-map（L3）が担う"
 given = "terminal_1が1件のFakeBackendに対するadd::run_pane(b, tab=None, count=2, name=Some(w), cwd=None, cmd=[], json=false)"
 expect_return = "Okかつstateにtitle=w-1・w-2のpaneが追加されpanesは3件"
 
 [[condition]]
 id = "add-remove.add-tab-layout-sources-conflict"
-source_lines = "tests/fake_backend/rename_add_remove.rs:90"
+source_lines = "tests/fake_backend/rename_add_remove.rs:171"
 target_function = "add::run_tab（layout source排他）"
 source = "docs/testing/test-plan.md §2.1（排他規則（DD-1.5）の全組み合わせ: add tab 3source併用） + docs/design/detailed-design.md DD-1.5（add tab: --layout / --path / --inline は相互排他） + docs/design/first/260821/requirements.md §2.9（mutually exclusive source forms must be rejected when supplied together。同一原則はCLI全体へ適用）"
 description = "add tabのlayout指定3形式（--layout / --path / --inline）の相互排他: 複数同時指定はusage error。remap 3source排他（cli-grammar条件）と同一原則のadd側適用。§8.3 (g)の対応: 本条件で排他機構を条件化。検証限界: name+pathの2source併用のみのassertであり、3source同時・残り組合せ（name+inline・path+inline）は未検証（同一の排他検査経路）"
@@ -29,8 +30,26 @@ given = "LayoutSpecにname=Some(x)とpath=Some(./x.kdl)を同時設定したadd:
 expect_return = "Err（ErrorClass=Usage）"
 
 [[condition]]
+id = "add-remove.add-pane-option-argv-map"
+source_lines = "tests/cli/list_read_send.rs:2963"
+target_function = "add paneのbackend引数map（src/zellij/process.rs new_pane）"
+source = "docs/design/detailed-design.md DD-11 add（pane: new-paneをcount回（--cwd/--name/--tab-id/-- commandをmap）） + docs/design/first/260821/requirements.md §2.7（count > 1 should be supported・allow creation associated with a named layout where appropriate）"
+description = "add paneのoption→backend argv map: --tab TABSPECは--tab-idへ・--nameは--nameへ・--cwdは--cwd PATHへ・`--`以降のcommandは`-- CMD...`へmapされる。cli-grammar.add-parse-emits-typed-argv（TASK-65）がcount複数回発行と--tab-id map（--name無し）を検証済みため、本条件は未検証の--cwd/--name/-- CMD...を単発count=1で担う（分担）。name連番suffix（count>1）はadd-remove.add-pane-count-and-postcondition（L2）が担う。`--`以降の引数境界（独立引数列。空白連結logでは不可視）はshim new-pane handler内検査で保護（誤結合実装でtestが赤になる）"
+given = "FAKE_TABS_JSON（tab 0）+FAKE_PANES_JSON（terminal_1入り）でzelper add pane --tab 0 --name w --cwd /work -- codex exec"
+expect_return = "exit 0・FAKE_LOGにaction new-pane --tab-id 0 --name w --cwd /work -- codex execが1回（argv順は--tab-id→--name→--cwd→--）・stdout \"created pane terminal_2\"（shim採番id）"
+
+[[condition]]
+id = "add-remove.add-tab-layout-source-argv-map"
+source_lines = "tests/cli/list_read_send.rs:3010"
+target_function = "add tabのlayout source map（src/zellij/process.rs new_tab）"
+source = "docs/design/detailed-design.md DD-11 add（tab: --layoutは-l NAMEへ、--pathは-l PATHへ、--inlineは--layout-stringへmap。tab --layoutの受理仕様〔TASK-91: '/'入り値は拒否せず-lへ透過〕+ 探索先統一〔TASK-102: ZELLIJ_LAYOUT_DIRがOkかつ非空のとき--layout値へ--layout-dir <env値>を前置付与。設計: tmp/tasks/tm-102/design-layout-dir-unification.md §5/§7〕） + docs/design/first/260821/requirements.md §2.7"
+description = "add tabのlayout source 3形式のmap先: --layoutは-l NAME・--pathは-l PATH・--inlineは--layout-string。3source併用の排他負例はadd-remove.add-tab-layout-sources-conflictが・count>1の連番suffixと途中失敗はadd系のL2条件が担う。本条件は3形式の正例argv mapを担う（shimのnew-tab handler〔TASK-67拡張: 採番id応答+tabs状態file反映〕でpostcondition通過させる）。(iv)は--layoutへのpath形式入力（'/'入り）の透過契約（TASK-91・適用しない決定: zellij -lがpathを正規受理するため拒否・書換えせず-lへ渡す。拒否検査を追加する実装でtestが赤になる）。TASK-102: (v)〜(viii)で--layout-dir付与契約を担う——(v)非空env+名前→--layout-dir前置付与の正例、(vi)空文字env+名前→argv不変（空文字誤付与の検出）、(vii)非空env+--path/--inline/sourceなし→argv不変（全source誤付与の検出）、(viii)非空env+--layout path形式値→flag付与+-l値不変。env制御は各Commandの.env()/.env_remove()で子process環境のみ隔離（親process envは並列test汚染のため不使用。設計§7 minor-1）。(i)〜(iv)はZELLIJ_LAYOUT_DIR未設定前提（env_removeで保証）。テスト先行のためfail-first: 現行（flag付与なし）では(v)(viii)が赤（tmp/tasks/tm-102/test_red.log・test_red_viii.log。TASK-102実装工程で緑化）。単一値optionの引数境界（-l/--layout-stringの値が単一argv要素。空白連結logでは不可視）はshim new-tab handler内検査で保護（値分割実装でtestが赤になる）"
+given = "FAKE_TABS_JSON（tab 0）で (i) zelper add tab --layout mylayout（env未設定保証） (ii) zelper add tab --path ./x.kdl（同） (iii) zelper add tab --inline \"layout {}\"（同） (iv) zelper add tab --layout ./x.kdl（同） (v) ZELLIJ_LAYOUT_DIR=/ly設定下 zelper add tab --layout mylayout (vi) ZELLIJ_LAYOUT_DIR=（空文字）設定下 zelper add tab --layout mylayout (vii) ZELLIJ_LAYOUT_DIR=/ly設定下 zelper add tab --path ./x.kdl / --inline \"layout {}\" / sourceなしの3通り (viii) ZELLIJ_LAYOUT_DIR=/ly設定下 zelper add tab --layout ./x.kdl"
+expect_return = "いずれもexit 0・FAKE_LOGに (i) action new-tab -l mylayout (ii) action new-tab -l ./x.kdl (iii) action new-tab --layout-string layout {} (iv) action new-tab -l ./x.kdl (v) action new-tab --layout-dir /ly -l mylayout (vi) action new-tab -l mylayout（argv不変） (vii) action new-tab -l ./x.kdl / --layout-string layout {} / new-tab（argv不変） (viii) action new-tab --layout-dir /ly -l ./x.kdl が各1回・stdout \"created tab 1\""
+
+[[condition]]
 id = "add-remove.remove-pane-safety-gate"
-source_lines = "tests/fake_backend/rename_add_remove.rs:111"
+source_lines = "tests/fake_backend/rename_add_remove.rs:271"
 target_function = "remove::run_pane（安全gate）"
 source = "docs/design/first/260821/requirements.md §2.8（destructive multi-target actions require clear preview/confirmation policy or explicit noninteractive flags） + docs/design/detailed-design.md DD-11 remove安全（2対象以上の破壊的削除、または--emptyは--yesまたは--dry-run必須。単一pane/tab削除は確認不要）"
 description = "remove paneの安全gate: 単一対象は確認不要で実行、2対象以上は--yes/--dry-runなしではPreflight失敗、--dry-runは実行しない（DD-1.5の--dry-run×--yes併用経路: --yes併用でもdry-runが優先）、--yesで実行。非対話環境での確定的挙動（CMR-5: gate 4局面を1条件に統合）"
@@ -39,16 +58,16 @@ expect_return = "単一はOk（3→2件）。2対象gateなしはErr（ErrorClas
 
 [[condition]]
 id = "add-remove.remove-empty-unknown-tab-name-is-error-not-silent-widen"
-source_lines = "tests/fake_backend/rename_add_remove.rs:137"
+source_lines = "tests/fake_backend/rename_add_remove.rs:297"
 target_function = "remove::run_tab（--empty: TABSPEC解決）"
-source = "docs/design/first/260821/requirements.md §2.8（空tab削除の考慮・明示的方針） + docs/design/detailed-design.md DD-11 remove --empty + docs/design/design-review.md §4.2 MR-20（remove tab --emptyのTABSPEC解決失敗を黙って捨て、削除対象が全空tabへ暗黙拡大する問題の修正。回帰test追加）"
+source = "docs/design/first/260821/requirements.md §2.8（空tab削除の考慮・明示的方針） + docs/design/detailed-design.md DD-11 remove --empty + remove tab --emptyのTABSPEC解決失敗はerror（解決失敗を黙って捨てて削除対象が全空tabへ暗黙拡大しない。回帰test）"
 description = "remove tab --emptyのTABSPEC解決失敗はerrorであり黙って捨てない（解決不能指定→全空tabへの暗黙拡大防止）。名前で一意解決できる場合はそのtabのみ対象。MR-20回帰"
 given = "tab0=空・tab1=空でない（nosuchtabは不在）のFakeBackendへの--empty+nosuchtab指定と、tab0=空でない・empty1=空tabのFakeBackendへの--empty+empty1指定"
 expect_return = "前者はErr（ErrorClass=NoTarget）。後者はOkでempty1のみ削除されtab0が残存"
 
 [[condition]]
 id = "add-remove.remove-empty-selects-only-empty-tabs"
-source_lines = "tests/fake_backend/rename_add_remove.rs:168"
+source_lines = "tests/fake_backend/rename_add_remove.rs:328"
 target_function = "remove::run_tab（--empty: 対象選択）"
 source = "docs/design/detailed-design.md DD-11 remove --empty（空tab = selectable な pane（tiled+floating両方）が0個のtab。tab-bar等のnon-selectable pluginのみのtabが該当。対象をdry-run形式で列挙してから削除） + docs/design/first/260821/requirements.md §2.8（useful structural cleanup such as removal of empty tabs）"
 description = "remove tab --empty（TABSPEC省略）の対象選択: selectable pane 0個のtabのみを削除し、paneを持つtabは残す。dry-runは対象列挙のみで削除しない（CMR-5: 空tab選択とdry-run非破壊を1条件に統合）"
@@ -57,7 +76,7 @@ expect_return = "dry-runはOkでtabs 2件のまま。本実行はOkでtab1のみ
 
 [[condition]]
 id = "add-remove.remove-empty-requires-gate-even-for-single"
-source_lines = "tests/fake_backend/rename_add_remove.rs:184"
+source_lines = "tests/fake_backend/rename_add_remove.rs:344"
 target_function = "remove::run_tab（--empty: gate）"
 source = "docs/design/detailed-design.md DD-11 remove安全（2対象以上の破壊的削除、または--emptyは--yesまたは--dry-run必須（非対話環境で確定的な挙動））"
 description = "remove tab --emptyは単一候補でもgate（--yes/--dry-run）を要求する。空tab掃除が条件なしで走る事故防止の境界（単一対象の一般規則（確認不要）の--empty側例外）"
@@ -66,23 +85,27 @@ expect_return = "Err（ErrorClass=Preflight）"
 
 [[condition]]
 id = "add-remove.remove-missing-pane-is-no-target"
-source_lines = "tests/fake_backend/rename_add_remove.rs:192"
+source_lines = "tests/fake_backend/rename_add_remove.rs:352"
 target_function = "remove::run_pane（存在確認）"
 source = "docs/design/detailed-design.md DD-11 remove（pane: close-pane -p順次） + DD-1.4（対象0件 → no target matched error） + DD-4.3（NoTarget = exit 3）"
 description = "remove paneの対象存在確認: 不在pane ID指定はNoTargetとして失敗する（close-paneへ渡す前に解決段で検出）"
 given = "terminal_1が1件のFakeBackendに対するremove::run_pane(b, [42], yes=true)の実行"
 expect_return = "Err（ErrorClass=NoTarget）"
 
-[[excluded]]
-item = "add pane/tabのbackend引数map一式（add tabの--layout→-l NAME・--path→-l PATH・--inline→--layout-string mapとlayout指定tab生成・add paneの--cwd/--tab-id/-- CMD...）"
-source = "docs/design/detailed-design.md DD-11 add（pane: --cwd/--name/--tab-id/-- commandをmap。tab: --layoutは-l NAMEへ、--pathは-l PATHへ、--inlineは--layout-stringへmap） + docs/design/first/260821/requirements.md §2.7（allow creation associated with a named layout where appropriate）"
-reason = "未test。既存133 testにこれらのoption mapを検証するtest fnが存在しないため本移行では条件化できない（add paneは--name+countのみ検証済み・add tabは排他負例のみ）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "add-remove.add-partial-failure-keeps-created-no-rollback"
+source_lines = "tests/fake_backend/rename_add_remove.rs:204"
+target_function = "add::run_pane / add::run_tab（count>1の途中失敗）"
+source = "docs/design/detailed-design.md DD-11 add失敗（作成済み分は残存させ、per-target結果報告（rollbackしない）） + DD-12 atomicity（部分失敗時は実行済み操作の一覧を報告）"
+description = "addのcount>1途中失敗: 2回目のnew-pane/new-tab呼出失敗は作成済み分をstateへ残存させ（rollbackしない）・error messageへ作成済みID（created so far: [...] (kept; no rollback)）を載せる（add_partial）。初回失敗（created空）は「created so far」を付与しない素のerror（add_partialの空分岐の保護）。失敗注入はfail_opのprefix照合でname連番（w-2/t-2）を持つ2回目呼出のみに当てる"
+given = "FakeBackendへの失敗注入で (a) add::run_pane(count=2, name=w)の2回目new-pane失敗 (b) add::run_tab(count=2, name=t)の2回目new_tab失敗 (c) add::run_pane(count=2)の初回new-pane失敗"
+expect_return = "(a)(b)はErr（class保持=OperationFailed・exit 5）でmessageにcreated so far: [\"terminal_2\"]/[\"1\"]と(kept; no rollback)を含み作成済み分（w-1 pane・t-1 tab）がstateに残存 (c)は「created so far」を含まない素のinjected failure"
 
-[[excluded]]
-item = "add/removeの部分失敗時挙動（add: 作成済み分は残存させper-target結果報告（rollbackしない）・remove: 順次実行・部分失敗報告（残対象も実行））"
-source = "docs/design/detailed-design.md DD-11 add失敗（作成済み分は残存させ、per-target結果報告（rollbackしない））・remove失敗（順次実行・部分失敗報告（残対象も実行））"
-reason = "未test。既存133 testにadd/removeの部分失敗系列を検証するtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "add-remove.remove-partial-failure-continues-remaining-targets"
+source_lines = "tests/fake_backend/rename_add_remove.rs:367"
+target_function = "remove::run_pane / remove::run_tab（順次実行・部分失敗）"
+source = "docs/design/detailed-design.md DD-11 remove失敗（順次実行・部分失敗報告（残対象も実行）） + DD-4.3（部分失敗=6(PartialFailure)・error dataへper-target results[]）"
+description = "removeの部分失敗: 3対象の順次実行で2番目のcloseが失敗しても残対象（3番目）も実行され、per-target結果（error dataのresults[]。失敗対象のみok=false）をPartialFailure（exit 6）で報告する。失敗対象はstateに残存し成功対象は消失（rollback・中断なし）。session系の部分失敗はremove-session.tomlが担うため本条件はpane/tab nounに限る。失敗注入はfail_opのprefix照合で2番目のclose呼出のみに当てる"
+given = "FakeBackend（3 pane/3 tab構成）への失敗注入（close-pane terminal_2・close-tab 1のみ失敗）で (a) remove::run_pane([1,2,3], yes=true) (b) remove::run_tab([0,1,2], yes=true)"
+expect_return = "(a)(b)ともErr（PartialFailure・exit 6）・data.results[]は3対象分で2番目のみok=false（残対象も実行された）・stateは失敗対象のみ残存（terminal_2・tab 1とそのpane）"

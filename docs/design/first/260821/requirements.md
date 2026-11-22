@@ -63,6 +63,7 @@ Requirements:
 
 - rename a pane
 - rename a tab
+- rename a session (added 2026-11-13, TASK-95 — the old name is pre-verified against the session list including EXITED rows; NEW_NAME collisions with any existing row (EXITED included), EXITED source sessions, and empty / `/`-containing / whitespace-containing / identical new names are refused before execution, and success is verified by the old name disappearing and the new name appearing as running in the session list)
 - support multiple targets where useful
 - provide a path for generated/pattern-based names in detailed design if this can remain understandable and safe
 
@@ -90,7 +91,7 @@ The conceptual operation is:
 Requirements:
 
 - existing terminal panes SHALL be preserved wherever Zellij permits this
-- remap SHALL NOT be implemented as killing panes and recreating their commands unless the user explicitly chooses a destructive/recreate mode introduced by future design
+- remap SHALL NOT be implemented as killing panes and recreating their commands unless the user explicitly chooses a destructive/recreate mode introduced by future design. Limited exception (clarified 2026-09-19, TASK-81): this prohibition applies to panes that existed in the pre-execution `list-panes` snapshot; duplicate panes that zelper itself spawned within the same run due to failed run-matching (absent from the pre-execution snapshot, identified after stable observation and by the position rule of DD-10.7 step 6) MAY be closed to resolve the duplication, and every such close SHALL be reported in the JSON data (`closed_duplicates`) and in the human output
 - the default layout source is a **layout name**
 - path or inline definitions are secondary/explicit alternatives, not overloaded positional syntax
 - overflow behavior SHALL be deterministic
@@ -103,12 +104,14 @@ Requirements:
 - tabs that remain after remap (containing no selected panes) SHALL NOT be closed implicitly; leftovers SHALL be reported (warning / structured output) so the user can remove them explicitly
 - tab/window naming and reuse policy must be specified in detailed design
 - pane ordering for slot assignment must be deterministic and documented
-  - Exception (clarified 2026-09-15, TASK-74 design review TR74-3; same form as the DD-10 v2 R7 determination; extended to the per-tab allocation rule by TASK-75 2026-09-15): the determinism guarantee covers (i) each pane's group (block × layout tab) membership, derived from visual order, and (ii) the slot assignment of panes whose launch run (command+args) is unique. The slot order **among panes sharing the same run, and among multiple shell panes (run=None)**, is not guaranteed — zellij's run-matching consumes run-equivalent panes in its own order (implementation limitation of zellij 0.44.3, no CLI-visible discriminator). Process preservation, pane count, and tab membership remain guaranteed for these panes.
+  - Exception (clarified 2026-09-15, TASK-74 design review TR74-3; same form as the DD-10 v2 R7 determination; extended to the per-tab allocation rule by TASK-75 2026-09-15; run definition extended 2026-09-19, TASK-81): the determinism guarantee covers (i) each pane's group (block × layout tab) membership, derived from visual order, and (ii) the slot assignment of panes whose launch run (command+args+cwd — the cwd-derived matching obstruction is resolved by cwd injection into the generated KDL per DD-10.8, while argv-whitespace reconstruction of `terminal_command` remains an implementation limitation of zellij 0.44.3 per DD-10.13) is unique. The slot order **among panes sharing the same run, and among multiple shell panes (run=None)**, is not guaranteed — zellij's run-matching consumes run-equivalent panes in its own order (implementation limitation of zellij 0.44.3, no CLI-visible discriminator). Process preservation, pane count, and tab membership remain guaranteed for these panes.
 - remap scope must support at least the current tab; session/multi-tab scope should be supported if technically sound
 - plugin panes must be treated explicitly; they must not accidentally be destroyed or silently mixed into terminal-pane semantics
 - a dry-run/plan output is strongly required before potentially large remaps
 
 Zellij already supports runtime `override-layout`, retaining existing terminal panes, active-tab-only application, raw inline layouts, and swap layouts. Detailed design SHALL assess how much of `remap` can use these primitives and where orchestration is still required.
+
+`remap` is the heavyweight whole-set rearrangement; single-target relative moves and swaps (moving one pane within its tab, across tabs, swapping two panes, swapping two tabs) are provided by the separate `move` verb (added 2026-09-25, TASK-87/88).
 
 ### 2.7 Add panes and tabs
 
@@ -155,6 +158,30 @@ The exact option names may change during detailed design if there is a clear imp
 - bare positional operand = normal/default resource form
 - alternative source forms = explicit options
 - mutually exclusive source forms must be rejected when supplied together
+
+### 2.10 Watch pane output for a pattern（added 2026-09-25, TASK-86。元P1→実装）
+
+The user (or an agent) can wait until a given pattern appears in the output of one or more panes, without polling manually.
+
+Requirements:
+
+- watch the visible output (optionally including scrollback) of a multi-pane target set and report the first pane where a line matching the pattern appears (any-hit)
+- the first check SHALL run immediately (already-emitted text SHALL match), and polling continues at a configurable interval until a max attempt count
+- fixed substring matching by default, with regex as an explicit opt-in; an empty pattern and other invalid arguments SHALL be rejected before any polling starts
+- termination is hit or exhaustion only; per-pane read failures during polling SHALL be reported distinctly (partial failure) rather than aborting the whole watch
+
+### 2.11 Session lifecycle: attach / detach / create sessions（added 2026-09-25, TASK-89）
+
+The user can hand a session over to interactive use and back, and create detached sessions from non-interactive contexts.
+
+Requirements:
+
+- interactive attach SHALL require a TTY and fail fast (before launching zellij) otherwise
+- detach SHALL address the attach clients of the resolved target session
+- detached session creation SHALL work in environments where no session exists yet, and report post-creation presence in the session list
+- session removal SHALL be expressed with a single full-deletion semantics (both the session row and resurrection data; added 2026-11-13, TASK-84 — zellij 0.44.3 has no kill-only/delete-data split, so none is modeled). The backend operation is uniformly `zellij delete-session <NAME> -f`
+- session removal SHALL select targets with exactly one of four exclusive selectors: `NAME...` (one or more, duplicates removed), `--all` (all rows including EXITED), `--dead` (EXITED rows only), `--me` (the current session resolved from `ZELLIJ_SESSION_NAME`; without `--me` the current session is refused in the NAME path and excluded with a warning in `--all`)
+- session removal SHALL always require `--yes` or `--dry-run` (even for a single named target — a session deletion irreversibly takes all its panes/tabs and resurrection data), accept EXITED rows as targets, and verify post-removal disappearance in the session list before reporting success
 
 The same principle applies throughout the CLI, not only to `remap`.
 
@@ -283,7 +310,7 @@ Dry run must report the resolved targets and planned operations without mutating
 
 - richer selection filters
 - saved groups / aliases for pane sets
-- watch/wait semantics for pane output or state
+- watch/wait semantics for pane output or state（pane outputのpattern監視〔watch〕は2026-09-25 user指示によりP0相当へ昇格しTASK-86で実装済み。残るwait semantics〔run block系のprocess終了待ち・state監視〕はP1のまま分離）
 - batch execution policies
 - richer remap policies (reuse tabs, naming policies, overflow variants)
 - configuration file for defaults
@@ -306,7 +333,7 @@ The first version SHALL NOT aim to:
 - recreate panes just to perform remapping when preservation is possible
 - invent a large selector DSL before common positional/options grammar is proven insufficient
 
-Commands such as focus/move that are already easy interactively are lower priority unless they are needed as internal primitives or become valuable as part of multi-step wrapper operations.
+Commands such as focus/move that are already easy interactively are lower priority unless they are needed as internal primitives or become valuable as part of multi-step wrapper operations.（改訂2026-09-25・TASK-87: `move pane`は軽量な単一対象primitiveとして追加済み〔TASK-88実装〕。focus系は引き続き低優先）
 
 ## 6. Technology requirements
 

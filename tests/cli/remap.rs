@@ -1,16 +1,11 @@
 // L3: remap CLI契約テスト（test-plan §2.7 (g) R43〜R45・(h) R46・(i) R48〜R50出力側。
-// DD-10 v2 / DD-12）。fake zellij shimをtest実行時に生成する（実zellijに依存しない）。
+// DD-10 v2 / DD-12）。fake zellij shim（tests/cli/shim_common.rs正本をtest実行時に
+// 生成。実zellijに依存しない。shim機構一覧・命名規則の正本はshim_common.rsのdoc comment）。
 // fail-first: v2実装（TASK-39）前にfailする（test-plan §5）。
+mod shim_common;
 use assert_cmd::Command;
-use std::os::unix::fs::PermissionsExt;
+use shim_common::{FAKE_ZELLIJ_LOCK, fixture_dir, setup_fake_zellij};
 use std::path::PathBuf;
-
-/// fake zellij shimのwrite↔exec競合（ETXTBSY）対策: binary内のfake zellij
-/// testを直列化する（CR59-5・TASK-73。src/zellij/process.rs test moduleと同一構成+契約doc comment）。
-/// test fn冒頭でのみ取得すること。wrapper・helper内では再取得しないこと
-/// （std::sync::Mutexは非reentrantのため同一thread再取得は永久blockし、
-/// failではなくtest hangとして発覚する）。
-static FAKE_ZELLIJ_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 3-slot bare layout（k=1系テスト用。inlineで渡す）
 const THREE_SLOT: &str =
@@ -19,55 +14,6 @@ const THREE_SLOT: &str =
 /// 3-slot layoutにdefault_tab_template（children + compact-bar bar leaf）を付けた
 /// layout（bar leaf出現の検証用。inlineで渡す）
 const TEMPLATE_SLOT: &str = "layout {\n    default_tab_template {\n        children\n        pane size=1 borderless=true {\n            plugin location=\"zellij:compact-bar\"\n        }\n    }\n    tab {\n        pane\n        pane\n        pane\n    }\n}\n";
-
-fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/zellij")
-}
-
-/// fake zellij実行可能fileをworkdirに生成し、(PATHに設定すべきdir, log path)を返す。
-/// FAKE_VERSION envで --version 応答を、FAKE_PANES/FAKE_TABS envでfixtureを差し替え
-fn setup_fake_zellij(tag: &str) -> (PathBuf, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("zelper-fake-remap-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let shim = dir.join("zellij");
-    let script = r#"#!/usr/bin/env bash
-echo "$*" >> "$FAKE_LOG"
-if [[ "$1" == "--version" ]]; then echo "zellij ${FAKE_VERSION:-0.44.3}"; exit 0; fi
-if [[ "$1" == "list-sessions" ]]; then echo "fake-sess [Created 1m ago]"; exit 0; fi
-if [[ "$3" == "action" ]]; then
-  shift 3
-  action="$1"; shift
-  case "$action" in
-    list-panes) cat "$FAKE_FIXTURES/${FAKE_PANES:-panes.json}"; exit 0;;
-    list-tabs) cat "$FAKE_FIXTURES/${FAKE_TABS:-tabs.json}"; exit 0;;
-    current-tab-info)
-      # anchor = tab 0（fixture最初のtab。単体object形式）
-      printf '{"position":0,"name":"Tab #1","active":true,"panes_to_hide":0,"is_fullscreen_active":false,"is_sync_panes_active":false,"are_floating_panes_visible":true,"other_focused_clients":null,"active_swap_layout_name":null,"is_swap_layout_dirty":false,"viewport_rows":60,"viewport_columns":200,"display_area_rows":60,"display_area_columns":200,"selectable_tiled_panes_count":3,"selectable_floating_panes_count":0,"tab_id":0,"has_bell_notification":null,"is_flashing_bell":false}\n'
-      exit 0;;
-    dump-screen)
-      pane=""; full=""
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          -p) pane="$2"; shift 2;;
-          -f) full="FULL"; shift;;
-          *) shift;;
-        esac
-      done
-      echo "SCREEN[$pane]$full"; exit 0;;
-    *) echo "ok"; exit 0;;
-  esac
-fi
-exit 0
-"#;
-    // 実行内容とmode確定後にのみ公開する。最終の実行pathはwrite open状態にならない
-    // （LinuxのETXTBSY回避）。
-    let staged = dir.join("zellij.staged");
-    std::fs::write(&staged, script).unwrap();
-    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::rename(staged, &shim).unwrap();
-    let log = dir.join("calls.log");
-    (dir, log)
-}
 
 /// 3-pane同一tab fixture（k=1・移動不要）。廃止flag拒否後の正常系検証に使う。
 /// 既定panes.jsonはselectable terminal paneが2つのため、M=N=3（k=1）になる
@@ -659,4 +605,214 @@ fn json_n_field_holds_total_slots() {
     assert_eq!(data["n_slots"], serde_json::json!([3]), "raw: {data}");
     assert_eq!(v["schema_version"], 1);
     assert_eq!(v["ok"], true);
+}
+
+// ---- TASK-81（DD-10.10 dry-run floating緩和・KDL preview cwd・DD-10.9 error.data拡張） ----
+
+// [covers:remap-cli.dry-run-floating-relaxed-exit0-with-warning]
+#[test]
+fn dry_run_floating_relaxed_exit0_with_warning() {
+    // dry-run floating緩和のCLI契約（TASK-81・破壊的変更: exit 7→0）: selectable
+    // floating terminal pane保有scopeで--embed-floatingなしの--dry-run実行は
+    // exit 0で終了し（exit 7 Preflightでない）、警告が伝達経路規則に乗る——
+    // humanはstderrのwarning:行（embed-floating要求・floating語）、--jsonは
+    // ok:true envelope + data.warningsへの同文言。計画は仮想embed（floating込みの
+    // M・k）。実行（dry-runなし）はexit 7 Preflightのまま（r8・対照）
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    // human: exit 0・stderr warning・stdoutに計画表示（M=4相当・k=2）
+    let mut cmd = zelper_with("t81-df", None, false);
+    cmd.env("FAKE_PANES", "panes-floating.json");
+    let out = cmd
+        .args(["remap", "--inline", THREE_SLOT, "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8(out.stderr.clone()).unwrap();
+    assert!(
+        stderr.contains("warning:")
+            && stderr.to_lowercase().contains("floating")
+            && stderr.contains("--embed-floating"),
+        "stderrのwarning:行（embed-floating要求・floating語）: {stderr}"
+    );
+    let human = String::from_utf8(out.stdout.clone()).unwrap();
+    assert!(
+        human.contains("panes=4") && human.contains("blocks=2"),
+        "計画は仮想embed（floating込みのM=4・k=2）: {human}"
+    );
+
+    // --json: exit 0・stdoutは単一のok:true envelope + data.warnings
+    let mut cmd = zelper_with("t81-dfj", None, false);
+    cmd.env("FAKE_PANES", "panes-floating.json");
+    let out = cmd
+        .args(["remap", "--inline", THREE_SLOT, "--dry-run", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("warning:"),
+        "--json実行時もstderrのwarning行は出る: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true, "raw: {v}");
+    assert_eq!(v["data"]["m"], 4, "仮想embedの計画: {}", v["data"]);
+    assert_eq!(v["data"]["k"], 2, "raw: {}", v["data"]);
+    let warnings = v["data"]["warnings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or_default().to_lowercase();
+            s.contains("floating") && s.contains("embed-floating")
+        }),
+        "data.warningsにembed-floating要求警告: {warnings:?}"
+    );
+
+    // 対照: 実行（dry-runなし）はpreflight errorのまま（r8・DD-10.5）
+    let mut cmd = zelper_with("t81-dfx", None, false);
+    cmd.env("FAKE_PANES", "panes-floating.json");
+    cmd.args(["remap", "--inline", THREE_SLOT])
+        .assert()
+        .failure()
+        .code(7);
+}
+
+// [covers:remap-cli.dry-run-kdl-preview-includes-pane-cwd]
+#[test]
+fn dry_run_kdl_preview_includes_pane_cwd() {
+    // dry-run KDL previewのcwd属性（TASK-81）: pane_cwd=Someを持つoccupied paneの
+    // slotは、dry-runの生成KDL preview（--jsonのinstances[].kdl）において
+    // command/argsに加えてcwd属性（cwd="/path"・quote付き）として現れる。
+    // 実行とdry-runで同一の生成KDLが見えることの拡張（r49のcwd側）
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cmd = zelper_with("t81-dc", None, false);
+    cmd.env("FAKE_PANES", "panes-cwd.json");
+    let out = cmd
+        .args(["remap", "--inline", THREE_SLOT, "--dry-run", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let instances = v["data"]["instances"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(!instances.is_empty(), "raw: {v}");
+    let kdl = instances[0]["kdl"]
+        .as_str()
+        .unwrap_or_else(|| panic!("instances[].kdl preview: {instances:?}"));
+    assert!(
+        kdl.contains("command=\"claude\"") && kdl.contains("args \"--model\" \"x\""),
+        "command/args注入: {kdl}"
+    );
+    assert!(
+        kdl.contains("cwd=\"/home/tomo/work\""),
+        "cwd属性がcommand/argsと同一のpane nodeに現れる: {kdl}"
+    );
+}
+
+// [covers:remap-cli.verify-failure-error-data-carries-leftover-and-duplicates]
+#[test]
+fn verify_failure_error_data_carries_leftover_and_duplicates() {
+    // 検証失敗時のerror.data拡張のCLI契約（TASK-81）: 検証失敗（VerificationFailed・
+    // exit 7）の--json実行は、stdoutへ単一のerror envelope（ok:false・
+    // error.class=VerificationFailed）を出し、error.dataにleftover_tabsと
+    // closed_duplicatesの配列fieldが存在する（要素が無くともfield自体は載る）。
+    // stdoutに成功envelopeや複数JSONを出さない（PR#1規則）。
+    // M=2 < N=3のfixtureはlayout適用でpane数がNに揃わない系列（shimはstateless
+    // のため検証(b)がfailする）
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cmd = zelper_with("t81-vf", None, false);
+    cmd.env("FAKE_PANES", "panes-two.json");
+    let out = cmd
+        .args(["remap", "--inline", THREE_SLOT, "--json"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .clone();
+    let text = String::from_utf8(out.stdout.clone()).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(lines.len(), 1, "stdoutは単一のJSON envelope: {text}");
+    let v: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(v["schema_version"], 1, "raw: {v}");
+    assert_eq!(v["ok"], false, "raw: {v}");
+    assert_eq!(v["error"]["class"], "VerificationFailed", "raw: {v}");
+    assert!(
+        v["error"]["data"]["leftover_tabs"].as_array().is_some(),
+        "error.dataにleftover_tabs field: {v}"
+    );
+    assert!(
+        v["error"]["data"]["closed_duplicates"].as_array().is_some(),
+        "error.dataにclosed_duplicates field: {v}"
+    );
+}
+
+// [covers:remap-cli.success-json-carries-closed-duplicates]
+#[test]
+fn success_json_carries_closed_duplicates() {
+    // 成功時JSON dataのclosed_duplicates（TASK-81）: reconciliationでdup closeが
+    // 発生して成功したremapの--json実行は、data.closed_duplicates[]（pane id・slot・
+    // reason）を報告する（要件2.6 L93限定条項のevery close SHALL be reported）。
+    // dupが発生しない実行は空配列（field自体は存在）。
+    // shimのdup注入: override-layout後・close-pane前のlist-panesのみdup pane入り
+    // fixture（反転で照合成立した結果=close-pane後は通常3 paneに戻る）を返す
+    let _guard = FAKE_ZELLIJ_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    // dup spawn -> reconciliationでclose -> 反転成立で成功する系列
+    let mut cmd = zelper_with("t81-sc", None, false);
+    cmd.env("FAKE_PANES", "panes-three.json")
+        .env("FAKE_DUP_AFTER_OVERRIDE", "1");
+    let out = cmd
+        .args(["remap", "--inline", THREE_SLOT, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true, "raw: {v}");
+    let dups = v["data"]["closed_duplicates"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !dups.is_empty(),
+        "dup close実績がdata.closed_duplicatesに載る: {v}"
+    );
+    assert!(
+        dups.iter().all(|d| {
+            d.get("pane").is_some() && d.get("slot").is_some() && d.get("reason").is_some()
+        }),
+        "要素はpane id/slot/reasonを含む: {dups:?}"
+    );
+
+    // 対照: dupが発生しない通常成功系列では空配列（field自体は存在）
+    let mut cmd = zelper_with("t81-scc", None, false);
+    cmd.env("FAKE_PANES", "panes-three.json");
+    let out = cmd
+        .args(["remap", "--inline", THREE_SLOT, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true, "raw: {v}");
+    assert_eq!(
+        v["data"]["closed_duplicates"],
+        serde_json::json!([]),
+        "dup無しの成功は空配列: {v}"
+    );
 }

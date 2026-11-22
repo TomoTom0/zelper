@@ -2,7 +2,9 @@
 // generatorは純粋関数。TASK-75（v2.2）: generate_instance_kdl_v2はtemplate引数を持たず、
 // 入力baseはnormalize_tab_templatesが返す正規形subtree（children置換済み・tab属性除去済み）のみ。
 // 既存条件の期待値は不変（入力の読み替えのみ）。
-use zelper::layout::generator::{SlotRun, generate_instance_kdl_v2};
+// TASK-81: run列はSlotRun=Option<Vec<String>>からRunSpec{argv, cwd}へ拡張。
+// cwd=None（derive互換）を与える既存条件の期待値は不変（cwd属性は出力されない）。
+use zelper::layout::generator::{RunSpec, SlotRun, generate_instance_kdl_v2};
 
 const THREE_SLOT: &str = "layout {\n    tab {\n        pane size=\"40%\"\n        pane size=\"30%\"\n        pane size=\"30%\"\n    }\n}\n";
 
@@ -22,8 +24,20 @@ fn slots_of(kdl: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// 生成KDLを再parseしてslot毎のcwd属性を取り出す（TASK-81 cwd注入の検証用）
+fn cwds_of(kdl: &str) -> Vec<Option<String>> {
+    zelper::layout::extract_slot_commands(&zelper::layout::parse(kdl).unwrap())
+        .into_iter()
+        .map(|s| s.cwd)
+        .collect()
+}
+
+/// argvのみのRunSpec（cwd=None。derive互換: 旧SlotRun=Option<Vec<String>>相当）
 fn run(argv: &[&str]) -> SlotRun {
-    Some(argv.iter().map(|s| s.to_string()).collect())
+    Some(RunSpec {
+        argv: argv.iter().map(|s| s.to_string()).collect(),
+        cwd: None,
+    })
 }
 
 /// subtree内（node自身含む）にcompact-bar pluginが含まれるか
@@ -392,6 +406,125 @@ fn template_children_substitution_nested_base() {
 
     // 再parseしてterminal slot数=9（bar leafはplugin leafのため数えない）
     assert_eq!(zelper::layout::count_terminal_slots(&generated), 9);
+}
+
+// ---- TASK-81（DD-10.8改訂: cwd注入・Run::Cwd slot表現・hold属性非併記） ----
+
+/// 2-slotの正規形subtree（cwd注入系test用）
+const TWO_SLOT: &str = "layout {\n    tab {\n        pane\n        pane\n    }\n}\n";
+
+// [covers:layout-generator.occupied-slot-injects-pane-cwd]
+#[test]
+fn occupied_slot_injects_pane_cwd() {
+    // RunSpec.cwd=Someのoccupied slotはcommand/args注入に加えてpane nodeへcwd属性
+    // （cwd="/path"・文字列値はquote付き——r17規定）として注入する（DD-10.8
+    // TASK-81改訂の核心: zellij run起因paneはinvoked_withのcwd=Someが常に成立し
+    // 無cwdslotと照合しないため）。cwd=Noneはcwd属性を出力しない（derive互換・
+    // 旧挙動のため既存条件群の期待値は不変）
+    let runs = vec![
+        Some(RunSpec {
+            argv: vec!["claude".to_string(), "--model".to_string(), "x".to_string()],
+            cwd: Some("/home/tomo/work".to_string()),
+        }),
+        Some(RunSpec {
+            argv: vec!["htop".to_string()],
+            cwd: None,
+        }),
+    ];
+    let kdl = generate_instance_kdl_v2(&base(TWO_SLOT), &runs).unwrap();
+    assert_eq!(
+        slots_of(&kdl),
+        vec![
+            vec!["claude".to_string(), "--model".to_string(), "x".to_string()],
+            vec!["htop".to_string()],
+        ],
+        "raw: {kdl}"
+    );
+    assert_eq!(
+        cwds_of(&kdl),
+        vec![Some("/home/tomo/work".to_string()), None],
+        "slot 0のみcwd属性を持つ: {kdl}"
+    );
+    assert!(
+        kdl.contains("cwd=\"/home/tomo/work\""),
+        "cwd値はquote付きで出力される（r17規定）: {kdl}"
+    );
+}
+
+// [covers:layout-generator.run-cwd-representation-emits-cwd-only-pane]
+#[test]
+fn run_cwd_representation_emits_cwd_only_pane() {
+    // Run::Cwd表現のslot出力（reconciliation pass 2用の表現）: run列の要素が
+    // 「argvなし・cwdのみ」（RunSpecのCwd表現。terminal_command=Noneのshell pane
+    // 割当slotが反転対象と判定された際のpass 2生成KDLのslot形状）の場合、当該
+    // slotはcommand属性・args子nodeを持たずcwd属性のみのpane node（pane cwd="/path"
+    // の形）として出力される（DD-10.8・DD-10.2 #14）。CLI new-tab由来shell
+    // （invoked_with=Run::Cwd）との照合に使う表現
+    let runs = vec![
+        Some(RunSpec {
+            argv: Vec::new(),
+            cwd: Some("/work".to_string()),
+        }),
+        None,
+    ];
+    let kdl = generate_instance_kdl_v2(&base(TWO_SLOT), &runs).unwrap();
+    assert_eq!(
+        cwds_of(&kdl),
+        vec![Some("/work".to_string()), None],
+        "slot 0のみcwd属性: {kdl}"
+    );
+    assert_eq!(
+        slots_of(&kdl),
+        vec![Vec::<String>::new(), Vec::<String>::new()],
+        "argvなしslotはcommand/argsを出力しない（cwdのみのpane node）: {kdl}"
+    );
+    assert!(
+        kdl.contains("cwd=\"/work\""),
+        "pane cwd=\"/work\"の形式で出力: {kdl}"
+    );
+    assert!(
+        !kdl.contains("command="),
+        "Run::Cwd表現slotにcommand属性は出力しない: {kdl}"
+    );
+}
+
+// [covers:layout-generator.hold-attributes-never-emitted]
+#[test]
+fn hold_attributes_never_emitted() {
+    // hold属性の非併記（DD-10.2 #16）: 生成KDLのpane nodeはclose_on_exit・
+    // start_suspended属性を出力しない（run注入slot・空slot正規化の両方）。
+    // -cなしzellij runのhold_on_close=true == KDL未指定既定（DD-10.1事実5
+    // TASK-81訂正）のため併記不要。close_on_exit=true併記はhold_on_close=falseと
+    // なり正常系paneと逆に不一致を生むため禁止。layout宣言にこれらの属性があって
+    // も生成KDLからは除去する
+    let declared = "layout {\n    tab {\n        pane close_on_exit=true command=\"old\"\n        pane start_suspended=true\n    }\n}\n";
+    let runs = vec![
+        Some(RunSpec {
+            argv: vec!["vim".to_string()],
+            cwd: Some("/x".to_string()),
+        }),
+        None,
+    ];
+    let kdl = generate_instance_kdl_v2(&base(declared), &runs).unwrap();
+    assert!(
+        !kdl.contains("close_on_exit"),
+        "close_on_exit属性は出力しない: {kdl}"
+    );
+    assert!(
+        !kdl.contains("start_suspended"),
+        "start_suspended属性は出力しない: {kdl}"
+    );
+    // slot 0はcommand/args/cwd注入・slot 1はbare（属性除去の対象はhold属性のみ）
+    assert_eq!(
+        slots_of(&kdl),
+        vec![vec!["vim".to_string()], Vec::new()],
+        "raw: {kdl}"
+    );
+    assert_eq!(
+        cwds_of(&kdl),
+        vec![Some("/x".to_string()), None],
+        "raw: {kdl}"
+    );
 }
 
 // [covers:layout-generator.per-tab-kdl-from-normalized-templates]

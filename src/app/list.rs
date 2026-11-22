@@ -48,6 +48,16 @@ pub fn run(
                 }
             } else {
                 println!("NAME\tCREATED\tCURRENT\tPANES");
+                if sessions.is_empty() {
+                    // 0-sessionは空一覧の正常系（TASK-93 D1/D2）: stdout契約は
+                    // headerのみのまま、作成案内をstderrのnote行へ出す（R4慣例。
+                    // NAMEはliteral placeholder。JSON/compactは契約不変のため
+                    // stderr空）
+                    eprintln!(
+                        "zelper: note: no running zellij sessions; \
+                         create one with 'zelper add session NAME'"
+                    );
+                }
                 for s in &sessions {
                     // 他sessionのlist-tabs失敗（実行中に消えた等）は一覧を落とさない
                     let panes = backend
@@ -156,8 +166,10 @@ pub fn run(
         }
         ListResource::Layouts => {
             let dir = layout_dir();
-            // (name, size_bytes, modified_epoch_secs)。stat失敗・mtime不明時は
-            // 誤った値（size 0・半世紀前等）を表示しないようNoneを保持する
+            // (name, size_bytes, modified_epoch_secs)。SIZE/MODIFIEDはsymlinkを
+            // たどった内容実体のstat（follow）由来。壊れたsymlinkなど参照先の
+            // stat取得失敗時・mtime不明時は、誤った値（size 0・半世紀前等・
+            // link先path長）を表示しないようNoneを保持する
             let mut entries: Vec<(String, Option<u64>, Option<u64>)> = Vec::new();
             if let Ok(iter) = std::fs::read_dir(&dir) {
                 for e in iter.flatten() {
@@ -165,8 +177,7 @@ pub fn run(
                     if path.extension().and_then(|s| s.to_str()) == Some("kdl")
                         && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
                     {
-                        let (size, modified) = e
-                            .metadata()
+                        let (size, modified) = std::fs::metadata(&path)
                             .map(|m| {
                                 let modified = m
                                     .modified()

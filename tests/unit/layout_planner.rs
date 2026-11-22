@@ -452,12 +452,12 @@ fn run_is_derived_from_terminal_command_not_foreground_process() {
     assert_eq!(runs[0], None);
     assert_eq!(
         runs[1],
-        Some(
-            vec!["claude", "--model", "x"]
-                .into_iter()
-                .map(String::from)
-                .collect()
-        )
+        Some(zelper::layout::generator::RunSpec {
+            argv: vec!["claude".to_string(), "--model".to_string(), "x".to_string()],
+            // TASK-81本体実装: cwdはpane_cwd由來で算定される（pane builderの
+            // cwd=Some("/w")由来。DD-10.8: zellij run起因paneはcwd=Someが常に成立）
+            cwd: Some("/w".into()),
+        })
     );
     assert_eq!(runs[2], None);
 }
@@ -746,4 +746,98 @@ fn t1_formula_level_backward_compat() {
     let p = plan_v2(&panes(4), &tpl, ANCHOR, "agents").unwrap();
     assert!(group(&p, 0, 0).tab_focus_target, "t*=0 -> (0,0)=anchor");
     assert!(!group(&p, 1, 0).tab_focus_target, "block 0以外は立たない");
+}
+
+// ---- TASK-81（DD-10.8 cwd注入のplanner側・DD-10.13 shell -c高疑いheuristics） ----
+
+// [covers:layout-planner.pane-cwd-missing-skips-cwd-with-warning]
+#[test]
+fn pane_cwd_missing_skips_cwd_with_warning() {
+    // pane_cwd欠落時の注入skip+warning（DD-10.8/10.13）: terminal_command=Someかつ
+    // pane_cwd=None（list-panesのcwd enrichが100ms timeoutで欠けうる。T0 r2after
+    // で実在）のoccupied paneは、runのcwd=Noneとして注入をskipし（生成KDLはcwd
+    // 属性なし——旧挙動と同一の出力）、pane特定付きのpreflight warningを出す
+    // （実行は可。errorにしない。照合が外れうることは(b)検証でVerificationFailed
+    // として検知される設計）
+    let mut no_cwd = pane(1, "nocwd", None);
+    no_cwd.terminal_command = Some("htop".into());
+    no_cwd.cwd = None;
+    let mut with_cwd = pane(2, "withcwd", None);
+    with_cwd.terminal_command = Some("vim".into());
+    with_cwd.cwd = Some("/w".into());
+    let p = plan_v2(&[no_cwd, with_cwd], &templates_n(2), ANCHOR, "agents").unwrap();
+    assert_eq!(p.k, 1, "実行は可（errorにしない）");
+    let runs: Vec<_> = p.blocks[0].groups[0]
+        .assignments
+        .iter()
+        .map(|a| a.run.clone())
+        .collect();
+    assert_eq!(
+        runs[0],
+        Some(zelper::layout::generator::RunSpec {
+            argv: vec!["htop".to_string()],
+            cwd: None,
+        }),
+        "pane_cwd欠落はcwd=Noneで注入skip: {:?}",
+        runs[0]
+    );
+    assert_eq!(
+        runs[1],
+        Some(zelper::layout::generator::RunSpec {
+            argv: vec!["vim".to_string()],
+            cwd: Some("/w".to_string()),
+        }),
+        "pane_cwd=Someはrunのcwdへ算出される: {:?}",
+        runs[1]
+    );
+    assert!(
+        p.warnings.iter().any(|w| w.contains("terminal_1")),
+        "pane_cwd欠落paneを特定するwarning（pane id表記）: {:?}",
+        p.warnings
+    );
+    assert!(
+        !p.warnings.iter().any(|w| w.contains("terminal_2")),
+        "pane_cwd正常paneはwarning対象外: {:?}",
+        p.warnings
+    );
+}
+
+// [covers:layout-planner.shell-c-heuristic-quoting-warning]
+#[test]
+fn shell_c_heuristic_quoting_warning() {
+    // shell -c高疑いheuristics warning（DD-10.13 TASK-81拡張）: terminal_commandの
+    // 空白分割argv[0]がshell系（*sh/bash/zsh/fish等）かつargv[1]が-cの場合、quote
+    // 文字を含まなくてもargv破壊の高疑いとしてpreflight warningを出す（arg境界は
+    // joinで消失しており、bash -c "echo hello world"のような引数はquote文字なしで
+    // も誤argv化するため文字種検出〔r20系〕だけでは拾えない）。実行は可・errorに
+    // しない。shell名単独（argv[1]なし）・通常commandは対象外
+    let source = [
+        (1, "shc", "bash -c echo hello world"),
+        (2, "sh", "bash"),
+        (3, "ok", "codex exec --plan"),
+    ]
+    .into_iter()
+    .map(|(id, title, invoked)| {
+        let mut p = pane(id, title, None);
+        p.terminal_command = Some(invoked.into());
+        p
+    })
+    .collect::<Vec<_>>();
+    let p = plan_v2(&source, &templates_n(3), ANCHOR, "agents").unwrap();
+    assert_eq!(p.k, 1, "実行は可（errorにしない）");
+    assert!(
+        p.warnings.iter().any(|w| w.contains("terminal_1")),
+        "shell系argv[0]+-cの高疑いheuristics warning: {:?}",
+        p.warnings
+    );
+    assert!(
+        !p.warnings.iter().any(|w| w.contains("terminal_2")),
+        "shell名単独（argv[1]なし）は対象外: {:?}",
+        p.warnings
+    );
+    assert!(
+        !p.warnings.iter().any(|w| w.contains("terminal_3")),
+        "通常commandは対象外: {:?}",
+        p.warnings
+    );
 }

@@ -9,8 +9,12 @@
 //!   wasm絶対path文字列）と必要権限を事前記述すると対話dialogなしでgrantされる
 //!   （E6実証。session起動前のseedで実証済み）
 
+use crate::domain::{PaneKindId, TabId};
 use crate::error::{ErrorClass, ZelperError};
+use crate::zellij::ZellijBackend;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 /// companion pluginが必要とする権限（DD-10.3。load()のrequest_permissionと同集合。
 /// permissions.kdlではnodeの子に権限名のbare nodeとして記述する）
@@ -379,4 +383,110 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), ZelperError> {
         )
     })?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// runtime orchestration（DD-10.7 step 3・TASK-88設計§2.8）
+//
+// remap.rsから切り出したcompanion経路の共通helper（挙動不変）。remap / move
+// （--to-tab・--swap-with）の双方から利用する。polling定数・probe pipe・
+// break-id payload組み立て・権限hintをここに集約する
+// ---------------------------------------------------------------------------
+
+/// polling定数（DD-10.7: 250ms間隔・10s deadline。list-panes再取得で条件判定）
+pub const POLL_INTERVAL: Duration = Duration::from_millis(250);
+pub const POLL_DEADLINE: Duration = Duration::from_secs(10);
+
+/// nonce連番（実行毎に一意なprobe titleのための後付けエントロピー。DD-10.3）
+static NONCE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+pub fn new_nonce() -> String {
+    let seq = NONCE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}-{seq}-{}", std::process::id())
+}
+
+/// 権限hint（DD-10.4。probe不成立・移動polling timeout時に付与）
+pub const PERMISSION_HINT: &str = "the companion plugin may lack permissions: the \
+permissions.kdl seed may not be picked up by a session started before seeding, the \
+permission dialog may be pending, or the plugin protocol may be incompatible \
+(proven combination: zellij 0.44.3 + zellij-tile 0.44.3 only). restart the session \
+after seeding, or grant permissions to the companion plugin manually, then re-run";
+
+/// polling（DD-10.7: 250ms間隔・10s deadline）。条件は最初に評価するため、
+/// 即座に成立する場合はsleepしない。成立時に条件値（例: 新規tab id）を返す。
+/// deadlineは条件評価（list_panes等のbackend呼出）の所要時間を含めて保証する:
+/// 呼出し後にdeadlineを再検査し、超過後の条件成立は成立扱いにしない（遅延実行を
+/// 成功と誤認しない）。sleepは残時間を超えない
+pub fn poll<T>(
+    mut cond: impl FnMut() -> Result<Option<T>, ZelperError>,
+    timeout: impl FnOnce() -> ZelperError,
+) -> Result<T, ZelperError> {
+    let deadline = Instant::now() + POLL_DEADLINE;
+    loop {
+        let hit = cond()?;
+        if Instant::now() >= deadline {
+            return Err(timeout());
+        }
+        if let Some(v) = hit {
+            return Ok(v);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(POLL_INTERVAL));
+    }
+}
+
+/// companion setup + probe pipe（DD-10.7 step 3。remap/move共通）: wasm extract +
+/// permissions seedを行い、probe pipe `<nonce>`を送ってlist-panesで
+/// `zelper-probe-<nonce>` titleの出現をpollingする。probeは状態変更前の応答性・
+/// 権限確認（設計レビューR3）で、不成立（timeout・pipe失敗）は一切の状態変更前に
+/// OperationFailed + 権限hintで中断する。成功時はwasmの絶対pathを返す
+pub fn setup_and_probe(backend: &dyn ZellijBackend) -> Result<PathBuf, ZelperError> {
+    let path = ensure_companion_wasm()?;
+    ensure_permissions(&permissions_path()?, &path.to_string_lossy(), None)?;
+    let nonce = new_nonce();
+    let want_title = format!("zelper-probe-{nonce}");
+    backend.pipe_plugin(&path, "probe", &nonce).map_err(|e| {
+        ZelperError::new(
+            ErrorClass::OperationFailed,
+            format!(
+                "probe pipe did not complete; no session state was changed. {e}. \
+{PERMISSION_HINT}"
+            ),
+        )
+    })?;
+    poll(
+        || {
+            let Some(panes) = backend.list_panes_lenient()? else {
+                return Ok(None);
+            };
+            // lenient取得の戻り値で直接判定する。空stdoutは未成立として扱い、
+            // 1 tick 1回のbackend呼出でstrict再取得によるfatal窓を作らない。
+            Ok(panes.iter().any(|p| p.title == want_title).then_some(()))
+        },
+        || {
+            ZelperError::new(
+                ErrorClass::OperationFailed,
+                format!(
+                    "probe not observed within 10s (companion plugin did not respond); \
+screen may be busy and its 1s list response timeout may have produced empty output. no \
+session state was changed. {PERMISSION_HINT}"
+                ),
+            )
+        },
+    )?;
+    Ok(path)
+}
+
+/// `break-id` pipe payload（`"<tab_id> <pane_id_csv>"`。DD-10.3 protocol）
+pub fn break_id_payload(tab: TabId, panes: &[PaneKindId]) -> String {
+    let ids = panes
+        .iter()
+        .map(|p| p.as_spec())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{} {ids}", tab.0)
 }

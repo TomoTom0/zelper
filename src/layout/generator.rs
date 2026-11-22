@@ -7,14 +7,25 @@ use kdl::{KdlDocument, KdlNode};
 
 use super::{SKIP_NODES, is_content_node, leaf_is_plugin};
 
-/// slot i への注入run（DD-10.8）。
-/// - `Some(argv)`: occupied slot。terminal_command空白分割（`command`=argv[0]・`args`=残り）。
-///   terminal_commandがSomeなら単語1つの起動paneでもSomeを渡す（run一致照合は
-///   Run（argv）等価であり、`command="bash"`起動paneはbare slot（run=None）と
-///   照合しないため。旧shell_aware_argvの「shell名のみはbare扱い」は再作成用途の
-///   規則で、照合用途では誤り——v2で廃止）
-/// - `None`: shell pane（terminal_command=None）または空slot。いずれもbare pane slotのまま
-pub type SlotRun = Option<Vec<String>>;
+/// slot i への注入runの内容（DD-10.8。TASK-81: `SlotRun = Option<Vec<String>>`から
+/// `RunSpec{argv, cwd}`へ拡張）
+/// - `argv`: terminal_command空白分割（`command`=argv[0]・`args`=残り）。
+///   terminal_commandがSomeなら単語1つの起動paneでもargvを渡す（run一致照合は
+///   Run等価であり、`command="bash"`起動paneはbare slot（run=None）と照合しない
+///   ため。旧shell_aware_argvの「shell名のみはbare扱い」は再作成用途の規則で、
+///   照合用途では誤り——v2で廃止）
+/// - `cwd`: pane_cwd由來の注入cwd（TASK-81）。`None`はcwd属性を出力しない
+///   （derive互換・旧挙動）。argv空かつcwd=SomeはRun::Cwd表現（reconciliation
+///   pass 2のslot形状。10.2 #14）
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunSpec {
+    pub argv: Vec<String>,
+    pub cwd: Option<String>,
+}
+
+/// slot i への注入run。`None`: shell pane（terminal_command=None）または空slot。
+/// いずれもbare pane slotのまま
+pub type SlotRun = Option<RunSpec>;
 
 /// 1 instance分の生成KDL文字列を生成する（DD-10.8 v2.2）。
 /// base: 当該tab鋳型の正規形subtree（`layout::normalize_tab_templates`出力。
@@ -111,10 +122,18 @@ fn inject_walk(
                     *leaf_index += 1;
                     let node = &mut doc.nodes_mut()[i];
                     normalize_leaf(node);
-                    if let Some(argv) = runs.get(idx).and_then(SlotRun::as_ref)
-                        && !argv.is_empty()
-                    {
-                        inject_run(node, argv);
+                    match runs.get(idx).cloned().flatten() {
+                        Some(spec) if !spec.argv.is_empty() => {
+                            inject_run(node, &spec.argv, spec.cwd.as_deref());
+                        }
+                        // argv空かつcwd=SomeはRun::Cwd表現（`pane cwd="X"`。command属性・
+                        // args子nodeを持たない。reconciliation pass 2のslot形状。10.2 #14）
+                        Some(spec) => {
+                            if let Some(cwd) = spec.cwd {
+                                set_quoted_prop(node, "cwd", &cwd);
+                            }
+                        }
+                        None => {}
                     }
                 }
             }
@@ -124,13 +143,20 @@ fn inject_walk(
 
 /// leafをbare paneに正規化する: layout宣言のcommand/cwd属性とargs子nodeを除去
 /// （空slotは常にbare pane・cwd注入は全廃。DD-10.2 #9 / 10.8）。
+/// hold属性（close_on_exit / start_suspended）も併記しない（DD-10.2 #16 TASK-81:
+/// -cなし`zellij run`のhold_on_close=true == KDL未指定既定〔DD-10.1事実5〕のため
+/// 併記不要。close_on_exit=true併記はhold_on_close=falseとなり正常系paneと逆に
+/// 不一致を生むため、layout宣言にあっても生成KDLからは除去する）
 /// なおkdl crateの`KdlNode::remove`はidentifier比較にreprを含むためparsed nodeの
 /// entryに一致せず、value比較のretainで除去する
 fn normalize_leaf(node: &mut KdlNode) {
     node.entries_mut().retain(|e| {
-        e.name()
-            .map(|i| i.value())
-            .is_none_or(|name| name != "command" && name != "cwd")
+        e.name().map(|i| i.value()).is_none_or(|name| {
+            name != "command"
+                && name != "cwd"
+                && name != "close_on_exit"
+                && name != "start_suspended"
+        })
     });
     if let Some(children) = node.children_mut().as_mut() {
         children.nodes_mut().retain(|n| n.name().value() != "args");
@@ -141,9 +167,13 @@ fn normalize_leaf(node: &mut KdlNode) {
     }
 }
 
-/// occupied slotへrun（command+args）を注入する
-fn inject_run(node: &mut KdlNode, argv: &[String]) {
+/// occupied slotへrun（command+args+cwd）を注入する（DD-10.8 TASK-81: cwd属性は
+/// pane_cwd由來。cwd=Noneは出力しない〔derive互換〕）
+fn inject_run(node: &mut KdlNode, argv: &[String], cwd: Option<&str>) {
     set_quoted_prop(node, "command", &argv[0]);
+    if let Some(cwd) = cwd {
+        set_quoted_prop(node, "cwd", cwd);
+    }
     if argv.len() > 1 {
         let mut args = KdlNode::new("args");
         for a in &argv[1..] {

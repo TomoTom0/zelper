@@ -140,3 +140,90 @@ pub fn run_tab(
     }
     Ok(())
 }
+
+/// add session NAME: detached session作成（DD-14・TASK-89）。main.rsからは
+/// 0-session環境で動く前提のprobe backend（session解決なし）が渡される
+/// （AddTarget::Session例外dispatch。設計§2.2）
+pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Result<(), ZelperError> {
+    // app層Usage検査（TASK-96 §2.2-§2.4: 一覧取得より前にfail-fast）。空白含み名は
+    // zellijが受理する（M96-A実測）がparse_sessionsがlist-sessions行の先頭wordのみを
+    // 名前化するため世界modelで復元不能（postcondition必敗・session残留）。
+    // 空文字・'/'含みはzellijが明示拒否する（M96-B/C実測）がrename NEW_NAMEとの
+    // 対称性・fail-fastでwrap側でも事前検査。先頭'-'は`--`通過系列が`--`挿入なしの
+    // attach -b NAME組み立てへ到達するため（有効option一致値の下流挙動は未測定・
+    // zellij側option集合はzeller管理外）入力段の確定拒否が唯一のzeller側完結手段。
+    // 検査順は empty → '/' → whitespace → 先頭'-'（複合違反時の優先順位固定）。
+    // それ以外の文字種は推測で事前拒否せず、すり抜けはpostconditionが最終防衛
+    if name.is_empty() {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not be empty",
+        ));
+    }
+    if name.contains('/') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not contain '/'",
+        ));
+    }
+    if name.contains(char::is_whitespace) {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not contain whitespace",
+        ));
+    }
+    if name.starts_with('-') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NAME must not start with '-'",
+        ));
+    }
+    // 事前確認: 同名running sessionの存在はPreflightでfail-fast拒否する
+    // （zellijのrc=1「Session already exists」を待たない）。EXITED行はrunningと
+    // みなさない（EXITED同名はzellijへ委ねる）。一覧取得の失敗は0件へ丸めず
+    // 元class/exitのまま伝播する（TASK-93 D5: 従来のrc=1一律0件扱い〔F7〕を
+    // backendの0件decode〔D1〕で解消し、真のbackend障害を表面化させる）
+    let sessions = backend.list_sessions()?;
+    if sessions.iter().any(|s| !s.exited && s.name == name) {
+        return Err(ZelperError::new(
+            ErrorClass::Preflight,
+            format!("session already exists: '{name}'"),
+        ));
+    }
+    backend.create_session_detached(name)?;
+    // postcondition: 作成後のlist_sessionsにNAMEがrunning出現（DD-11 addの存在
+    // 確認規則に準拠。作成成否をexit codeのみで信用しない）。0-session環境の
+    // 作成直後はbackendの0件decode（D1）によりOk(空一覧)が返るため、作成rc=0
+    // かつ一覧0件はpostcondition不在としてVerificationFailedへ分類される
+    // （REVIEW-2指摘5）。事後確認の失敗は作成呼出（attach -b）が成功済みの
+    // 可能性があるため、元class/exitを保持したままmessageへ文脈を付与する
+    // （D5: created session 'NAME' but failed to confirm: <元message>）
+    let sessions = backend.list_sessions().map_err(|e| {
+        ZelperError::new(
+            e.class().clone(),
+            format!(
+                "created session '{name}' but failed to confirm: {}",
+                e.message()
+            ),
+        )
+    })?;
+    if sessions.iter().any(|s| !s.exited && s.name == name) {
+        println!("{}", session_report(name, json));
+        Ok(())
+    } else {
+        Err(ZelperError::new(
+            ErrorClass::VerificationFailed,
+            format!("session '{name}' not found in list-sessions after creation"),
+        ))
+    }
+}
+
+/// add session成功の報告文。humanは `created session '<NAME>' (detached)` の1行・
+/// JSONはenvelope 1通（data.session=NAME・data.created=true。DD-14）
+pub fn session_report(name: &str, json: bool) -> String {
+    if json {
+        output::json::ok(serde_json::json!({ "session": name, "created": true }))
+    } else {
+        format!("created session '{name}' (detached)")
+    }
+}

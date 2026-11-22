@@ -78,6 +78,35 @@ pub enum ResizeOp {
     Shrink(ResizeDirection),
 }
 
+/// move pane操作の種別（DD-13。設計§2.3）。directionは`ResizeDirection`（left/
+/// right/up/down）を再利用し、rotateはforwards/backwardsの2値。argvは
+/// `move-pane <dir> -p <spec>` / `move-pane -p <spec>`（bare = rotate forwards）/
+/// `move-pane-backwards -p <spec>`（M1実測確定）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovePaneOp {
+    Direction(ResizeDirection),
+    RotateForwards,
+    RotateBackwards,
+}
+
+/// move-tabの方向（DD-13。M2実測確定: direction positional必須・`-t <tab_id>`で
+/// 非active tabをfocus不変で1 position移動）。Left/Rightのみの専用表現
+/// （`ResizeDirection`流用は4値として型過大のため不採用）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabMoveDirection {
+    Left,
+    Right,
+}
+
+impl TabMoveDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TabMoveDirection::Left => "left",
+            TabMoveDirection::Right => "right",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OverrideSpec {
     pub source: LayoutSpec,
@@ -110,6 +139,14 @@ pub trait ZellijBackend {
     fn close_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
     fn close_tab(&self, tab: TabId) -> Result<(), ZelperError>;
     fn resize(&self, pane: Option<&PaneKindId>, op: ResizeOp) -> Result<(), ZelperError>;
+    /// native move-pane系（DD-13）。argv: `move-pane <dir> -p <spec>` /
+    /// `move-pane -p <spec>`（rotate forwards）/ `move-pane-backwards -p <spec>`。
+    /// M1実測: edge方向移動はrc=0・出力空のsilent no-opのため、成否はcallerが
+    /// list-panes再取得の幾何比較で判定する
+    fn move_pane(&self, pane: &PaneKindId, op: MovePaneOp) -> Result<(), ZelperError>;
+    /// native move-tab wrap（DD-13）。argv: `move-tab <left|right> -t <tab_id>`。
+    /// M2実測: 1回の呼び出しで非active tabをfocus不変で1 position移動
+    fn move_tab(&self, tab: TabId, direction: TabMoveDirection) -> Result<(), ZelperError>;
     fn override_layout(&self, spec: &OverrideSpec) -> Result<(), ZelperError>;
     fn go_to_tab(&self, tab: TabId) -> Result<(), ZelperError>;
     /// action focus-pane-id <PANE_ID>（DD-10.7 step 6 v2.2。PANE_ID形式は
@@ -118,6 +155,26 @@ pub trait ZellijBackend {
     fn focus_pane(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
     fn dump_layout(&self) -> Result<String, ZelperError>;
     fn toggle_embed_floating(&self, pane: &PaneKindId) -> Result<(), ZelperError>;
+    /// 対話attach（DD-14）。run_interactive経由（stdio inherit×3・timeout無効。
+    /// DD-3.1例外）。argvは `attach <session>` positional形式
+    fn attach_session(&self) -> Result<(), ZelperError>;
+    /// 対象sessionのattach clientをdetach（DD-14）。`--session NAME action detach`
+    /// wrap（現行run_actionの枠）
+    fn detach_session(&self) -> Result<(), ZelperError>;
+    /// detached session作成（DD-14）。argvは `attach -b NAME`（positional形式。
+    /// global --session形式はrandom別名sessionを作るため禁止——M5実測）。
+    /// session解決に依存しないtop-level argv
+    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError>;
+    /// sessionの完全削除（DD-11 remove session・TASK-84）。argvは
+    /// `delete-session <name> -f`（top-level positional。run_actionの--session接頭
+    /// なし）。kill-sessionとは終状態が同一（行+session_info完全消滅・実測M4/M5）
+    /// で状態（RUNNING/死data）に依らず動作するため単一methodに統一
+    fn delete_session(&self, name: &str) -> Result<(), ZelperError>;
+    /// session名変更（DD-8 rename session・TASK-95）。argvは
+    /// `--session <from> action rename-session <to>`（run_action_as形式・M4 H実測）。
+    /// 既存session名へのrename・空文字・'/'含み名はrc=0で黙って失敗する（M4 I・
+    /// M95-C1/C2）ため、衝突・validation事前検査とpostcondition検証はcallerの責務
+    fn rename_session(&self, from: &str, to: &str) -> Result<(), ZelperError>;
     fn pipe_plugin(
         &self,
         path: &std::path::Path,

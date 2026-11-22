@@ -1,27 +1,27 @@
-# read / send 操作（src/app/read.rs）の検証条件。出典: test-plan §2.4・DD-6/DD-7/DD-4.1・design-review §4.2
-# 対応test: tests/cli/list_read_send.rs（部分5件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
+# read / send 操作（src/app/read.rs）の検証条件。出典: test-plan §2.4・DD-6/DD-7/DD-4.1
+# 対応test: tests/cli/list_read_send.rs（16件。1条件=1 test fnの1:1対応。設計書§2.3/3.4）
 [meta]
 feature = "read-send"
 source_file = "src/app/read.rs"
 verified = true
-verified_at = "2026-09-13"
+verified_at = "2026-11-14"
 verified_by = "claude"
-test_command = "cargo test --test cli_list_read_send"
+test_command = "cargo test --test cli_list_read_send -- read send"
 source_hash = "572a7681d912de0027f9438e084b63c4674b57b2"
-note = "src/app/send.rs も検証対象"
+note = "src/app/send.rs も検証対象。TASK-62（2026-09-17）: --tail/--full加工の条件化としてread-full-passes-dump-screen-f・read-tail-applies-to-last-n-linesの2条件を追加し、excluded該当行（--tail N / --full加工）を解消（--tail 0は出典に値域規定がなく実装由来のため除外行へ記録）。test追従済み（test fn 2件・shimへFAKE_DUMP_SCREEN応答差し替え追加。cargo test --test cli_list_read_send 25/25 green・verify-conditions exit 0）。source_hashは実装不変のため従来値のまま。TASK-63（2026-09-18）: read/sendの失敗注入・複数行系列の条件化としてread-partial-failure-exit6・read-all-failure-exit5・send-partial-failure-continues-remaining・send-multiline-text-single-write-charsの4条件を追加し、excluded該当3件（per-pane失敗exit 6/5・send部分失敗継続・複数行text単呼び）を解消。test追従済み（test fn 4件・shimへFAKE_FAIL_DUMP_SCREEN/FAKE_FAIL_WRITE_CHARS失敗注入を追加〔未設定時は現行挙動のまま〕。cargo test 178/178 green・verify-conditions exit 0〔178条件・178tag・43excluded〕）。source_hashは実装不変のため従来値のまま。TASK-79（2026-11-14）: TR63-2の残failure系列5種をすべて条件化としてsend-enter-cr-failure-exit5・send-keys-failure-exit5・send-failure-per-pane-report-contents・read-failure-human-shows-failed-pane・read-all-failure-includes-resultsの5条件を追加（全系列条件化のためexcluded追加なし）。test追従済み（test fn 5件・shimへFAKE_FAIL_WRITE〔write -p失敗注入〕/FAKE_FAIL_SEND_KEYS〔send-keys失敗注入〕を追加〔未設定時は従来挙動のまま〕。cargo test --test cli_list_read_send -- read send filterでgreen・verify-conditions exit 0〔全binary実行・全件verifyはorchestrator実施〕）。source_hashは実装不変のため従来値のまま"
 
 [[condition]]
 id = "read-send.read-single-and-multi-results"
-source_lines = "tests/cli/list_read_send.rs:267"
+source_lines = "tests/cli/list_read_send.rs:455"
 target_function = "read::run"
 source = "docs/testing/test-plan.md §2.4（read: 対象順のdump-screen呼び出し列） + docs/design/detailed-design.md DD-6（plan: 対象pane毎にdump-screen -p。順序はTargetSet順 / JSON: results[]: { target, title, tab, content | error }） + DD-1.3（PANESPEC = bare 3（=terminal_3）正規化）"
 description = "readの対象解決と結果取得の基盤: 単数PANESPECはbare数値（1）をterminal_1へ正規化して解決し、JSONのresults[]にtargetとcontent（dump-screen結果）を格納する。複数PANESPEC指定も同経路で受理（§2.1のPANESPEC正規形要求のうちbare正規化を本条件が担う。CMR-5: bare正規化とresults構造を1条件に統合）"
 given = "fake zellij shim（list-panes 3 pane・dump-screenはSCREEN[pane]を返す）に対するzelper read 1 --jsonとzelper read 1 2 --jsonの実行"
-expect_return_shape = "単数時はexit 0かつresults[0].target=terminal_1・results[0].detail=SCREEN[terminal_1]改行。複数時はexit 0。検証限界: 複数時のresults順序とdump-screen呼び出し列の順序は未assert（successのみ）。--tail/--full加工は未検証（excluded参照）"
+expect_return_shape = "単数時はexit 0かつresults[0].target=terminal_1・results[0].detail=SCREEN[terminal_1]改行。複数時はexit 0。検証限界: 複数時のresults順序とdump-screen呼び出し列の順序は未assert（successのみ）。--tail/--full加工はread-full-passes-dump-screen-f / read-tail-applies-to-last-n-lines参照"
 
 [[condition]]
 id = "read-send.read-nonexistent-pane-is-no-target-exit3"
-source_lines = "tests/cli/list_read_send.rs:287"
+source_lines = "tests/cli/list_read_send.rs:475"
 target_function = "read::run（positional照合）"
 source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-6（解決: positional PANESPECはlist-panes結果と照合（存在確認 + 読み取り対象確定）） + DD-1.4（対象0件 → no target matched error） + DD-4.3（NoTarget = exit 3）"
 description = "readのpositional照合の負荷側: 存在しないpane ID指定はNoTarget（exit 3）で失敗する。positional PANESPECの存在確認が効いていることの検証"
@@ -30,7 +30,7 @@ expect_return = "exit 3（NoTarget）"
 
 [[condition]]
 id = "read-send.human-output-pane-headers"
-source_lines = "tests/cli/list_read_send.rs:416"
+source_lines = "tests/cli/list_read_send.rs:604"
 target_function = "read human出力"
 source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-4.1（read複数pane: pane毎にヘッダ行 === terminal_3 (HB1, tab:2 agents) === + 内容）"
 description = "readのhuman出力形式: pane毎の識別ヘッダ行（=== pane_id (title, tab:POS NAME) ===）。複数pane読み取り時にどのpaneの出力かを判別可能にする表示契約"
@@ -38,8 +38,44 @@ given = "fake zellij shimに対するzelper read 1（human出力）の実行"
 expect_return_shape = "stdoutに === terminal_1 (agent-a, tab:0 Tab #1) === のヘッダ行を含む"
 
 [[condition]]
+id = "read-send.read-full-passes-dump-screen-f"
+source_lines = "tests/cli/list_read_send.rs:619"
+target_function = "read::run → ZellijBackend::dump_screen（-f転送）"
+source = "docs/testing/test-plan.md §2.4（read: --fullの加工） + docs/design/detailed-design.md DD-6（request: --full（scrollback） / plan: 対象pane毎にdump-screen -p（full指定時-f）） + --full加工testは当初不在のため追加（--tail系と併せtest追加要求への対応）"
+description = "--full指定時のbackend転送: readのdump-screen呼び出しに-fが付くこと。scrollback込み取得はzellij側機能のためzelperは加工せず-f引数の転送のみ行う（非--full時と対象解決・results構造は同一経路）"
+given = "fake zellij shim（dump-screenは-pのpaneにSCREEN[pane]を返し、-f検出時はFULL接尾付き。全argvはlogへ記録）に対するzelper read 1 --full --jsonの実行"
+expect_return = "exit 0かつshim logにdump-screen -p terminal_1 -fが記録され、results[0].detailは-f応答（SCREEN[terminal_1]FULL）に変わる"
+
+[[condition]]
+id = "read-send.read-tail-applies-to-last-n-lines"
+source_lines = "tests/cli/list_read_send.rs:647"
+target_function = "read::run（apply_tail）"
+source = "docs/testing/test-plan.md §2.4（read: --tail Nの加工） + docs/design/detailed-design.md DD-6（request: --tail N（行末N行、zelper側加工。--tailは取得済み内容——viewport、--full指定時はscrollback込み——の末尾N行に適用） + JSON: results[]: { target, title, tab, content | error }。--tailはcontentに適用） + apply_tail経路は実装済みのため、--tail N加工はtest追加により担保"
+description = "--tail Nのzelper側加工: 取得済みcontentを末尾N行へ切り詰め、JSON resultsのcontent（detail）へ格納する。適用対象は取得形態の末尾N行（viewport / --full併用時はscrollback込み）で、両形式を1条件で検証（CMR-5: --tail単体と--full併用の2形式を統合。DD-6 request節が1文で両者を規定）。Nが行数以上の場合は切り詰められず全行保持の境界を含む。加工は出力前のapply_tail単一経路のためhuman出力にも同一の加工済み内容が現れる（検証はJSONで実施）"
+given = "fake zellij shimのdump-screen応答を環境変数で複数行内容（例: 識別可能な5行）へ差し替えられるようにした上で、zelper read 1 --tail 2 --json・zelper read 1 --full --tail 2 --json・zelper read 1 --tail 99 --json（N >= 行数）の各実行"
+expect_return_shape = "各実行ともexit 0し、detailは--tail 2では末尾2行のみ（先頭側の行は含まれない）、--full --tail 2では-f付き取得内容（FULL接尾・scrollback込み相当）の末尾2行、--tail 99では全行保持（切り詰め無し）"
+
+[[condition]]
+id = "read-send.read-partial-failure-exit6"
+source_lines = "tests/cli/list_read_send.rs:699"
+target_function = "read::run（per-pane失敗集計）"
+source = "docs/design/detailed-design.md DD-6（失敗: per-pane失敗をresults[]で報告、exit 6（部分）または5（全失敗） / JSON: results[]: { target, title, tab, content | error }） + DD-4.3（exit status: 6 = 部分失敗（複数対象の一部失敗）。error.class対応: PartialFailure=6）"
+description = "readのper-pane失敗集計の部分側: 対象の一部paneでdump-screenが失敗しても処理を打ち切らず、成功paneのcontentと失敗paneのerrorをresults[]へ混在報告した上でexit 6（PartialFailure）を返す。multi-target読み取りの部分失敗報告契約（成功entryとerror entryの混在）"
+given = "fake zellij shimへper-pane失敗注入（複数対象のうち1 paneのみdump-screenが失敗する）を可能にした上で、zelper read 1 2 --jsonの実行"
+expect_return = "exit 6（PartialFailure）。results[]は成功paneのentryがcontent（detail）を持ち、失敗paneのentryはerrorを報告する"
+
+[[condition]]
+id = "read-send.read-all-failure-exit5"
+source_lines = "tests/cli/list_read_send.rs:738"
+target_function = "read::run（per-pane失敗集計）"
+source = "docs/design/detailed-design.md DD-6（失敗: per-pane失敗をresults[]で報告、exit 6（部分）または5（全失敗）） + DD-4.3（exit status: 5 = 操作失敗（単対象失敗、または複数対象の全失敗）。error.class対応: OperationFailed=5）"
+description = "readのper-pane失敗集計の全失敗側: 対象全paneのdump-screenが失敗する場合はexit 5（OperationFailed）。部分失敗（exit 6）と全失敗（exit 5）はDD-4.3上で別exit code・別error.classとして規定される排他契約のため、read-partial-failure-exit6と別条件で検証する（失敗範囲の集計判定が独立した分岐であるため）"
+given = "fake zellij shimへ失敗注入（対象全paneのdump-screenが失敗する）を可能にした上で、zelper read 1 2 --jsonの実行"
+expect_return = "exit 5（OperationFailed）"
+
+[[condition]]
 id = "read-send.send-broadcast-visual-order-calls"
-source_lines = "tests/cli/list_read_send.rs:318"
+source_lines = "tests/cli/list_read_send.rs:506"
 target_function = "send::run"
 source = "docs/testing/test-plan.md §2.4（send: text→write-chars呼び出し。fake shim: 呼び出しargv列の記録と期待比較（L3）） + docs/design/detailed-design.md DD-7（実行: text → write-chars -p。順序: TargetSet順に順次） + DD-6（順序はTargetSet順（tab position → y → x））"
 description = "sendのtext送信がwrite-charsへmapされ、対象がvisual order（tab position → y → x昇順）で順次呼び出されること。broadcast系操作の実行順序の決定性（pane列挙順に依らない）をshimのargv記録で検証"
@@ -48,37 +84,79 @@ expect_return = "exit 0かつwrite-chars呼び出しが2件で、順序はtermin
 
 [[condition]]
 id = "read-send.send-enter-appends-cr-and-keys-use-send-keys"
-source_lines = "tests/cli/list_read_send.rs:335"
+source_lines = "tests/cli/list_read_send.rs:523"
 target_function = "send::run（--enter / --keys）"
 source = "docs/testing/test-plan.md §2.4（--enterで追加のwrite 13・--keys→send-keys argv分割） + docs/design/detailed-design.md DD-7（--enter → write -p 13。keys → send-keys -p（key毎に独立argv要素））"
 description = "sendの送信形式map: textはwrite-chars、--enter併用時はtext送信後にCR（write 13）を追加、--keysはkey毎に独立argv要素を持つsend-keysへ。入力送信のbackend呼び出し契約（CMR-5: --enterのCR追加と--keysのargv分割を1条件に統合）"
 given = "fake zellij shimに対するzelper send 1 --enter -- helloとzelper send 1 --keys Ctrl aの各実行"
 expect_return = "前者はwrite-chars -p terminal_1 helloとwrite -p terminal_1 13の両方が呼ばれexit 0。後者はsend-keys -p terminal_1 Ctrl a（key毎の独立要素）が呼ばれexit 0"
 
-[[excluded]]
-item = "readの--tail N / --full加工（--tailは取得済み内容の末尾N行へ適用・--full時はdump-screen -f）"
-source = "docs/testing/test-plan.md §2.4（read: --tail/--fullの加工） + docs/design/detailed-design.md DD-6（--full（scrollback）・--tail N（zelper側加工））"
-reason = "未test。既存133 testに--tail/--fullを引数に持つtest fnが存在しないため本移行では条件化できない（read_single_and_multi_with_tailもfn名に反し--tailを渡していない）。apply_tail経路は実装済み（design-review §4.2 MR-30でtail testはP1と明示）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
+[[condition]]
+id = "read-send.send-partial-failure-continues-remaining"
+source_lines = "tests/cli/list_read_send.rs:761"
+target_function = "send::run（部分失敗時の残対象継続）"
+source = "docs/design/detailed-design.md DD-7（順序: TargetSet順に順次。部分失敗でも残対象へ継続（broadcast性質） / 失敗: per-pane報告） + DD-4.3（exit status: 6 = 部分失敗（複数対象の一部失敗）。error.class対応: PartialFailure=6）"
+description = "sendのbroadcast性質: 対象の一部paneへの書き込みが失敗しても処理を打ち切らず、残対象への送信を継続する。1対象の失敗が後続対象の飛ばしに繋がらないことと、結果の部分失敗報告（exit 6）を検証する"
+given = "fake zellij shimへper-pane失敗注入（visual order先頭の対象paneのみwrite-charsが失敗する）を可能にした上で、複数対象へのzelper send 1 2 -- helloの実行（失敗paneより後に残対象が続く構成）"
+expect_return = "exit 6（PartialFailure）かつ、失敗paneより後の残対象へもwrite-chars呼び出しが実行される（継続）"
+
+[[condition]]
+id = "read-send.send-multiline-text-single-write-chars"
+source_lines = "tests/cli/list_read_send.rs:789"
+target_function = "send::run（複数行textの送信形式）"
+source = "docs/design/detailed-design.md DD-7（実行: text → write-chars -p（複数行textはv1ではwrite-chars単呼び。pasteは未検証のためv1未使用）） + 複数行textはwrite-chars単呼び・paste不使用〔v1契約〕"
+description = "sendの複数行textの送信形式: 改行を含むtextもwrite-chars 1回の単呼びで送信し、行単位への分割呼び出しを行わずpasteも使用しない（v1契約）。複数行textにおけるbackend呼び出し契約（既存send系条件は単語textのみで複数行を未検証）"
+given = "fake zellij shim（全argvはlogへ記録）に対するzelper send 1 -- 改行を含む複数行text（例: 2行を改行で接続したtext）の実行"
+expect_return = "exit 0かつwrite-chars呼び出しは1回のみで、改行を含むtext全体が単一argv要素として渡る。paste呼び出しと行単位の分割呼び出しは発生しない"
+
+[[condition]]
+id = "read-send.send-enter-cr-failure-exit5"
+source_lines = "tests/cli/list_read_send.rs:814"
+target_function = "send::run（--enter併用時のCR書き込み失敗）"
+source = "TASK-79 body（TR63-2 (a)系列: send --enter併用時CR失敗） + docs/design/detailed-design.md DD-7（--enter → write -p 13・失敗: per-pane報告） + DD-4.3（exit status: 5 = 操作失敗（単対象失敗）。error.class対応: OperationFailed=5）"
+description = "send --enter併用時のCR書き込み（write -p 13）失敗の報告: text送信（write-chars）は別backend呼び出しのため、text成功後にCR書き込みのみが失敗したpaneは失敗扱いとなり、単対象ならexit 5（OperationFailed）でper-pane報告される。CR側のみの失敗がpane結果（ok=false・error）へ反映する分岐を検証する"
+given = "fake zellij shimへFAKE_FAIL_WRITE（write -p失敗注入: terminal_1のみ）を設定した上で、zelper send 1 --enter --json -- helloの実行"
+expect_return = "exit 5（OperationFailed）。error.data.results[0]はtarget=terminal_1・ok=false・errorにshim失敗出力（boom）を含む。shim logにwrite-chars -p terminal_1 hello（成功）に続いてwrite -p terminal_1 13（失敗）がこの順序で記録される（DD-7: CRはtext送信の後）"
+
+[[condition]]
+id = "read-send.send-keys-failure-exit5"
+source_lines = "tests/cli/list_read_send.rs:852"
+target_function = "send::run（--keys経路のsend-keys失敗）"
+source = "TASK-79 body（TR63-2 (b)系列: send-keys失敗） + docs/design/detailed-design.md DD-7（keys → send-keys -p・失敗: per-pane報告） + DD-4.3（exit status: 5 = 操作失敗（単対象失敗）。error.class対応: OperationFailed=5）"
+description = "send --keys経路のsend-keys失敗の報告: send-keys呼び出しが失敗したpaneは失敗扱いとなり、単対象ならexit 5（OperationFailed）でper-pane報告される。送信形式3種（text・--enterのCR・--keys）のうち--keys経路の失敗分岐を検証する（text系の失敗はsend-partial-failure-continues-remaining・send-enter-cr-failure-exit5が担う）"
+given = "fake zellij shimへFAKE_FAIL_SEND_KEYS（send-keys失敗注入: terminal_1のみ）を設定した上で、zelper send 1 --json --keys Ctrl aの実行"
+expect_return = "exit 5（OperationFailed）。error.data.results[0]はtarget=terminal_1・ok=false・errorにshim失敗出力（boom）を含む。shim logにsend-keys -p terminal_1 Ctrl aが記録される"
+
+[[condition]]
+id = "read-send.send-failure-per-pane-report-contents"
+source_lines = "tests/cli/list_read_send.rs:888"
+target_function = "send::run（失敗時per-pane報告の中身）"
+source = "TASK-79 body（TR63-2 (c)系列: send失敗時per-pane報告中身） + docs/design/detailed-design.md DD-4.2（multi-target操作は results: [{ target, ok, ... }] の配列。部分失敗を隠さない / 失敗時envelopeのerror.data） + DD-4.1（変更系: 実行した操作の1行サマリ + 失敗があれば FAILED 行） + DD-7（失敗: per-pane報告）"
+description = "send失敗時のper-pane報告の中身: 部分失敗時のJSON error.data.results[]は成功pane（ok=true）と失敗pane（ok=false・error）のentryを混在させ、human出力は成功paneの送信行と失敗paneのFAILED行を混在させる。既存send-partial-failure-continues-remainingがexit 6と残対象継続のみを検証するのに対し、報告の中身（部分失敗を隠さない契約）を本条件が担う"
+given = "fake zellij shimへFAKE_FAIL_WRITE_CHARS（terminal_1のみ失敗）を設定した上で、zelper send 1 2 -- helloのhuman実行と--json実行"
+expect_return_shape = "humanはexit 6で、terminal_1を含む行にFAILEDと失敗理由が揃い、terminal_2を含む行が送信成功（sent ->）を報告する（pane行と報告の対応。別pane行への附着は不通過）。--jsonはerror.data.results[]が2件で、失敗entry（terminal_1・ok=false・errorにshim失敗出力）と成功entry（terminal_2・ok=true）が混在する"
+
+[[condition]]
+id = "read-send.read-failure-human-shows-failed-pane"
+source_lines = "tests/cli/list_read_send.rs:964"
+target_function = "read human出力（失敗paneの表示）"
+source = "TASK-79 body（TR63-2 (d)系列: read失敗human表示） + docs/design/detailed-design.md DD-6（失敗: per-pane失敗をresults[]で報告） + DD-4.1（read複数pane: pane毎にヘッダ行 === terminal_3 (HB1, tab:2 agents) === + 内容）"
+description = "read失敗時のhuman表示: 失敗paneの行はpane識別子とtitleを含むヘッダ形式で現れ、FAILED表示と失敗理由が続き、成功paneのヘッダと内容に混在する。失敗行の形式は出典に規定がなく実装由来のため（実装はtab情報を省いた === pane_id (title) === 形式）、検証はpane判別可能性（識別子・title・FAILED・理由）までとする（形式全文の固定はしない）"
+given = "fake zellij shimへFAKE_FAIL_DUMP_SCREEN（terminal_1のみ失敗）を設定した上で、zelper read 1 2（human出力）の実行"
+expect_return_shape = "exit 6で、stdoutのterminal_1識別子を含む行（失敗pane行）内にtitle（agent-a）・FAILED表示・shim失敗出力（boom）が揃い（pane行と報告の対応。別pane行への附着は不通過）、terminal_2の成功ヘッダと内容（SCREEN[terminal_2]）も含む。失敗行のヘッダ形式（括弧内の構成）は出典規定がないため固定しない"
+
+[[condition]]
+id = "read-send.read-all-failure-includes-results"
+source_lines = "tests/cli/list_read_send.rs:1004"
+target_function = "read::run（全失敗時のresults同梱）"
+source = "TASK-79 body（TR63-2 (e)系列: read全失敗時results同梱） + docs/design/detailed-design.md DD-6（失敗: per-pane失敗をresults[]で報告、exit 6（部分）または5（全失敗）） + DD-4.2（multi-target操作は results: [...] の配列。部分失敗を隠さない）"
+description = "read全失敗時のresults同梱: 対象全pane失敗（exit 5）の場合もerror.data.results[]に全pane分の失敗entry（target・ok=false・error）を同梱する。per-pane失敗報告はexit 6/5の両方に適用される契約であり、read-all-failure-exit5がexit分類のみを検証するのに対し本条件は全失敗側の報告中身を検証する（部分側の中身はread-partial-failure-exit6が担う）"
+given = "fake zellij shimへFAKE_FAIL_DUMP_SCREEN（terminal_1・terminal_2とも失敗）を設定した上で、zelper read 1 2 --jsonの実行"
+expect_return = "exit 5（OperationFailed）。error.data.results[]は2件で、各entryはtarget=terminal_1/terminal_2・ok=false・errorにshim失敗出力（boom）を含む"
 
 [[excluded]]
-item = "readのper-pane失敗exit 6（部分失敗）・全失敗exit 5"
-source = "docs/testing/test-plan.md §2.4（per-pane失敗でexit 6・全失敗でexit 5） + docs/design/detailed-design.md DD-6（失敗: per-pane失敗をresults[]で報告、exit 6（部分）または5（全失敗）） + DD-4.3（PartialFailure=6・OperationFailed=5）"
-reason = "未test。既存133 testにreadのdump-screen失敗系列を検証するtest fnが存在しないため本移行では条件化できない（fake shimにdump-screen失敗注入が無い）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
-
-[[excluded]]
-item = "send部分失敗時の残対象継続（broadcast性質）"
-source = "docs/testing/test-plan.md §2.4（部分失敗でも残対象継続） + docs/design/detailed-design.md DD-7（順序: TargetSet順に順次。部分失敗でも残対象へ継続（broadcast性質））"
-reason = "未test。既存133 testにsendのwrite-chars失敗系列を検証するtest fnが存在しないため本移行では条件化できない。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
-decided_by = "claude"
-
-[[excluded]]
-item = "sendの複数行textはwrite-chars単呼びであること（paste未使用・行分割しない）"
-source = "docs/design/detailed-design.md DD-7（実行: text → write-chars -p（複数行textはv1ではwrite-chars単呼び。pasteは未検証のためv1未使用））"
-reason = "未test。既存133 testに複数行textのsendを検証するtest fnが存在しないため本移行では条件化できない（既存send系条件は単語textのみ）。新規test追加時に条件化する（tm起票済み）"
-decided_at = "2026-09-13"
+item = "readの--tail 0の値域（N=0指定時の挙動）"
+source = "docs/testing/test-plan.md §2.4 + docs/design/detailed-design.md DD-6（--tail N（行末N行）はN>=1の挙動のみ規定しN=0の値域を規定しない）"
+reason = "出典にN=0の挙動規定がなく実装由来の値域（apply_tailはSome(0)で空文字を返す）のため出典起点の条件化対象外。末尾N行の規定はread-tail-applies-to-last-n-linesが検証する"
+decided_at = "2026-09-16"
 decided_by = "claude"

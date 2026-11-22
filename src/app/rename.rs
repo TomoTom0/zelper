@@ -76,3 +76,141 @@ pub fn run_tab(
         ))
     }
 }
+
+/// rename session NAME NEW_NAME: session名変更（DD-8 rename session・TASK-95）。
+/// main.rsからは対象session解離を必要としないprobe backendが渡される
+/// （RenameTarget::Session例外dispatch。設計§2.7）。
+///
+/// 実行順序（設計§2.8 + TASK-97 §2.2）: app層Usage検査（空文字・'/'含み・
+/// 空白含み・先頭'-'・同一名——空文字・'/'・同一名はzellijがrc=0で黙って
+/// 失敗/部分適用する系列〔M4 I・M95-B/C1/C2〕、空白含みはzellijが受理しても
+/// list_sessionsの世界modelで復元不能なため、いずれも一覧取得より前に
+/// fail-fast。先頭'-'は黙失敗系列ではなく`--`通過系列の下流option解釈に
+/// 依存しない確定拒否として同じ位置で拒否〔TASK-97〕）→ 事前list_sessions（1回の取得をNAME不在・
+/// EXITED判定・NEW_NAME衝突の全判定に共用。存在確認はEXITED込み = remove
+/// sessionと同一基準）→ rename呼出（action形式・DD-3.1判定はbackendが担う）→
+/// 事後list_sessionsでpostcondition（旧名消失+新名running出現。rc=0黙失敗の
+/// 検出）→ 報告。事前/事後一覧取得の失敗は0件へ丸めず元class/exitのまま扱う
+/// （事後のみ「but failed to confirm」文面を付与——rename呼出が成功済みの
+/// 可能性があるため。add session DD-14と同一pattern）
+pub fn run_session(
+    backend: &dyn ZellijBackend,
+    name: &str,
+    new_name: &str,
+    json: bool,
+) -> Result<(), ZelperError> {
+    // app層Usage検査（§2.2/§2.3 + TASK-97 §2.1/§2.2: 一覧取得より前にfail-fast）。
+    // 空白含み新名はzellijが受理する（M95-C3実測）がparse_sessionsがlist-sessions
+    // 行の先頭wordのみを名前化するため世界modelで復元不能（postcondition必敗）。
+    // 空文字・'/'含み新名は黙失敗・部分適用の状態破壊（M95-C1/C2実測）。先頭'-'は
+    // TASK-97追加: `--`option終端通過系列がbackendの`--`挿入なしargv組み立て
+    // （process.rs run_action_as → zellij --session <from> action rename-session
+    // <to>）へ到達するためclap依存の拒否が成立せず、未知option値はM95-C4 rc=2
+    // 実測済みだが有効option一致値の下流挙動は未測定・zellij側option集合は
+    // zeller管理外のため、入力段の確定拒否が唯一のzeller側完結手段（add session
+    // NAME検査〔TASK-96〕と対称の4種目）。検査順は empty → '/' → whitespace →
+    // 先頭'-' → 同一名differ（文字種4種の形式検査が関係検査に先行）。旧NAMEは
+    // 文字種検査対象外——世界model（一覧行）にある名前はそのままrename対象。
+    // それ以外の文字種は推測で事前拒否せず、すり抜けはpostconditionが最終防衛
+    if new_name.is_empty() {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must not be empty",
+        ));
+    }
+    if new_name.contains('/') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must not contain '/'",
+        ));
+    }
+    if new_name.contains(char::is_whitespace) {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must not contain whitespace",
+        ));
+    }
+    if new_name.starts_with('-') {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must not start with '-'",
+        ));
+    }
+    if name == new_name {
+        return Err(ZelperError::new(
+            ErrorClass::Usage,
+            "NEW_NAME must differ from NAME",
+        ));
+    }
+    // 事前一覧（§2.1: 失敗は元class/exitのまま伝播・0件へ丸めない）
+    let sessions = backend.list_sessions()?;
+    let Some(target) = sessions.iter().find(|s| s.name == name) else {
+        // 不在はNoTarget（§2.1）。candidates=全行のname（EXITED込み——agentの
+        // 修正導線をremove sessionと同一にする）。行0件は候補列でなく
+        // 「no zellij sessions found」文面。単一対象のため単数形文面
+        if sessions.is_empty() {
+            return Err(ZelperError::new(
+                ErrorClass::NoTarget,
+                "no zellij sessions found",
+            ));
+        }
+        return Err(ZelperError::with_candidates(
+            ErrorClass::NoTarget,
+            format!("session '{name}' not found"),
+            sessions.iter().map(|s| s.name.clone()).collect(),
+        ));
+    };
+    // EXITED行はrename不可（§2.4: server不在へのaction系呼び出しは失敗のみ
+    // 〔M95-A/D実測〕のためfail-fast。存在確認〔行にあるか〕と実行可否判定
+    // 〔runningか〕は別個の検査）
+    if target.exited {
+        return Err(ZelperError::new(
+            ErrorClass::Preflight,
+            format!(
+                "cannot rename an EXITED (dead) session '{name}' (attach to resurrect it first)"
+            ),
+        ));
+    }
+    // NEW_NAME衝突（§2.2: EXITED込みで判定。既存名へのrenameはzellijがrc=0で
+    // 黙って失敗する〔M4 I〕ため、事前検査が唯一の防衛）
+    if sessions.iter().any(|s| s.name == new_name) {
+        return Err(ZelperError::new(
+            ErrorClass::Preflight,
+            format!("session already exists: '{new_name}'"),
+        ));
+    }
+    backend.rename_session(name, new_name)?;
+    // 事後一覧（§2.5: 失敗は元class/exitを保持したままmessageへ文脈付与）
+    let after = backend.list_sessions().map_err(|e| {
+        ZelperError::new(
+            e.class().clone(),
+            format!(
+                "renamed session '{name}' but failed to confirm: {}",
+                e.message()
+            ),
+        )
+    })?;
+    // postcondition（§2.5）: (1) 旧名行の消失（RUNNING/EXITED問わず）
+    // (2) 新名行が存在しexited == false。黙失敗の現れ方が複数（衝突黙失敗は
+    // 旧名消失・新名不出現、no-op黙失敗は旧名残存、等）なため両条件必須
+    let old_gone = !after.iter().any(|s| s.name == name);
+    let new_running = after.iter().any(|s| s.name == new_name && !s.exited);
+    if old_gone && new_running {
+        if json {
+            println!(
+                "{}",
+                crate::output::json::ok(
+                    serde_json::json!({ "renamed_session": name, "name": new_name })
+                )
+            );
+        } else {
+            println!("renamed session '{name}' -> '{new_name}'");
+        }
+        Ok(())
+    } else {
+        Err(ZelperError::new(
+            ErrorClass::VerificationFailed,
+            format!("rename of session '{name}' did not take effect (unchanged in list-sessions)"),
+        ))
+    }
+}
