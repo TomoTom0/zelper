@@ -2179,6 +2179,45 @@ fn closed_duplicates_reported_success_and_failure() {
     );
 }
 
+// [covers:remap-sequence.closed-duplicates-attached-to-interruption-error]
+#[test]
+fn closed_duplicates_attached_to_interruption_error() {
+    // 中断時報告の契約（DD-10.9/DD-12・TASK-105）: reconciliationでdupをclose
+    // した後にpass 2のlayout再適用が失敗する系列では、エラーはverifyを経由
+    // しないpartial_phaseエラーになるが、蓄積済みのclose実績はerror.dataの
+    // closed_duplicatesとして報告されなければならない（従来はdata自体が無く
+    // 監査情報が欠落していた。PR #10 Codex P2指摘への対応）
+    let b = recon_ok_backend();
+    b.fail_override_layout_nth(2); // 2番目のoverride = reconciliation pass 2
+    let mut a = args(false);
+    a.json = true;
+    let err = with_isolated_xdg(|_| run(&b, &a)).unwrap_err();
+    assert!(
+        err.message()
+            .contains("re-applying layout (reconciliation pass 2)"),
+        "pass 2失敗のpartial_phaseエラー: {}",
+        err.message()
+    );
+    assert!(
+        !close_pane_calls(&b).is_empty(),
+        "pass 2より前にdup closeが実行済み: {:?}",
+        b.calls()
+    );
+    let data = err.data().expect("中断エラーにもerror.dataが付く");
+    let arr = data["closed_duplicates"]
+        .as_array()
+        .expect("closed_duplicates配列");
+    assert!(
+        !arr.is_empty(),
+        "close実績がclosed_duplicatesに載る: {data}"
+    );
+    // 要素構造（pane/slot/reason）も成功・検証失敗時と同一
+    assert!(
+        arr[0]["pane"].is_string() && arr[0]["slot"].is_number() && arr[0]["reason"].is_string(),
+        "closed_duplicates要素の構造: {data}"
+    );
+}
+
 // [covers:remap-sequence.verify-run-unique-slot-position]
 #[test]
 fn verify_run_unique_slot_position() {

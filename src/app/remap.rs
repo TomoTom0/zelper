@@ -483,11 +483,13 @@ fn source_tab_of(source: &[PaneState], pane: PaneKindId) -> Option<TabId> {
     source.iter().find(|p| p.id == pane).map(|p| p.tab_id)
 }
 
-/// 実行sequenceの移動phase以降（DD-10.7 step 3〜7 v2.2。preflight完了後の呼び出し）。
-/// `floating`: preflightで特定した--embed-floating対象のselectable floating terminal
-/// pane列（toggleはこのID集合のみ。probe自動launchのnon-selectableなcompanion plugin
-/// paneはDD-10.3/10.5により対象外）。`pre_ids`: 実行開始前snapshotのpane id集合
-/// （reconciliationのdup close対象限定と検証(e'')の新規id判定。DD-12/10.9 TASK-81）
+/// executeの入口（中断時報告の付与。TASK-105・PR #10レビュー対応）。
+/// closed_duplicatesの報告義務（DD-10.9/DD-12）は成功・失敗双方に及ぶが、
+/// 検証失敗のerror.dataはverifyが構成する一方、適用phaseの中断エラー
+/// （partial_phase等）はverifyを経由しないため、蓄積済みのclose実績が
+/// error.dataへ載らない経路があった。ここでclose実績の蓄積先を保持し、
+/// data未付与のエラーのまま戻る場合にclosed_duplicatesを付与する
+/// （dataを既に持つ検証失敗エラーはそのまま返す）。
 #[allow(clippy::too_many_arguments)]
 fn execute(
     backend: &dyn ZellijBackend,
@@ -498,6 +500,43 @@ fn execute(
     snapshot_len: usize,
     floating: &[PaneState],
     pre_ids: &HashSet<PaneKindId>,
+) -> Result<RemapOutcome, ZelperError> {
+    let mut closed: Vec<ClosedDuplicate> = Vec::new();
+    let result = execute_body(
+        backend,
+        args,
+        plan,
+        source,
+        kdls,
+        snapshot_len,
+        floating,
+        pre_ids,
+        &mut closed,
+    );
+    match result {
+        Err(e) if e.data().is_none() && !closed.is_empty() => Err(e.with_data(
+            serde_json::json!({ "closed_duplicates": closed_duplicates_json(&closed) }),
+        )),
+        other => other,
+    }
+}
+
+/// 実行sequenceの移動phase以降（DD-10.7 step 3〜7 v2.2。preflight完了後の呼び出し）。
+/// `floating`: preflightで特定した--embed-floating対象のselectable floating terminal
+/// pane列（toggleはこのID集合のみ。probe自動launchのnon-selectableなcompanion plugin
+/// paneはDD-10.3/10.5により対象外）。`pre_ids`: 実行開始前snapshotのpane id集合
+/// （reconciliationのdup close対象限定と検証(e'')の新規id判定。DD-12/10.9 TASK-81）
+#[allow(clippy::too_many_arguments)]
+fn execute_body(
+    backend: &dyn ZellijBackend,
+    args: &RemapArgs,
+    plan: &V2Plan,
+    source: &[PaneState],
+    kdls: &[Vec<String>],
+    snapshot_len: usize,
+    floating: &[PaneState],
+    pre_ids: &HashSet<PaneKindId>,
+    closed: &mut Vec<ClosedDuplicate>,
 ) -> Result<RemapOutcome, ZelperError> {
     let anchor = plan.anchor;
     let t_count = plan.tabs.len();
@@ -668,7 +707,6 @@ fn execute(
     // pass 2→残余close。DD-10.7 step 6 TASK-81）→ focus-pane-id（reconciliation後の
     // 位置から対象決定。呼出失敗はwarning）。各group処理直前にlist-tabs（lenient）で
     // targets[j]の存在確認を行い、不在なら再解決する（tab id再利用への実行内防御）
-    let mut closed: Vec<ClosedDuplicate> = Vec::new();
     let mut recon_notes: Vec<String> = Vec::new();
     for (b, block) in plan.blocks.iter().enumerate() {
         for (t, g) in block.groups.iter().enumerate() {
@@ -739,16 +777,7 @@ its 1s list response timeout may have produced empty output",
                     }));
             let observed = if excess {
                 let (final_obs, note) = reconcile(
-                    backend,
-                    plan,
-                    b,
-                    t,
-                    target,
-                    observed,
-                    pre_ids,
-                    j,
-                    &targets,
-                    &mut closed,
+                    backend, plan, b, t, target, observed, pre_ids, j, &targets, closed,
                 )?;
                 if let Some(note) = note {
                     recon_notes.push(note);
@@ -805,7 +834,7 @@ mismatch",
         &targets,
         snapshot_len,
         pre_ids,
-        &closed,
+        &*closed,
         &recon_notes,
     );
     let final_target = plan

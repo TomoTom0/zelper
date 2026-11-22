@@ -7,10 +7,10 @@
 feature = "layout-planner"
 source_file = "src/app/remap.rs"
 verified = true
-verified_at = "2026-11-14"
+verified_at = "2026-11-22"
 verified_by = "claude"
 test_command = "cargo test --test layout_planner"
-source_hash = "f8b47dc8202f9b36d9141d606288102f7a1b0fd4"
+source_hash = "899929c974cdd65deab3d17401e2f237c67babf2"
 note = "TASK-74（2026-09-15）条件書更新: run-derives-from-invoked-withを追加しr20系2条件（quoting warning）の対象をterminal_commandへ更新——（当時記録。その後の実装・test追従で解消済み・cargo test --test layout_planner は全pass。CR74-8補正）。TASK-75（2026-09-15）条件書更新: v2.2（multi-tab layout全体再現）のtest-first前段として8条件を追加（normalize-tab-templates-doc-order-and-tab-attributes・multi-tab-allocation-cumulative-slots・k-uses-total-slots・tab-names-from-templates-and-block-suffix・zero-slot-tab-template-invalid・pane-focus-slot-first-focused-leaf・empty-group-planned-for-all-blocks-tabs・t1-formula-level-backward-compat）。r12-multi-tab-layout-counts-first-tab-shape-onlyはv2.2で期待値を反転（先頭tab形状N基準からlayout全体S=sum(N_t)基準へ。stable id維持・R12対応表の安定参照）。r1〜r11は正規形TabTemplate列入力とblocks/groups用語へ読み替え（T=1後方互換により期待値不変）。新条件は当時未実装のためfail-first状態（テストコード・実装は後段の追従待ち）——（当時記録。TASK-75実装・test追従・E2E acceptance 80条件PASS（S-v3-1〜5・tmp/task75/acceptance/）・コードレビューCR75-1〜3対応まで完了〔2026-09-16〕。cargo test --test layout_planner は全pass）。verified/verified_at/verified_by/source_hashはTASK-75実装に対する最終検証記録へ更新。TASK-81（2026-09-19）条件書更新（test-first前段）: run-derives-from-invoked-withをRunSpec{argv, cwd}拡張へ更新（argv=terminal_command分割・cwd=pane_cwd由來。DD-10.6 (ii)照合keyのcwd拡張）、r20系2条件へTASK-81のargv破壊文言（arg境界はjoinで消失・quote文字有無にかかわらず空白を含むargは全ケース復元不能）を追記。新規2条件（pane-cwd-missing-skips-cwd-with-warning・shell-c-heuristic-quoting-warning）はRunSpec拡張前のためfail-first状態（テストコード・実装は後段の追従待ち）。verified等の検証記録はTASK-75実装時点のまま（TASK-81実装・test追従後に更新）——TASK-94（2026-11-14）: 保留だった更新の実施。TASK-81実装（2026-09-21）・TASK-88 companion helper切り出し（9280c9f・2026-09-26）によるremap.rs変更が反映前の値だったため現行実測値へ更新。cargo test --test layout_planner 15件全pass〔tmp/tasks/tm-94/cargo_test_mismatch_targets.log〕。verified_at/source_hashはTASK-94再検証時点へ更新"
 
 [[condition]]
