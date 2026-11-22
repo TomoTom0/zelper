@@ -5,3 +5,7 @@ run = "cargo install --path . --force"
 [tasks.verify-conditions]
 description = "Verify tests/design conditions.toml (tag/coverage/schema/source_lines sync)"
 run = "uv run --no-project scripts/design/verify-conditions.py --strict-source --complete"
+
+[tasks.release]
+description = "Publish the GitHub Release for the current version (verify, musl build, package, idempotent)"
+run = "scripts/release.sh"
