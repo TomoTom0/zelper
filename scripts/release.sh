@@ -61,7 +61,13 @@ cargo test
 # ---- Phase 4: release build (musl static) ----
 log "building x86_64-unknown-linux-musl (release)"
 cargo build --release --target x86_64-unknown-linux-musl
-BIN="${CARGO_TARGET_DIR:-target}/x86_64-unknown-linux-musl/release/zelper"
+# Resolve the *effective* target directory: CARGO_TARGET_DIR and
+# .cargo/config.toml [build] target-dir (checked out locally, untracked) both
+# relocate build output away from ./target, and cargo build above honors them.
+TARGET_DIR="$(cargo metadata --no-deps --format-version 1 \
+  | jq -r '.target_directory')" \
+  || die "cargo metadata | jq failed while resolving target directory"
+BIN="${TARGET_DIR}/x86_64-unknown-linux-musl/release/zelper"
 [ -f "$BIN" ] || die "built binary not found: ${BIN}"
 
 # ---- Phase 5: stage & package (v0.1.0-compatible assets) ----
