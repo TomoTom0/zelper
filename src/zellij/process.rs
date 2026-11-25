@@ -187,7 +187,19 @@ impl ZellijCliBackend {
         &self,
         args: &[String],
     ) -> Result<(std::process::ExitStatus, String, String), ZelperError> {
+        self.run_capture_in(args, None)
+    }
+
+    /// run_captureのcwd指定版（TASK-1: add session --cwd）
+    fn run_capture_in(
+        &self,
+        args: &[String],
+        cwd: Option<&std::path::Path>,
+    ) -> Result<(std::process::ExitStatus, String, String), ZelperError> {
         let mut cmd = Command::new(&self.program);
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -595,10 +607,24 @@ impl ZellijBackend for ZellijCliBackend {
         Ok(())
     }
 
-    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError> {
+    fn create_session_detached(
+        &self,
+        name: &str,
+        opts: &crate::zellij::SessionCreateOpts,
+    ) -> Result<(), ZelperError> {
         // 非対話作成（M5実測: one-shot・rc=0・silent）。session解決に依存しない
         // top-level argv（run_actionの--session接頭なし）
-        self.run(&["attach".to_string(), "-b".to_string(), name.to_string()])?;
+        let mut args = vec!["attach".to_string(), "-b".to_string(), name.to_string()];
+        if let Some(layout) = &opts.layout {
+            // 存在しないlayoutはzellijがrc=1でsession未作成のまま失敗する（実測）
+            args.extend([
+                "options".to_string(),
+                "--default-layout".to_string(),
+                layout.clone(),
+            ]);
+        }
+        let (status, stdout, stderr) = self.run_capture_in(&args, opts.cwd.as_deref())?;
+        Self::classify_run(status, &stdout, &stderr)?;
         Ok(())
     }
 

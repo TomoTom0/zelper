@@ -1903,8 +1903,19 @@ impl ZellijBackend for FakeBackend {
         Ok(())
     }
 
-    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError> {
-        self.record(&format!("attach -b {name}"))?;
+    fn create_session_detached(
+        &self,
+        name: &str,
+        opts: &zelper::zellij::SessionCreateOpts,
+    ) -> Result<(), ZelperError> {
+        let mut rec = format!("attach -b {name}");
+        if let Some(l) = &opts.layout {
+            rec.push_str(&format!(" --layout {l}"));
+        }
+        if let Some(c) = &opts.cwd {
+            rec.push_str(&format!(" --cwd {}", c.display()));
+        }
+        self.record(&rec)?;
         if self.mute_create_session.get() {
             // 呼び出し自体は成功扱いだがlist-sessions状態へ反映しない
             // （rc=0・postcondition不在模擬）

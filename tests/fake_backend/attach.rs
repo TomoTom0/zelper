@@ -337,3 +337,90 @@ fn add_session_invalid_name_fail_fast_before_backend() {
         );
     }
 }
+
+// ---- TASK-1: add session --layout/--cwd・設定default_layout・attach自sessionガード ----
+
+use zelper::app::add::{resolve_create_opts, run_session_with};
+use zelper::app::attach::nested_attach_guard;
+use zelper::config;
+
+// [covers:attach-detach.add-session-layout-cwd-opts]
+#[test]
+fn add_session_passes_layout_and_cwd_to_backend() {
+    let dir = std::env::temp_dir().join(format!("zelper-t1-cwd-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let b = FakeBackend::new(vec![], vec![]);
+    run_session_with(&b, "work", Some("two"), Some(&dir), None, true).unwrap();
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    let want = format!("attach -b work --layout two --cwd {}", canon.display());
+    assert!(
+        b.calls().iter().any(|c| *c == want),
+        "calls: {:?}",
+        b.calls()
+    );
+    // layout名はそのまま通り、'/'含みpathは絶対化される
+    let o = resolve_create_opts(None, None, Some("cfg")).unwrap();
+    assert_eq!(o.layout.as_deref(), Some("cfg"));
+    let f = dir.join("l.kdl");
+    std::fs::write(&f, "layout {}\n").unwrap();
+    let o = resolve_create_opts(Some(f.to_str().unwrap()), None, None).unwrap();
+    assert_eq!(
+        o.layout.unwrap(),
+        std::fs::canonicalize(&f).unwrap().to_string_lossy()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// [covers:attach-detach.add-session-layout-precedence-and-usage]
+#[test]
+fn add_session_layout_precedence_and_usage_errors() {
+    // --layout > config > None
+    let o = resolve_create_opts(Some("cli"), None, Some("cfg")).unwrap();
+    assert_eq!(o.layout.as_deref(), Some("cli"));
+    let o = resolve_create_opts(None, None, None).unwrap();
+    assert_eq!(o, Default::default());
+    // Usage: 空・先頭'-'・不在path・不在cwd・非dir cwd
+    for (l, c) in [
+        (Some(""), None),
+        (Some("-x"), None),
+        (Some("/nonexistent-zelper/l.kdl"), None),
+        (None, Some("/nonexistent-zelper-dir")),
+        (None, Some("/etc/hostname")),
+    ] {
+        let e = resolve_create_opts(l, c.map(std::path::Path::new), None).unwrap_err();
+        assert_eq!(*e.class(), ErrorClass::Usage, "{l:?} {c:?}");
+    }
+    // 検査失敗時はbackend呼出ゼロ
+    let b = FakeBackend::new(vec![], vec![]);
+    let e = run_session_with(&b, "work", Some("-x"), None, None, false).unwrap_err();
+    assert_eq!(*e.class(), ErrorClass::Usage);
+    assert!(b.calls().is_empty(), "calls: {:?}", b.calls());
+}
+
+// [covers:attach-detach.config-parse]
+#[test]
+fn config_parse_default_layout_and_rejects_unknown() {
+    let p = std::path::Path::new("c.toml");
+    assert_eq!(config::parse("", p).unwrap(), Default::default());
+    let c = config::parse("[session]\ndefault_layout = \"work\"\n", p).unwrap();
+    assert_eq!(c.session.default_layout.as_deref(), Some("work"));
+    for bad in [
+        "[session]\ndefault_layout = 1\n",
+        "[session]\nunknown = 1\n",
+        "x = 1\n",
+        "[[[",
+    ] {
+        let e = config::parse(bad, p).unwrap_err();
+        assert_eq!(*e.class(), ErrorClass::Usage, "{bad}");
+    }
+}
+
+// [covers:attach-detach.attach-nested-current-session-preflight]
+#[test]
+fn nested_attach_to_current_session_is_preflight() {
+    let e = nested_attach_guard("a", Some("a")).unwrap_err();
+    assert_eq!(*e.class(), ErrorClass::Preflight);
+    assert!(e.to_string().contains("current session 'a'"), "{}", e);
+    assert!(nested_attach_guard("a", Some("b")).is_ok());
+    assert!(nested_attach_guard("a", None).is_ok());
+}
