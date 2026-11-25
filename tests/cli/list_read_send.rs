@@ -4779,3 +4779,66 @@ fn remap_tab_spec_parse_scopes_plan() {
         "sourceは対象tabのpaneのみ（tab 0のpane不載）: {data}"
     );
 }
+
+// [covers:attach-detach.add-session-config-default-layout]
+#[test]
+fn add_session_layout_flag_config_default_and_precedence() {
+    let _guard = FAKE_ZELLIJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let cfg = std::env::temp_dir().join(format!("zelper-t1-cfg-{}.toml", std::process::id()));
+    std::fs::write(&cfg, "[session]\ndefault_layout = \"cfglay\"\n").unwrap();
+    // 設定既定: --layout無しでconfigのlayoutが `options --default-layout` で渡る
+    let (mut cmd, log) = zelper("t1-cfg");
+    cmd.env("ZELPER_CONFIG", &cfg)
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "w1"])
+        .assert()
+        .success();
+    let cs = calls(&log);
+    assert!(
+        cs.iter()
+            .any(|c| c == "attach -b w1 options --default-layout cfglay"),
+        "calls: {cs:?}"
+    );
+    // --layout指定が設定より優先
+    let (mut cmd, log) = zelper("t1-flag");
+    cmd.env("ZELPER_CONFIG", &cfg)
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "w2", "--layout", "flaglay"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log)
+            .iter()
+            .any(|c| c == "attach -b w2 options --default-layout flaglay"),
+        "calls: {:?}",
+        calls(&log)
+    );
+    // 設定なし: 従来argv（zellij自身のdefault_layoutに委ねる）
+    let (mut cmd, log) = zelper("t1-none");
+    cmd.env("ZELPER_CONFIG", "/nonexistent-zelper.toml")
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "w3"])
+        .assert()
+        .failure(); // 明示指定のconfig不在はUsage error
+    let (mut cmd, log) = zelper("t1-none2");
+    cmd.env_remove("ZELPER_CONFIG")
+        .env("XDG_CONFIG_HOME", "/nonexistent-zelper-xdg")
+        .env("FAKE_SESSIONS_CREATE", "ok")
+        .args(["add", "session", "w4"])
+        .assert()
+        .success();
+    assert!(
+        calls(&log).iter().any(|c| c == "attach -b w4"),
+        "calls: {:?}",
+        calls(&log)
+    );
+    // 壊れたconfigはUsage exit 2・作成不発
+    std::fs::write(&cfg, "[session]\nbogus = 1\n").unwrap();
+    let (mut cmd, log) = zelper("t1-bad");
+    cmd.env("ZELPER_CONFIG", &cfg)
+        .args(["add", "session", "w5"])
+        .assert()
+        .code(2);
+    assert!(!calls(&log).iter().any(|c| c.starts_with("attach -b")));
+    let _ = std::fs::remove_file(&cfg);
+}

@@ -145,6 +145,20 @@ pub fn run_tab(
 /// 0-session環境で動く前提のprobe backend（session解決なし）が渡される
 /// （AddTarget::Session例外dispatch。設計§2.2）
 pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Result<(), ZelperError> {
+    run_session_with(backend, name, None, None, None, json)
+}
+
+/// layout/cwd/設定既定つきのadd session（TASK-1）。layoutの優先順位は
+/// `--layout` > 設定file `[session] default_layout` > 未指定（zellij自身の
+/// default_layout設定に委ねる）。いずれもNAME検査の後・一覧取得より前にfail-fast
+pub fn run_session_with(
+    backend: &dyn ZellijBackend,
+    name: &str,
+    layout: Option<&str>,
+    cwd: Option<&std::path::Path>,
+    config_layout: Option<&str>,
+    json: bool,
+) -> Result<(), ZelperError> {
     // app層Usage検査（TASK-96 §2.2-§2.4: 一覧取得より前にfail-fast）。空白含み名は
     // zellijが受理する（M96-A実測）がparse_sessionsがlist-sessions行の先頭wordのみを
     // 名前化するため世界modelで復元不能（postcondition必敗・session残留）。
@@ -178,6 +192,7 @@ pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Resul
             "NAME must not start with '-'",
         ));
     }
+    let opts = resolve_create_opts(layout, cwd, config_layout)?;
     // 事前確認: 同名running sessionの存在はPreflightでfail-fast拒否する
     // （zellijのrc=1「Session already exists」を待たない）。EXITED行はrunningと
     // みなさない（EXITED同名はzellijへ委ねる）。一覧取得の失敗は0件へ丸めず
@@ -190,7 +205,7 @@ pub fn run_session(backend: &dyn ZellijBackend, name: &str, json: bool) -> Resul
             format!("session already exists: '{name}'"),
         ));
     }
-    backend.create_session_detached(name)?;
+    backend.create_session_detached(name, &opts)?;
     // postcondition: 作成後のlist_sessionsにNAMEがrunning出現（DD-11 addの存在
     // 確認規則に準拠。作成成否をexit codeのみで信用しない）。0-session環境の
     // 作成直後はbackendの0件decode（D1）によりOk(空一覧)が返るため、作成rc=0
@@ -226,4 +241,64 @@ pub fn session_report(name: &str, json: bool) -> String {
     } else {
         format!("created session '{name}' (detached)")
     }
+}
+
+/// layout/cwd指定の解決・検査（TASK-1）。
+/// - layout: 空文字・先頭`-`はUsage。'/'含みまたは`.kdl`終端はpath扱いで絶対化し
+///   存在必須（cwd変更後の相対path誤解決を防ぐ）。それ以外はlayout名としてzellijへ
+///   渡す（探索・存在判定はzellij側。不在はzellijがrc=1でsession未作成のまま失敗）
+/// - cwd: 既存directory必須（zellijは不在cwdを黙って受理するため事前検査）。絶対化する
+pub fn resolve_create_opts(
+    layout: Option<&str>,
+    cwd: Option<&std::path::Path>,
+    config_layout: Option<&str>,
+) -> Result<crate::zellij::SessionCreateOpts, ZelperError> {
+    let layout = layout.or(config_layout);
+    let layout = match layout {
+        None => None,
+        Some(l) => {
+            if l.is_empty() {
+                return Err(ZelperError::new(
+                    ErrorClass::Usage,
+                    "layout must not be empty",
+                ));
+            }
+            if l.starts_with('-') {
+                return Err(ZelperError::new(
+                    ErrorClass::Usage,
+                    "layout must not start with '-'",
+                ));
+            }
+            if l.contains('/') || l.ends_with(".kdl") {
+                let p = std::fs::canonicalize(l).map_err(|e| {
+                    ZelperError::new(
+                        ErrorClass::Usage,
+                        format!("layout file '{l}' is not readable: {e}"),
+                    )
+                })?;
+                Some(p.to_string_lossy().into_owned())
+            } else {
+                Some(l.to_string())
+            }
+        }
+    };
+    let cwd = match cwd {
+        None => None,
+        Some(c) => {
+            let p = std::fs::canonicalize(c).map_err(|e| {
+                ZelperError::new(
+                    ErrorClass::Usage,
+                    format!("cwd '{}' is not accessible: {e}", c.display()),
+                )
+            })?;
+            if !p.is_dir() {
+                return Err(ZelperError::new(
+                    ErrorClass::Usage,
+                    format!("cwd '{}' is not a directory", c.display()),
+                ));
+            }
+            Some(p)
+        }
+    };
+    Ok(crate::zellij::SessionCreateOpts { layout, cwd })
 }

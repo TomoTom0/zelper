@@ -164,7 +164,15 @@ pub trait ZellijBackend {
     /// detached session作成（DD-14）。argvは `attach -b NAME`（positional形式。
     /// global --session形式はrandom別名sessionを作るため禁止——M5実測）。
     /// session解決に依存しないtop-level argv
-    fn create_session_detached(&self, name: &str) -> Result<(), ZelperError>;
+    ///
+    /// opts: 作成時のlayout/cwd指定（TASK-1）。layoutは`attach -b NAME options
+    /// --default-layout <L>`、cwdはspawnするzellijプロセスのcurrent_dirで渡す
+    /// （`options --default-cwd`はbackground作成sessionのpaneへ反映されない実測のため）
+    fn create_session_detached(
+        &self,
+        name: &str,
+        opts: &SessionCreateOpts,
+    ) -> Result<(), ZelperError>;
     /// sessionの完全削除（DD-11 remove session・TASK-84）。argvは
     /// `delete-session <name> -f`（top-level positional。run_actionの--session接頭
     /// なし）。kill-sessionとは終状態が同一（行+session_info完全消滅・実測M4/M5）
@@ -190,3 +198,12 @@ pub trait ZellijBackend {
 /// 実行時要件はzellij >=0.44.3。実証済み組合せはzellij 0.44.3 + zellij-tile 0.44.3
 /// （companion plugin build）のみで、0.44.x系列を超える未来versionは受け付けない
 pub const MIN_SUPPORTED: (u32, u32, u32) = (0, 44, 3);
+
+/// add sessionの作成時option（TASK-1）。両方Noneは従来の素の作成
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionCreateOpts {
+    /// zellij `--default-layout` へ渡す値（layout名またはpath。path系は呼出側で絶対化済み）
+    pub layout: Option<String>,
+    /// 作成プロセスのcwd（存在検証済みの絶対path）
+    pub cwd: Option<std::path::PathBuf>,
+}

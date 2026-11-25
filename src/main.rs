@@ -147,10 +147,24 @@ fn run(cli: Cli) -> Result<(), ZelperError> {
             // sessionが1つも存在しない環境（主要ユースケース）で動く必要があるため
             // mk_backend（session解決）を経ず、ListResource::Sessionsと同一のprobe
             // backend（capability checkのみ）を直接構築する
-            if let zelper::cli::AddTarget::Session { name, json } = target {
+            if let zelper::cli::AddTarget::Session {
+                name,
+                layout,
+                cwd,
+                json,
+            } = target
+            {
                 let probe = ZellijCliBackend::new("zelper-probe-unused");
                 check_capability(&probe)?;
-                return zelper::app::add::run_session(&probe, name, *json);
+                let cfg = zelper::config::load()?;
+                return zelper::app::add::run_session_with(
+                    &probe,
+                    name,
+                    layout.as_deref(),
+                    cwd.as_deref(),
+                    cfg.session.default_layout.as_deref(),
+                    *json,
+                );
             }
             let backend = mk_backend(&cli)?;
             match target {

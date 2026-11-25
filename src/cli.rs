@@ -272,8 +272,16 @@ pub enum AddTarget {
     /// はzellijが明示拒否するが対称性・fail-fastでwrap側でも事前検査（rename
     /// sessionのNEW_NAMEと同一規約）、先頭'-'は`--`通過系列が下流のoption解釈に
     /// 到達するため事前拒否
+    ///
+    /// `--layout NAME|PATH`（TASK-1）: 作成sessionのlayout。未指定時は設定file
+    /// `[session] default_layout`、それも無ければzellij自身のdefault_layout。
+    /// `--cwd DIR`: 初期cwd（既存dir。未指定は現在dir）
     Session {
         name: String,
+        #[arg(long)]
+        layout: Option<String>,
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
         #[arg(long)]
         json: bool,
     },

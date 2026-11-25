@@ -31,6 +31,12 @@ pub fn run_attach_inner(
             "attach requires a TTY (stdin and stdout); for non-interactive session creation use `zelper add session`",
         ));
     }
+    // zellij自身が「現在のsessionへのattach」をpanic（exit 101）で拒否する（実測）。
+    // ZELLIJ_SESSION_NAME == 対象sessionの入れ子attachをzellij起動前にPreflightで止める
+    nested_attach_guard(
+        session,
+        std::env::var("ZELLIJ_SESSION_NAME").ok().as_deref(),
+    )?;
     backend.attach_session()?;
     // 対話終了後のみ出力（対話中は一切出力しない。stdoutはzellijが占有する）
     println!("{}", attach_report(session, json));
@@ -70,4 +76,18 @@ pub fn detach_report(session: &str, json: bool) -> String {
     } else {
         format!("detached clients from session '{session}'")
     }
+}
+
+/// 入れ子attach検査（純粋関数）。current = 呼出元の`ZELLIJ_SESSION_NAME`
+pub fn nested_attach_guard(session: &str, current: Option<&str>) -> Result<(), ZelperError> {
+    if current == Some(session) {
+        return Err(ZelperError::new(
+            ErrorClass::Preflight,
+            format!(
+                "cannot attach to the current session '{session}' from inside it; \
+                 detach first or pass --session OTHER"
+            ),
+        ));
+    }
+    Ok(())
 }

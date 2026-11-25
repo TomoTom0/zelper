@@ -35,7 +35,7 @@ zelper remap LAYOUT [--tab T] [--embed-floating] [--dry-run] [--json]
 zelper remap --path FILE | --inline KDL   （layout 3sourceは相互排他）
 zelper add pane [--tab T] [--count N] [--name NAME] [--cwd DIR] [-- CMD...]
 zelper add tab  [--count N] [--name NAME] [--cwd DIR] [--layout NAME | --path F | --inline KDL] [-- CMD...]
-zelper add session NAME [--json]
+zelper add session NAME [--layout NAME|PATH] [--cwd DIR] [--json]
 zelper remove pane PANE... [--yes] [--dry-run] [--json]
 zelper remove tab TAB... [--empty] [--yes] [--dry-run] [--json]
 zelper remove session NAME... [--yes] [--dry-run] [--json]

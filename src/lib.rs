@@ -1,6 +1,7 @@
 pub mod app;
 pub mod cli;
 pub mod companion;
+pub mod config;
 pub mod domain;
 pub mod error;
 pub mod layout;
